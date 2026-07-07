@@ -1,0 +1,209 @@
+{
+  "schema_version": "1.0",
+  "description": "Field schema for SME financing document extraction. Each field entry defines the field name, a detailed extraction description, a realistic example value, and its data type. Used to generate extraction templates and Gemini response schemas.",
+
+  "business_registration_ssm": {
+    "_section_description": "Fields extracted from SSM business registration documents. Accepted form types: Form 24 (Return of Allotment of Shares), Form 44 (Notice of Registered Office), Form 49 (Return of Directors and Managers), Certificate of Incorporation, or for sole proprietors and partnerships: Firm Registration Form B (sole proprietor) or Form D (partnership). Different form types carry different fields; not all fields will be present in every document.",
+    "fields": {
+      "document_type": {
+        "field_name": "document_type",
+        "description": "The specific SSM form type or certificate type of the submitted document. For companies incorporated under the Companies Act 2016 (Sdn Bhd or Bhd), this is typically 'Certificate of Incorporation', 'Form 49', or 'Form 24/44'. For sole proprietorships or partnerships registered under the Registration of Businesses Act 1956, this is 'Form B' (sole proprietor) or 'Form D' (partnership). Extract the form designation as it appears in the document header or title. If multiple form numbers are printed on the document (e.g. 'Form 24 / Form 49'), extract all as a combined string.",
+        "example": "Certificate of Incorporation (DCTC)",
+        "data_type": "string"
+      },
+      "business_name": {
+        "field_name": "business_name",
+        "description": "The full legal registered name of the business as it appears on the SSM document. For companies (Sdn Bhd/Bhd), this includes the full suffix: 'SDN. BHD.' or 'BERHAD'. For sole proprietors and partnerships, this is the trade name registered with ROB. Extract exactly as printed, typically in ALL CAPS for companies and in Title Case for sole proprietors. Do not abbreviate or normalise — the exact name is used for cross-document matching against the application form and financial statements.",
+        "example": "PRISMA NIAGA SDN. BHD.",
+        "data_type": "string"
+      },
+      "business_registration_number": {
+        "field_name": "business_registration_number",
+        "description": "The unique identifier assigned to the business by SSM or ROB at registration. For companies registered under the Companies Act 2016, the format is a 12-digit numeric new number followed by the old alphanumeric number in parentheses, e.g. '202301045678 (1534291-W)'. The trailing letter (W, X, A, U, etc.) is a check character and must be included. For sole proprietors and partnerships, the ROB number format varies by state and typically appears as a combination of letters and numbers separated by hyphens, e.g. 'JM0123456-A'. Extract the complete number including both formats when both are present.",
+        "example": "202301045678 (1534291-W)",
+        "data_type": "string"
+      },
+      "incorporation_date": {
+        "field_name": "incorporation_date",
+        "description": "The official date on which the business was registered or incorporated, as certified by SSM or ROB. For SSM certificates, this appears as 'Tarikh Pemerbadanan / Date of Incorporation' and may be printed in both Bahasa Malaysia and English, e.g. '15 Mac / March 2018'. Extract the date as it appears in the document without translating Malay month names — the original format preserves the certified value. For Form 49 or Form 24, the date may instead refer to the date the form was filed, not the incorporation date — extract only the incorporation date if both are present.",
+        "example": "15 Mac / March 2018",
+        "data_type": "date"
+      }
+    }
+  },
+
+  "audited_financial_statements": {
+    "_section_description": "Fields extracted from audited financial statements for each financial year. A single document may contain multiple financial years in side-by-side columns (the most common format for 3-year comparatives). Each year's data is extracted into a separate object. If years are submitted as separate documents, each document is extracted independently and merged into this structure. Fields map to standard Malaysian financial statement line items as defined by MFRS (Malaysian Financial Reporting Standards).",
+    "year_object_fields": {
+      "financial_year": {
+        "field_name": "financial_year",
+        "description": "The financial year label for this set of figures. Typically appears as a column header in the financial statements in the format 'FY20XX (RM)' or 'Year ended 31 December 20XX'. Extract the year identifier in a consistent format. If the document uses the full period label ('Year ended 31 December 2023'), normalise to 'FY2023' for consistency across documents. If the financial year end is not 31 December (e.g. a June year-end), preserve the actual year-end month in the label, e.g. 'FY2023 (Jun)'.",
+        "example": "FY2023",
+        "data_type": "string"
+      },
+      "asset_value": {
+        "field_name": "asset_value",
+        "description": "Total assets as stated on the Statement of Financial Position (balance sheet) for this financial year. Corresponds to the 'TOTAL ASSETS' line item, which is the sum of Total Non-Current Assets and Total Current Assets. Expressed in Ringgit Malaysia (RM) as a numeric value without currency prefix. Parenthesised values in the document (e.g. '(3,124,300)') indicate negative figures — store as negative numbers. If the document presents figures in thousands (e.g. 'RM '000'), multiply by 1,000 before storing.",
+        "example": 2466400.0,
+        "data_type": "float"
+      },
+      "liability_value": {
+        "field_name": "liability_value",
+        "description": "Total liabilities as derived from the Statement of Financial Position for this financial year. This is the sum of Total Non-Current Liabilities and Total Current Liabilities. Note: many Malaysian financial statements do not print an explicit 'TOTAL LIABILITIES' line — the value must be computed as: Total Assets minus Total Equity, or by summing Total Non-Current Liabilities and Total Current Liabilities directly. Do not confuse with 'TOTAL LIAB. & EQUITY', which is the same figure as Total Assets (the two sides of the balance sheet must balance). Expressed in RM as a positive numeric value.",
+        "example": 1405975.0,
+        "data_type": "float"
+      },
+      "advances_due_to_director": {
+        "field_name": "advances_due_to_director",
+        "description": "Amounts owed to or from company directors as reported in the financial statements. This is a related-party transaction disclosure that appears as a line item in the Statement of Financial Position, typically in the Current Liabilities section as 'Amount due to directors', 'Directors' loan account', or 'Advances from directors'. It may alternatively appear in Current Assets as 'Amount due from directors' if the company has advanced funds to directors rather than the reverse. Significant for Islamic banking assessment because interest-free director loans affect cash flow and leverage ratios. This field is nullable — not all companies have related-party director advances. If the document shows an amount due FROM directors (asset), store as a negative value to indicate the direction. If not present in the document, set to null.",
+        "example": 50000.0,
+        "data_type": "float",
+        "nullable": true
+      },
+      "total_equity": {
+        "field_name": "total_equity",
+        "description": "Total shareholders' equity as stated on the Statement of Financial Position for this financial year. Corresponds to the 'Total Equity' line item, which is the sum of Share Capital and Retained Earnings (and any other reserves such as revaluation reserves). This is the book value of the owners' stake in the business. In the balance sheet identity: Total Equity = Total Assets - Total Liabilities. Expressed in RM as a numeric value. If the company has accumulated losses, this value may be negative (capital deficiency).",
+        "example": 1060425.0,
+        "data_type": "float"
+      },
+      "net_worth": {
+        "field_name": "net_worth",
+        "description": "The net worth of the business for this financial year, used as a key creditworthiness indicator in Malaysian SME financing assessment. In Malaysian banking practice, net worth is typically defined as Total Equity (Total Assets minus Total Liabilities), which equals the 'Total Equity' line on the balance sheet. However, some institutions define net worth as Tangible Net Worth (Total Equity minus Intangible Assets and Goodwill). Extract Total Equity as the base value. If the document explicitly states 'Net Worth' as a separate line item, use that figure. If Intangible Assets are present and the financing scheme requires Tangible Net Worth, note that a separate computation is needed. This field will often equal total_equity unless intangibles are material.",
+        "example": 1060425.0,
+        "data_type": "float"
+      },
+      "revenue_turnover_gross_profit": {
+        "field_name": "revenue_turnover_gross_profit",
+        "description": "The primary top-line income figure from the Statement of Profit or Loss for this financial year. The field accommodates three different labels that may appear depending on the company type and auditor: (1) 'Revenue' — total income from the company's primary business activity, before any cost deductions, used by most trading and manufacturing companies; (2) 'Turnover' — equivalent to Revenue, more common in older financial statements or service companies; (3) 'Gross Profit' — income after deducting Cost of Sales but before operating expenses, used when the document does not separately disclose Revenue. Extraction priority: Revenue first, then Turnover, then Gross Profit. Do not extract Net Profit or EBITDA for this field. If the document shows both Revenue and Gross Profit, extract Revenue. Expressed in RM.",
+        "example": 4820500.0,
+        "data_type": "float"
+      },
+      "expenses_costs": {
+        "field_name": "expenses_costs",
+        "description": "Total business expenses or costs from the Statement of Profit or Loss for this financial year. This represents the total cash outflows related to business operations. The computation depends on the document's level of detail: (1) If the statement shows both 'Cost of Sales' and 'Operating Expenses' separately, sum them: Cost of Sales + Operating Expenses; (2) If the statement shows only 'Total Expenses' or 'Total Costs' as a single line item, extract that directly; (3) If the statement shows only Cost of Sales without breaking out operating expenses, extract Cost of Sales only and flag for review. Do not include Finance Costs (interest charges) or Tax Expense in this figure — those are financing and tax items, not operating costs. Expressed in RM as a positive value (costs are stated as positives here even though they appear as parenthesised negatives in the document).",
+        "example": 4016700.0,
+        "data_type": "float"
+      },
+      "ebitda_net_profit": {
+        "field_name": "ebitda_net_profit",
+        "description": "EBITDA (Earnings Before Interest, Tax, Depreciation and Amortisation) or Net Profit After Tax for this financial year, used in debt serviceability assessment. Extraction priority: (1) EBITDA — if explicitly labelled in the document, extract directly. EBITDA is a key metric for Islamic financing because it excludes interest, which aligns with Sharia principles. It equals Gross Profit minus Operating Expenses plus Depreciation and Amortisation. (2) If EBITDA is not separately stated, extract 'Profit After Tax' or 'Net Profit' as the fallback. Do not compute EBITDA from components if it is not explicitly stated — flag for review instead. Record which metric was extracted (EBITDA vs PAT) in a separate note field if the template supports it. Expressed in RM.",
+        "example": 803800.0,
+        "data_type": "float"
+      },
+      "pbt": {
+        "field_name": "pbt",
+        "description": "Profit Before Tax (PBT) from the Statement of Profit or Loss for this financial year. Corresponds to the line item labelled 'Profit Before Tax', 'Profit Before Taxation', 'PBT', or 'Profit Before Income Tax'. PBT = EBIT minus Finance Costs (interest on borrowings). This figure is used to assess earning power before tax obligations. It differs from EBITDA by deducting both Depreciation/Amortisation and Finance Costs. If the document labels this line differently (e.g. 'Profit Before Zakat and Tax' in Islamic-compliant entities — Zakat is a religious obligation distinct from corporate tax), extract that figure as PBT. Expressed in RM.",
+        "example": 606700.0,
+        "data_type": "float"
+      }
+    }
+  },
+
+  "bank_statements": {
+    "_section_description": "Fields extracted from the Monthly Summary section of each bank statement. Each statement covers one calendar month. Six statements are required, representing the six most recent consecutive months. Each file is extracted independently and contributes one object to the statements array. The monthly summary table (RINGKASAN BULANAN / MONTHLY SUMMARY in Maybank statements, equivalent sections in other banks) is the primary extraction target — not individual transaction rows.",
+    "statement_object_fields": {
+      "month": {
+        "field_name": "month",
+        "description": "The calendar month and year this bank statement covers, extracted from the statement period header or the monthly summary table. The statement period is typically shown at the top of the document as 'Tempoh / Period: DD/MM/YYYY - DD/MM/YYYY' for multi-month statements, or appears as a row label in the monthly summary table (e.g. 'Julai 2023' in Malay, 'July 2023' in English). Normalise to English month name + 4-digit year format regardless of the source language. Malay month mapping: Januari=January, Februari=February, Mac=March, April=April, Mei=May, Jun=June, Julai=July, Ogos=August, September=September, Oktober=October, November=November, Disember=December. Do not extract the full date range — extract only the month and year.",
+        "example": "July 2023",
+        "data_type": "string"
+      },
+      "monthly_withdrawal": {
+        "field_name": "monthly_withdrawal",
+        "description": "Total debit amount (withdrawals, payments, and outflows) for this calendar month. Extracted from the monthly summary table, typically labelled 'Jumlah Debit / Total Debits' (Maybank), 'Total Debit' (CIMB, RHB), or equivalent in the bank's statement format. This is the aggregate of all debit transactions for the month, NOT individual transaction rows. Expressed in RM as a positive numeric value (debits are outflows but stored as positive numbers here for clarity). If the monthly summary table is absent from the document (some bank formats omit it), this field must be computed by summing individual debit transaction amounts — flag this case for review as computed values carry higher error risk.",
+        "example": 340980.0,
+        "data_type": "float"
+      },
+      "monthly_deposit": {
+        "field_name": "monthly_deposit",
+        "description": "Total credit amount (deposits, receipts, and inflows) for this calendar month. Extracted from the monthly summary table, typically labelled 'Jumlah Kredit / Total Credits' (Maybank), 'Total Credit' (CIMB, RHB), or equivalent. This is the aggregate of all credit transactions for the month, NOT individual transaction rows. Expressed in RM as a positive numeric value. Note: some bank statements include interest income (e.g. 'Faedah / Interest Income') as a credit that may appear in individual transactions but NOT in the monthly summary total — be aware that the monthly summary total and the sum of individual credit rows may not match exactly. Extract the monthly summary figure, not the sum of transaction rows.",
+        "example": 362700.0,
+        "data_type": "float"
+      },
+      "monthly_end_balance": {
+        "field_name": "monthly_end_balance",
+        "description": "The account balance at the end (last day) of this calendar month, also called the closing balance or ending balance. Extracted from the monthly summary table, typically labelled 'Baki Akhir / Closing Balance' (Maybank), 'Closing Balance', 'Balance c/f', or equivalent. This figure should equal the opening balance of the following month (continuity check). For the final month in the 6-month set, this figure should match the overall 'BAKI AKHIR / CLOSING BALANCE' stated at the bottom of the last page of the statement. Expressed in RM. If the account is overdrawn, the balance will be negative — store as a negative value.",
+        "example": 266750.0,
+        "data_type": "float"
+      }
+    }
+  },
+
+  "ic_photocopies": {
+    "_section_description": "Fields extracted from MyKad (Malaysian National Registration Identity Card) photocopies for each director, owner, or partner. One object per individual. The minimum count equals the number of directors/owners listed in the SSM business registration. Cards are submitted as certified true copies (Salinan Benar Disahkan) showing both front and back of the physical card. For companies: at least one IC per director. For sole proprietors: one IC for the owner. For partnerships: one IC per partner.",
+    "individual_object_fields": {
+      "name": {
+        "field_name": "name",
+        "description": "The full legal name of the individual exactly as printed on the front face of the MyKad. Names appear in ALL CAPS on Malaysian identity cards. The name may span multiple lines on the card due to the card's physical width constraint — join all name lines with a single space to produce the complete name. Include all components: given name, patronymic connector (bin=son of, binti=daughter of), and father's name. For Indian Malaysians, the connector 'a/l' (anak lelaki, son of) or 'a/p' (anak perempuan, daughter of) should be included. For Chinese Malaysians, the romanised name as printed on the card should be extracted (typically in the format SURNAME Given-Name). Do not translate, abbreviate, or reorder name components. This name is used for cross-document matching against the SSM directors table and the consent form signatories.",
+        "example": "AHMAD FAIZAL BIN MOHD NOOR",
+        "data_type": "string"
+      },
+      "nric": {
+        "field_name": "nric",
+        "description": "The Malaysian National Registration Identity Card number, a unique 12-digit identifier in the format YYMMDD-SS-NNNN, where: YY = last two digits of birth year, MM = birth month (01-12), DD = birth day (01-31), SS = state/country of birth code (01-16 for Malaysian states, higher numbers for foreign-born Malaysians), NNNN = sequential number assigned by JPN. Always stored with two hyphens in the exact positions shown. The IC number appears multiple times on the photocopy: on the front face of the card, on the back face, and as a combined number with a card sequence suffix (e.g. '880714-14-5623-01' where '01' is the card issue sequence). Extract the base 14-character number without the sequence suffix. Validate the format: must match the pattern \\d{6}-\\d{2}-\\d{4}. Cross-validate: the first 6 digits must encode a valid date matching the date_of_birth field.",
+        "example": "880714-14-5623",
+        "data_type": "string"
+      },
+      "role": {
+        "field_name": "role",
+        "description": "The individual's role in the business, used to contextualise their IC submission. This field is not extracted from the MyKad itself (the card only shows name and IC number) — it is determined by cross-referencing with the SSM business registration document. For companies (Sdn Bhd/Bhd): the role is 'Director' for individuals listed as Pengarah in the SSM directors table, or 'Shareholder' if listed only as a pemegang saham without a directorship. For sole proprietorships: 'Owner'. For partnerships: 'Partner'. If the SSM document has not yet been processed when the IC is being extracted, default to 'Director/Owner/Partner' and resolve after SSM extraction completes. Valid values: 'Director', 'Shareholder', 'Director/Shareholder', 'Owner', 'Partner'.",
+        "example": "Director",
+        "data_type": "string"
+      }
+    }
+  },
+
+  "consent_form": {
+    "_section_description": "Fields extracted from the customer consent and declaration form. This document authorises the bank to verify submitted information with SSM, BNM, CCRIS, CTOS, and LHDN. For companies, all directors typically sign. The consent form may be the bank's own standard form (e.g. Bank Muamalat's Pengakuan & Kebenaran section in the application form) or a standalone consent document. Extraction is limited to the authorisation section — the boilerplate declaration text is not extracted.",
+    "fields": {
+      "authorized_names": {
+        "field_name": "authorized_names",
+        "description": "A list of the full names of all individuals who have signed the consent and declaration form, as printed (not signed) beneath each signature line. Printed names are used rather than signatures because signatures are not machine-readable. Names appear in the declaration section, typically below the blank signature line and above or alongside the IC number. Extract all names present — for a company with two directors, this list should contain two entries. For sole proprietors, one entry. Names should match the names in the ic_photocopies section; any mismatch is a cross-document discrepancy that should be flagged for review. Store as a list of strings in the order they appear on the form (typically left-to-right for side-by-side blocks).",
+        "example": ["Ahmad Faizal bin Mohd Noor", "Nurul Ain binti Zulkifli"],
+        "data_type": "list[string]"
+      }
+    }
+  },
+
+  "customer_information_details": {
+    "_section_description": "Aggregated customer profile fields drawn primarily from the financing application form (Section A and Section B). Some fields are cross-referenced against other documents: address from SSM registered office, names from IC photocopies, financing amount from the application form's financing details section. These fields represent the bank's customer record for this financing application.",
+    "fields": {
+      "names": {
+        "field_name": "names",
+        "description": "Full names of the primary applicants for the financing — typically the company directors for a business application, or the business owner for a sole proprietorship. Extracted from the application form's director information section (Section B in Bank Muamalat's form), where names appear as 'Nama Penuh' for each Pengarah. Store as a list to accommodate multiple directors. Names here should match the names extracted from the ic_photocopies section and the SSM directors table — discrepancies indicate either a data entry error on the application form or a mismatch in submitted documents. Names on the application form may appear in Title Case rather than ALL CAPS (unlike the MyKad) — store as written on the application form.",
+        "example": ["Ahmad Faizal bin Mohd Noor", "Nurul Ain binti Zulkifli"],
+        "data_type": "list[string]"
+      },
+      "address": {
+        "field_name": "address",
+        "description": "The primary business or registered correspondence address for the applicant. Extracted from the application form's company information section, typically labelled 'Alamat Berdaftar / Registered Address'. This should match the registered office address on the SSM certificate ('Pejabat Berdaftar / Registered Office'). The address may be a single line on the application form (unlike the MyKad address which spans multiple lines). Extract the complete address including unit/lot number, street name, area/neighbourhood, postcode, city, and state. If postcode and city appear on the same line in the document, preserve them together. Malaysia addresses follow the format: [Unit/Lot Number], [Street Name], [Area/Taman], [Postcode] [City], [State].",
+        "example": "No. 12-A, Jalan Masjid India, 50100 Kuala Lumpur, W.P. Kuala Lumpur",
+        "data_type": "string"
+      },
+      "email": {
+        "field_name": "email",
+        "description": "Primary contact email address for the applicant or business. Extracted from the application form's company information section, labelled 'E-mel / Email'. Malaysian business email addresses often use the company domain (e.g. name@companyname.com.my) for Sdn Bhd companies, or free providers (Gmail, Yahoo) for smaller businesses and sole proprietors. Store exactly as written — do not normalise to lowercase. If multiple email addresses appear (e.g. one for each director in Section B), extract the company-level email from Section A; director-level emails from Section B are secondary and may be stored separately if the schema supports it.",
+        "example": "faizal@prismaniaga.com.my",
+        "data_type": "string"
+      },
+      "phone_number": {
+        "field_name": "phone_number",
+        "description": "Primary contact phone number for the applicant or business. Extracted from the application form's company information section, labelled 'No. Tel / Telephone'. Malaysian phone number formats: landline (03-XXXX XXXX for Kuala Lumpur/Selangor, 04- for Penang, etc.), mobile (012-, 013-, 014-, 016-, 017-, 018-, 019-). Store in the format as it appears on the document. If the document includes both a business landline and a personal mobile number, extract the business landline from Section A. Do not include country code (+60) unless it is written on the form. If the number appears without the area code hyphen separator, store as written.",
+        "example": "03-2698 4521",
+        "data_type": "string"
+      },
+      "nationality": {
+        "field_name": "nationality",
+        "description": "Nationality of the primary applicant(s). For Malaysian citizens, this appears on the MyKad as 'WARGANEGARA' with value 'MALAYSIA', which normalises to 'Malaysian'. For Permanent Residents, the MyKad shows 'BUKAN WARGANEGARA' with the country of origin as the value. For business applications, this field typically reflects the nationality of the primary director/owner rather than the company (companies do not have nationality). If multiple directors have different nationalities, store the nationality of the majority shareholder or the first-listed director, and flag the presence of foreign directors separately. Valid examples: 'Malaysian', 'Singaporean', 'Chinese', 'Indonesian'. Normalise to the English demonym.",
+        "example": "Malaysian",
+        "data_type": "string"
+      },
+      "financing_request_volume": {
+        "field_name": "financing_request_volume",
+        "description": "The total financing amount requested by the applicant, extracted from the application form's financing details section (Section C). Typically labelled 'Jumlah Pembiayaan / Financing Amount'. Expressed in Ringgit Malaysia (RM) as a numeric value without currency prefix. The application form typically includes the RM prefix (e.g. 'RM 1,200,000.00') — strip the prefix and store as a float. This figure represents the gross financing amount requested, not the net disbursement after fees. Cross-reference with the bank's internal assessment of eligible amount; any difference is a bank decision, not an extraction issue. For Islamic financing products (e.g. Tawarruq, Murabahah), this represents the purchase price or facility amount under the relevant Sharia contract.",
+        "example": 1200000.0,
+        "data_type": "float"
+      }
+    }
+  }
+}
