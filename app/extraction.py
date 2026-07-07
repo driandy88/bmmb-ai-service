@@ -1,7 +1,7 @@
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.config import TemplateNotFoundError, get_template, list_templates
-from app.gemini_client import GeminiCallError, GeminiParseError, run_extraction
+from app.gemini_client import GeminiCallError, GeminiConfigError, GeminiParseError, run_extraction
 from app.schema_builder import build_gemini_schema, generate_extraction_prompt
 from app.schemas import ApiResponse, TemplateDetail
 
@@ -41,7 +41,6 @@ def get_template_detail(template_key: str):
 @router.post("/extract", status_code=status.HTTP_200_OK)
 async def extract_document(
     template: str = Form(..., description="Template key, e.g. 'business_registration_ssm'"),
-    api_key: str = Form(..., description="Your Gemini API key"),
     file: UploadFile = File(...),
     model: str = Form("gemini-2.5-flash", description="Gemini model id"),
 ):
@@ -71,13 +70,14 @@ async def extract_document(
 
     try:
         extracted = run_extraction(
-            api_key=api_key,
             file_bytes=file_bytes,
             mime_type=content_type,
             prompt=prompt,
             schema=schema,
             model=model,
         )
+    except GeminiConfigError as exc:
+        raise HTTPException(status_code=500, detail=f"Service misconfigured: {exc}")
     except GeminiCallError as exc:
         raise HTTPException(status_code=502, detail=f"Gemini API error: {exc}")
     except GeminiParseError as exc:

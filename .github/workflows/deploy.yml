@@ -70,7 +70,7 @@ jobs:
             --platform=managed \
             --allow-unauthenticated \
             --service-account=extraction-service-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
-            --set-env-vars=ALLOWED_ORIGINS=${{ secrets.ALLOWED_ORIGINS }}
+            --set-env-vars=ALLOWED_ORIGINS=${{ secrets.ALLOWED_ORIGINS }},GCP_PROJECT_ID=${{ env.PROJECT_ID }}
 
       - name: Show deployed URL
         run: gcloud run services describe ${{ env.SERVICE_NAME }} --region=${{ env.REGION }} --format="value(status.url)"

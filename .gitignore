@@ -13,3 +13,8 @@ venv/
 
 # OS
 .DS_Store
+
+# Your own test documents -- never commit real/sensitive documents.
+# Only this folder's placeholder README stays tracked.
+sample_docs/private/*
+!sample_docs/private/README.md
