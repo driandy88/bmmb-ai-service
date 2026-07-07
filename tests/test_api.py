@@ -1,7 +1,7 @@
 """
 End-to-end tests of the FastAPI wiring (routing, validation, error handling)
 with app.extraction.run_extraction monkeypatched -- these never call the real
-Gemini API, so they run in CI with no API key and no network access.
+Gemini/Vertex AI API, so they run in CI with no credentials and no network access.
 """
 import io
 
@@ -21,9 +21,8 @@ TINY_PNG = bytes.fromhex(
 
 @pytest.fixture(autouse=True)
 def mock_gemini(monkeypatch):
-    """Replaces the real Gemini call with a canned response for every test."""
-    def _fake_run_extraction(api_key, file_bytes, mime_type, prompt, schema, model="gemini-2.5-flash"):
-        assert api_key, "api_key should never be empty when this is called"
+    """Replaces the real Gemini/Vertex AI call with a canned response for every test."""
+    def _fake_run_extraction(file_bytes, mime_type, prompt, schema, model="gemini-2.5-flash"):
         if schema.get("type") == "ARRAY":
             return [{"mocked": True}]
         return {"mocked": True}
@@ -57,7 +56,7 @@ class TestExtractValidation:
     def test_unknown_template_404(self):
         r = client.post(
             "/extract",
-            data={"template": "nope", "api_key": "fake-key"},
+            data={"template": "nope"},
             files={"file": ("doc.pdf", io.BytesIO(TINY_PDF), "application/pdf")},
         )
         assert r.status_code == 404
@@ -65,7 +64,7 @@ class TestExtractValidation:
     def test_unsupported_mime_type_400(self):
         r = client.post(
             "/extract",
-            data={"template": "consent_form", "api_key": "fake-key"},
+            data={"template": "consent_form"},
             files={"file": ("doc.txt", io.BytesIO(b"hello"), "text/plain")},
         )
         assert r.status_code == 400
@@ -73,15 +72,15 @@ class TestExtractValidation:
     def test_empty_file_400(self):
         r = client.post(
             "/extract",
-            data={"template": "consent_form", "api_key": "fake-key"},
+            data={"template": "consent_form"},
             files={"file": ("doc.pdf", io.BytesIO(b""), "application/pdf")},
         )
         assert r.status_code == 400
 
-    def test_missing_api_key_422(self):
+    def test_missing_template_422(self):
         r = client.post(
             "/extract",
-            data={"template": "consent_form"},
+            data={},
             files={"file": ("doc.pdf", io.BytesIO(TINY_PDF), "application/pdf")},
         )
         assert r.status_code == 422  # FastAPI form validation
@@ -91,7 +90,7 @@ class TestExtractSuccess:
     def test_pdf_extraction(self):
         r = client.post(
             "/extract",
-            data={"template": "business_registration_ssm", "api_key": "fake-key"},
+            data={"template": "business_registration_ssm"},
             files={"file": ("ssm.pdf", io.BytesIO(TINY_PDF), "application/pdf")},
         )
         assert r.status_code == 200
@@ -104,7 +103,7 @@ class TestExtractSuccess:
     def test_image_extraction(self):
         r = client.post(
             "/extract",
-            data={"template": "ic_photocopies", "api_key": "fake-key"},
+            data={"template": "ic_photocopies"},
             files={"file": ("ic.png", io.BytesIO(TINY_PNG), "image/png")},
         )
         assert r.status_code == 200
@@ -115,8 +114,30 @@ class TestExtractSuccess:
     def test_custom_model_passed_through(self):
         r = client.post(
             "/extract",
-            data={"template": "consent_form", "api_key": "fake-key", "model": "gemini-2.0-flash"},
+            data={"template": "consent_form", "model": "gemini-2.0-flash"},
             files={"file": ("doc.pdf", io.BytesIO(TINY_PDF), "application/pdf")},
         )
         assert r.status_code == 200
         assert r.json()["data"]["model"] == "gemini-2.0-flash"
+
+
+class TestMissingConfig:
+    def test_missing_gcp_project_id_returns_500(self, monkeypatch):
+        """If GCP_PROJECT_ID isn't set, the real run_extraction raises
+        GeminiConfigError -- confirm the endpoint surfaces that as a 500,
+        not an unhandled crash. Bypasses the autouse mock for this one test."""
+        import app.gemini_client as gc
+        from app.gemini_client import GeminiConfigError
+
+        def _raise_config_error(*args, **kwargs):
+            raise GeminiConfigError("GCP_PROJECT_ID is not set.")
+
+        monkeypatch.setattr("app.extraction.run_extraction", _raise_config_error)
+
+        r = client.post(
+            "/extract",
+            data={"template": "consent_form"},
+            files={"file": ("doc.pdf", io.BytesIO(TINY_PDF), "application/pdf")},
+        )
+        assert r.status_code == 500
+        assert "misconfigured" in r.json()["detail"].lower()
