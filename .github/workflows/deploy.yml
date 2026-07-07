@@ -1,16 +1,19 @@
-name: Test, Build & Deploy
+name: Test, Build & Deploy — Extraction
 
 on:
   pull_request:
     branches: [main]
+    paths: ["services/extraction/**", "libs/bmmb_common/**"]
   push:
     branches: [main]
+    paths: ["services/extraction/**", "libs/bmmb_common/**"]
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   REGION: asia-southeast1
   SERVICE_NAME: extraction-service
   REPO_NAME: bmmb-ai-service             # shared Artifact Registry repo across all services in this monorepo
+  WORKDIR: services/extraction
 
 jobs:
   test:
@@ -23,9 +26,11 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
+        working-directory: ${{ env.WORKDIR }}
         run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run tests
+        working-directory: ${{ env.WORKDIR }}
         run: pytest tests/ -v
 
   # Only runs after tests pass, and only on pushes to main (not on PRs)
@@ -56,7 +61,7 @@ jobs:
 
       - name: Build image
         run: |
-          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} .
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} ${{ env.WORKDIR }}
 
       - name: Push image
         run: |
