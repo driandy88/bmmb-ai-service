@@ -1,64 +1,114 @@
 """
-Loads templates_config.json and normalises every document-type section into a
-consistent shape, regardless of whether the source JSON used "fields" (single
-object per document) or a "*_object_fields" key (array of objects per document
-— e.g. one entry per bank statement month, per financial year, per director IC).
+Loads the template/attribute definitions from BigQuery and normalises every
+document-type "template" row into a consistent shape, regardless of whether
+it was authored as kind="single" (one object per document) or kind="array"
+(array of objects per document -- e.g. one entry per bank statement month,
+per financial year, per director IC).
 
-This is the ONLY place that understands the raw JSON's key-naming quirks.
-Everything downstream (schema_builder, prompts) works off get_template()'s
-normalised output and doesn't care how the source file was shaped.
+Templates/attributes are managed via the Express admin backend's
+/api/templates and /api/attributes routes (bmmb-sme-financing-platform/
+backend), which write to the same BigQuery dataset this module reads from:
+`docs_extractor_{APP_ENV}` in project `GCP_PROJECT_ID`.
+
+This is the ONLY place that understands the raw table shapes. Everything
+downstream (schema_builder, prompts) works off get_template()'s normalised
+output and doesn't care that the source is BigQuery.
 """
-import json
-from functools import lru_cache
-from pathlib import Path
+import os
+import time
 
-CONFIG_PATH = Path(__file__).parent / "templates_config.json"
+from google.cloud import bigquery
 
-# Any section key ending in this suffix is treated as "one object per instance,
-# multiple instances possible" -> the Gemini schema wraps it in an ARRAY.
-_ARRAY_FIELDS_SUFFIX = "_object_fields"
-_SINGLE_FIELDS_KEY = "fields"
+PROJECT_ID = os.getenv("GCP_PROJECT_ID", "prototype-bmmb-1b62")
+APP_ENV = os.getenv("APP_ENV", "dev")
+if APP_ENV not in ("dev", "prod"):
+    raise RuntimeError(f"APP_ENV must be 'dev' or 'prod', got {APP_ENV!r}")
 
-_RESERVED_TOP_LEVEL_KEYS = {"schema_version", "description"}
+DATASET_ID = f"docs_extractor_{APP_ENV}"
+
+# Re-query BigQuery at most once per this many seconds. There's no external
+# signal available to invalidate the cache on write (the Express admin routes
+# and this service are separate processes), so a short TTL is used instead of
+# caching forever.
+_CACHE_TTL_SECONDS = 5 * 60
+
+_cache = {"data": None, "loaded_at": 0.0}
+
+_client = None
+
+
+def _get_client() -> bigquery.Client:
+    global _client
+    if _client is None:
+        _client = bigquery.Client(project=PROJECT_ID)
+    return _client
+
+
+def _table_ref(name: str) -> str:
+    return f"`{PROJECT_ID}.{DATASET_ID}.{name}`"
 
 
 class TemplateNotFoundError(KeyError):
     pass
 
 
-def _normalise_section(key: str, raw: dict) -> dict:
-    """Turn one raw JSON section into {key, description, kind, fields}."""
-    fields_key = None
-    if _SINGLE_FIELDS_KEY in raw:
-        fields_key, kind = _SINGLE_FIELDS_KEY, "single"
-    else:
-        for k in raw:
-            if k.endswith(_ARRAY_FIELDS_SUFFIX):
-                fields_key, kind = k, "array"
-                break
-    if fields_key is None:
-        raise ValueError(
-            f"Template section '{key}' has neither a 'fields' key nor a "
-            f"'*{_ARRAY_FIELDS_SUFFIX}' key — cannot determine its shape."
+def _query_templates() -> dict:
+    """Reads templates + template_attributes + attributes from BigQuery and
+    groups them into the same normalised shape the old JSON-backed
+    `_load_all()` returned: {service_template_key: {key, description, kind,
+    fields: {field_name: {description, example, data_type}}}}.
+
+    Only templates with a non-null service_template_key are exposed here --
+    that column is what wires a BigQuery template row to this service.
+    attribute_columns (Table-type sub-columns) are not joined in: none of the
+    seeded templates use Table-type attributes, and schema_builder.py has no
+    support for nested column schemas today, so skipping it keeps this query
+    simple without losing any current functionality.
+    """
+    client = _get_client()
+    sql = f"""
+        SELECT
+            t.service_template_key AS key,
+            t.description AS template_description,
+            t.kind AS kind,
+            a.name AS field_name,
+            a.description AS field_description,
+            a.example AS example,
+            a.data_type AS data_type
+        FROM {_table_ref('templates')} t
+        JOIN {_table_ref('template_attributes')} ta ON ta.template_id = t.id
+        JOIN {_table_ref('attributes')} a ON a.id = ta.attribute_id
+        WHERE t.service_template_key IS NOT NULL
+        ORDER BY t.id, ta.id
+    """
+    rows = list(client.query(sql).result())
+
+    templates: dict = {}
+    for row in rows:
+        tmpl = templates.setdefault(
+            row.key,
+            {
+                "key": row.key,
+                "description": row.template_description or "",
+                "kind": row.kind or "single",
+                "fields": {},
+            },
         )
-    return {
-        "key": key,
-        "description": raw.get("_section_description", ""),
-        "kind": kind,  # "single" | "array"
-        "fields": raw[fields_key],  # {field_name: {field_name, description, example, data_type}}
-    }
+        tmpl["fields"][row.field_name] = {
+            "description": row.field_description,
+            "example": row.example,
+            "data_type": row.data_type,
+        }
 
-
-@lru_cache(maxsize=1)
-def _load_all() -> dict:
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        raw = json.load(f)
-    templates = {}
-    for key, value in raw.items():
-        if key in _RESERVED_TOP_LEVEL_KEYS:
-            continue
-        templates[key] = _normalise_section(key, value)
     return templates
+
+
+def _load_all() -> dict:
+    now = time.time()
+    if _cache["data"] is None or (now - _cache["loaded_at"]) > _CACHE_TTL_SECONDS:
+        _cache["data"] = _query_templates()
+        _cache["loaded_at"] = now
+    return _cache["data"]
 
 
 def list_templates() -> list[dict]:
@@ -80,5 +130,6 @@ def get_template(template_key: str) -> dict:
 
 
 def reload_config():
-    """Clears the cache — useful in tests or if templates_config.json changes at runtime."""
-    _load_all.cache_clear()
+    """Clears the cache — useful in tests or to force a refresh sooner than
+    the TTL (e.g. right after seeding/editing templates via the admin API)."""
+    _cache["data"] = None
