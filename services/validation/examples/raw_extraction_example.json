@@ -1,0 +1,32 @@
+{
+  "bundle_id": "BUNDLE-CONFLICT-DEMO",
+  "system_date": "2026-07-07",
+  "raw_documents": [
+    {
+      "document_id": "doc_ssm_24",
+      "document_type": "ssm_corporate_form",
+      "document_subtype": "form_24",
+      "raw_fields": {
+        "Entity Name": "ALPHA TECH SOLUTIONS SDN BHD",
+        "Business Registration Number": "202301098765",
+        "Entity Type": "Sdn Bhd",
+        "Shareholders": [
+          {
+            "Name": "MOHD AIMAN BIN ZULKIFLI",
+            "NRIC/Passport": "880214-14-5123"
+          }
+        ]
+      }
+    },
+    {
+      "document_id": "doc_consent_006",
+      "document_type": "consent_form",
+      "raw_fields": {
+        "Entity Name": "ALPHA TECH SOLUTIONS SDN BHD",
+        "Authorized Names": "MOHD AIMAN BIN ZULKIFLI",
+        "Authorized NRICs": "880214-14-5123",
+        "Signature Captured": true
+      }
+    }
+  ]
+}

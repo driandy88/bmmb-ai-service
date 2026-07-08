@@ -65,6 +65,91 @@ services to untangle from a flat layout.
 
 ---
 
+## Validation Agent (`services/validation/`)
+
+A second, independent service in this monorepo: deterministic + agentic
+validation of an already-structured BMMB document bundle against BMMB's
+compliance rules — SSM completeness, financial statement freshness, bank
+statement continuity/coverage, IC completeness, consent-form signatures,
+entity/IC cross-matching, and Form D expiry. See
+`services/validation/__init__.py` for the full module map.
+
+Two ways to validate a bundle:
+- **Deterministic only** — `ValidationEngine` runs every rule in
+  `services/validation/rules/` directly in Python. Fast, free, no LLM, no
+  GCP credentials needed (`enable_ai_review=False`).
+- **Agentic** (the default) — runs the deterministic engine first, then one
+  Gemini call (via Vertex AI) reviews that report against the raw
+  pre-adapter extraction, if available, to catch adapter-mapping bugs the
+  deterministic engine can't see on its own. The AI review can never
+  override a deterministic pass/fail — see `services/validation/agent.py`'s
+  module docstring.
+
+> **Not yet integrated with extraction.** This service takes an
+> already-structured `ValidationBundle` (or a raw-extraction-shaped dict via
+> `services/validation/adapter.py`) as its input — it does not call the
+> extraction service, and nothing in `services/extraction/` calls it either.
+> `adapter.py`'s expected raw-extraction shape (`raw_documents` /
+> `raw_fields`) also doesn't match `services/extraction`'s actual output
+> shape yet (per-template dynamic field dicts — see
+> `services/extraction/app/schemas.py`), and their document-type names don't
+> line up either (e.g. extraction's `business_registration_ssm` vs.
+> validation's `ssm_corporate_form`). Wiring the two together end to end is
+> a future task, not something that works today.
+
+### Structure
+
+```
+services/validation/
+├── bundle.py               # ValidationBundle schema (pydantic) -- the canonical input
+├── rules/                  # Individual BMMB rule functions (date logic, completeness, matching)
+├── engine.py                # ValidationEngine -- runs every applicable rule against a bundle
+├── adapter.py               # Example raw-extraction -> ValidationBundle mapping (contains one
+│                             # deliberate bug -- see its module docstring -- used to demonstrate
+│                             # what the agentic review step is meant to catch)
+├── schemas.py               # AgenticValidationReport / AIFinding / AIReview output models
+├── agent.py                 # run_agentic_validation() -- engine in Python + one Gemini review call
+├── api.py                    # FastAPI router/app -- GET /health, POST /validate
+├── examples/                 # Sample bundles, a raw-extraction conflict demo, curl requests
+├── tests/                    # pytest -- rules, engine, adapter, and API tests (Gemini call mocked)
+├── requirements.txt          # runtime deps only
+└── requirements-dev.txt      # + pytest
+```
+
+### Running it
+
+No Dockerfile or CI workflow yet for this service — it's local-only for now
+(`.github/workflows/deploy.yml` is path-filtered to `services/extraction/**`
+and doesn't touch it).
+
+```bash
+# from the repo root -- imports are `services.validation.*`, so this must
+# run from the repo root, not from inside services/validation/
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r services/validation/requirements-dev.txt
+
+uvicorn services.validation.api:app --reload
+```
+
+Open `http://localhost:8000/docs` for `GET /health` and `POST /validate`.
+`POST /validate` takes `{"bundle": {...}, "raw_extraction": null, "enable_ai_review": true}`;
+set `enable_ai_review: false` to skip the Gemini call entirely (no
+`GCP_PROJECT_ID` / Vertex AI credentials needed in that case).
+
+### Testing
+
+```bash
+# from the repo root
+pytest services/validation/tests/ -v
+```
+
+Never calls the real Gemini/Vertex AI API — the agentic-path tests
+monkeypatch `genai.Client`, same convention as
+`services/extraction/tests/test_api.py`. No credentials or network access
+required.
+
+---
+
 ## Prerequisites
 
 - Python 3.12+

@@ -1,0 +1,6 @@
+fastapi==0.121.0
+uvicorn==0.38.0
+pydantic==2.13.4
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.1
+google-genai==1.47.0
