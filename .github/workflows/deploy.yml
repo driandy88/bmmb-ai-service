@@ -18,8 +18,20 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # required for keyless auth if you switch to Workload Identity later
     steps:
       - uses: actions/checkout@v4
+
+      - id: auth
+        name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          # tests hit the real docs_extractor_dev BigQuery dataset (see
+          # tests/test_schema_builder.py) — same credentials as the deploy
+          # job below, just scoped to reads against dev, never prod.
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - uses: actions/setup-python@v5
         with:
@@ -31,6 +43,9 @@ jobs:
 
       - name: Run tests
         working-directory: ${{ env.WORKDIR }}
+        env:
+          APP_ENV: dev
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
         run: pytest tests/ -v
 
   # Only runs after tests pass, and only on pushes to main (not on PRs)
@@ -75,7 +90,7 @@ jobs:
             --platform=managed \
             --allow-unauthenticated \
             --service-account=extraction-service-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
-            --set-env-vars=ALLOWED_ORIGINS=${{ secrets.ALLOWED_ORIGINS }},GCP_PROJECT_ID=${{ env.PROJECT_ID }}
+            --set-env-vars=ALLOWED_ORIGINS=${{ secrets.ALLOWED_ORIGINS }},GCP_PROJECT_ID=${{ env.PROJECT_ID }},APP_ENV=prod
 
       - name: Show deployed URL
         run: gcloud run services describe ${{ env.SERVICE_NAME }} --region=${{ env.REGION }} --format="value(status.url)"

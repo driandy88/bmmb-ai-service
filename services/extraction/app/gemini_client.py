@@ -30,7 +30,10 @@ SYSTEM_INSTRUCTION = (
     "Extract only the requested fields from the provided document. "
     "Return only the extracted data as JSON matching the provided schema. "
     "Use null for any field that is not present or cannot be determined with "
-    "confidence — never guess or infer a plausible-looking value."
+    "confidence — never guess or infer a plausible-looking value. "
+    "For each extracted field, also populate its entry in _locations with the "
+    "1-based page number and the nearest heading or section title where the "
+    "value was found, so a document viewer can jump straight to it."
 )
 
 
