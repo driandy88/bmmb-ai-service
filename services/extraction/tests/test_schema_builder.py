@@ -1,7 +1,10 @@
 """
 Tests for app.config and app.schema_builder, run against the REAL
-templates_config.json (the 6 SME-financing document templates) so a broken
-config is caught immediately, not just a synthetic fixture.
+docs_extractor_dev BigQuery dataset (the 6 SME-financing document templates,
+seeded from the original templates_config.json) so a broken config is caught
+immediately, not just a synthetic fixture. Requires GCP credentials with
+BigQuery read access — see the `test` job in .github/workflows/deploy.yml
+for how CI provides them.
 """
 import pytest
 
@@ -79,9 +82,18 @@ class TestFieldTypeMapping:
 
     def test_all_fields_in_required(self):
         # required + nullable is the mechanism that forces Gemini to return
-        # null instead of omitting a key it couldn't find.
+        # null instead of omitting a key it couldn't find. `_locations` is
+        # deliberately excluded from `required` — it's a best-effort
+        # location hint, not core data, so we'd rather do without it than
+        # force a schema-validation failure over it.
         schema = build_gemini_schema("customer_information_details")
-        assert set(schema["required"]) == set(schema["properties"].keys())
+        data_fields = set(schema["properties"].keys()) - {"_locations"}
+        assert set(schema["required"]) == data_fields
+
+    def test_locations_present_but_not_required(self):
+        schema = build_gemini_schema("customer_information_details")
+        assert "_locations" in schema["properties"]
+        assert "_locations" not in schema["required"]
 
 
 class TestPrompt:

@@ -31,19 +31,48 @@ def _field_schema(meta: dict) -> dict:
     }
 
 
+def _locations_schema(field_names: list[str]) -> dict:
+    """One {page, section} slot per field, so the caller can point a document
+    preview at the page a value was actually read from. Not in `required` —
+    unlike the data fields, we'd rather silently do without it than force a
+    schema-validation failure if a field-scale document confuses the model.
+    """
+    return {
+        "type": "OBJECT",
+        "nullable": True,
+        "properties": {
+            name: {
+                "type": "OBJECT",
+                "nullable": True,
+                "properties": {
+                    "page": {"type": "INTEGER", "nullable": True},
+                    "section": {"type": "STRING", "nullable": True},
+                },
+            }
+            for name in field_names
+        },
+    }
+
+
 def build_gemini_schema(template_key: str) -> dict:
     """Returns a dict suitable for GenerateContentConfig(response_schema=...).
 
     Every field is nullable and listed in `required` — this is deliberate: it
     forces Gemini to emit `null` for anything it can't find rather than
     omitting the key, so the caller always gets a complete, predictable shape.
+
+    Each object also carries a sibling `_locations` map (one {page, section}
+    per field) — for "array" templates this means every row gets its own
+    locations, which is what a per-row "jump to page" UI needs.
     """
     tmpl = get_template(template_key)
     properties = {name: _field_schema(meta) for name, meta in tmpl["fields"].items()}
+    field_names = list(properties.keys())
+    properties["_locations"] = _locations_schema(field_names)
     obj_schema = {
         "type": "OBJECT",
         "properties": properties,
-        "required": list(properties.keys()),
+        "required": field_names,
     }
     if tmpl["kind"] == "array":
         return {
@@ -79,5 +108,11 @@ def generate_extraction_prompt(template_key: str) -> str:
         "",
         "Return null for any field not found or unclear in the document. "
         "Do not guess or infer values that are not present.",
+        "",
+        "For each field above, also populate its entry in _locations with:",
+        "  page    — 1-based page number where the value appears (null if unknown)",
+        "  section — nearest heading or section title on that page (null if unknown)",
+        "If this document type may contain multiple instances, give each instance's "
+        "object its own _locations reflecting where THAT instance's values were found.",
     ]
     return "\n".join(lines)
