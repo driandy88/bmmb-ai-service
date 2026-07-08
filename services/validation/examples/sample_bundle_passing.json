@@ -1,0 +1,166 @@
+{
+  "bundle_id": "BUNDLE-2026-99999",
+  "metadata": {
+    "total_documents_received": 12,
+    "system_date": "2026-07-07",
+    "document_types_present": [
+      "customer_information",
+      "ssm_corporate_form",
+      "financial_statement",
+      "bank_statement",
+      "identity_document",
+      "consent_form"
+    ]
+  },
+  "extracted_documents": [
+    {
+      "document_id": "doc_000",
+      "document_type": "customer_information",
+      "data": {
+        "main_contact_names": ["MOHD AIMAN BIN ZULKIFLI"],
+        "main_contact_emails": ["aiman@alphatech.my"],
+        "main_contact_phone_numbers": ["+60123456789"],
+        "financing_amount": 500000.00,
+        "product_type": "SME Term Financing",
+        "tenure_months": 60,
+        "repayment_frequency": "Monthly"
+      }
+    },
+    {
+      "document_id": "doc_001a",
+      "document_type": "ssm_corporate_form",
+      "document_subtype": "form_24",
+      "data": {
+        "entity_name": "ALPHA TECH SOLUTIONS SDN BHD",
+        "business_registration_number": "202301098765",
+        "entity_type": "Sdn Bhd",
+        "shareholders": [
+          {
+            "name": "MOHD AIMAN BIN ZULKIFLI",
+            "nric_passport": "880214-14-5123"
+          },
+          {
+            "name": "NURUL AIN BINTI ZULKIFLI",
+            "nric_passport": "900101-10-1234"
+          }
+        ]
+      }
+    },
+    {
+      "document_id": "doc_001b",
+      "document_type": "ssm_corporate_form",
+      "document_subtype": "form_44",
+      "data": {
+        "entity_name": "ALPHA TECH SOLUTIONS SDN BHD",
+        "entity_type": "Sdn Bhd",
+        "business_registration_number": "202301098765"
+      }
+    },
+    {
+      "document_id": "doc_001c",
+      "document_type": "ssm_corporate_form",
+      "document_subtype": "form_49",
+      "data": {
+        "entity_name": "ALPHA TECH SOLUTIONS SDN BHD",
+        "entity_type": "Sdn Bhd",
+        "business_registration_number": "202301098765",
+        "directors": [
+          {
+            "name": "MOHD AIMAN BIN ZULKIFLI",
+            "nric_passport": "880214-14-5123",
+            "position": "DIRECTOR"
+          },
+          {
+            "name": "NURUL AIN BINTI ZULKIFLI",
+            "nric_passport": "900101-10-1234",
+            "position": "DIRECTOR"
+          }
+        ]
+      }
+    },
+    {
+      "document_id": "doc_002",
+      "document_type": "financial_statement",
+      "data": {
+        "entity_name": "ALPHA TECH SOLUTIONS SDN BHD",
+        "financial_year_end": "2025-12-31",
+        "balance_sheet_present": true,
+        "profit_and_loss_present": true,
+        "cash_flow_present": true,
+        "auditors_report_present": true
+      }
+    },
+    {
+      "document_id": "doc_003",
+      "document_type": "financial_statement",
+      "data": {
+        "entity_name": "ALPHA TECH SOLUTIONS SDN BHD",
+        "financial_year_end": "2024-12-31",
+        "balance_sheet_present": true,
+        "profit_and_loss_present": true,
+        "cash_flow_present": true,
+        "auditors_report_present": true
+      }
+    },
+    {
+      "document_id": "doc_004a",
+      "document_type": "bank_statement",
+      "data": {
+        "entity_name": "ALPHA TECH SOLUTIONS SDN BHD",
+        "statement_start_date": "2026-01-01",
+        "statement_end_date": "2026-03-31"
+      }
+    },
+    {
+      "document_id": "doc_004b",
+      "document_type": "bank_statement",
+      "data": {
+        "entity_name": "ALPHA TECH SOLUTIONS SDN BHD",
+        "statement_start_date": "2026-04-01",
+        "statement_end_date": "2026-06-30"
+      }
+    },
+    {
+      "document_id": "doc_005",
+      "document_type": "identity_document",
+      "data": {
+        "individual_name": "MOHD AIMAN BIN ZULKIFLI",
+        "nric_passport": "880214-14-5123",
+        "front_image_present": true,
+        "back_image_present": true
+      }
+    },
+    {
+      "document_id": "doc_005b",
+      "document_type": "identity_document",
+      "data": {
+        "individual_name": "NURUL AIN BINTI ZULKIFLI",
+        "nric_passport": "900101-10-1234",
+        "front_image_present": true,
+        "back_image_present": true
+      }
+    },
+    {
+      "document_id": "doc_006a",
+      "document_type": "consent_form",
+      "data": {
+        "entity_name": "ALPHA TECH SOLUTIONS SDN BHD",
+        "individual_name": "MOHD AIMAN BIN ZULKIFLI",
+        "nric_passport": "880214-14-5123",
+        "position": "DIRECTOR",
+        "signature_present": true
+      }
+    },
+    {
+      "document_id": "doc_006b",
+      "document_type": "consent_form",
+      "data": {
+        "entity_name": "ALPHA TECH SOLUTIONS SDN BHD",
+        "individual_name": "NURUL AIN BINTI ZULKIFLI",
+        "nric_passport": "900101-10-1234",
+        "position": "DIRECTOR",
+        "signature_present": true
+      }
+    }
+  ]
+}

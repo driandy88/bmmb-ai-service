@@ -1,0 +1,42 @@
+{
+  "bundle_id": "BUNDLE-CONFLICT-DEMO",
+  "metadata": {
+    "total_documents_received": 2,
+    "system_date": "2026-07-07",
+    "document_types_present": [
+      "ssm_corporate_form",
+      "consent_form"
+    ]
+  },
+  "extracted_documents": [
+    {
+      "document_id": "doc_ssm_24",
+      "document_type": "ssm_corporate_form",
+      "document_subtype": "form_24",
+      "data": {
+        "entity_name": "ALPHA TECH SOLUTIONS SDN BHD",
+        "business_registration_number": "202301098765",
+        "entity_type": "Sdn Bhd",
+        "directors": null,
+        "shareholders": [
+          {
+            "name": "MOHD AIMAN BIN ZULKIFLI",
+            "nric_passport": "880214-14-5123",
+            "position": null
+          }
+        ]
+      }
+    },
+    {
+      "document_id": "doc_consent_006",
+      "document_type": "consent_form",
+      "data": {
+        "entity_name": "MOHD AIMAN BIN ZULKIFLI",
+        "individual_name": "",
+        "nric_passport": "",
+        "position": null,
+        "signature_present": true
+      }
+    }
+  ]
+}
