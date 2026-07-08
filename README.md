@@ -118,10 +118,6 @@ services/validation/
 
 ### Running it
 
-No Dockerfile or CI workflow yet for this service — it's local-only for now
-(`.github/workflows/deploy.yml` is path-filtered to `services/extraction/**`
-and doesn't touch it).
-
 ```bash
 # from the repo root -- imports are `services.validation.*`, so this must
 # run from the repo root, not from inside services/validation/
@@ -147,6 +143,32 @@ Never calls the real Gemini/Vertex AI API — the agentic-path tests
 monkeypatch `genai.Client`, same convention as
 `services/extraction/tests/test_api.py`. No credentials or network access
 required.
+
+### Deployment (Cloud Run)
+
+Same pipeline shape as extraction (`.github/workflows/deploy-validation.yml`,
+path-filtered to `services/validation/**`): every PR runs `pytest`; every
+push to `main` runs tests, then builds `services/validation/Dockerfile` and
+deploys to Cloud Run as `validation-service`, reusing the same shared
+Artifact Registry repo and `GCP_PROJECT_ID`/`GCP_SA_KEY` secrets as
+extraction — no new GitHub secrets needed.
+
+**One-time GCP setup still required before the first deploy succeeds** — a
+dedicated runtime service account, same pattern as `extraction-service-sa`:
+```bash
+export PROJECT_ID="prototype-bmmb-1b62"
+
+gcloud iam service-accounts create validation-service-sa \
+  --display-name="Validation Service runtime" --project=$PROJECT_ID
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:validation-service-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --role="roles/aiplatform.user"
+```
+`github-deployer` already has the project-level roles (`run.admin`,
+`artifactregistry.writer`, `iam.serviceAccountUser`) needed to deploy this
+service too — see "Deployment (Cloud Run)" → "One-time GCP setup" below,
+which was set up for extraction but isn't extraction-specific.
 
 ---
 
