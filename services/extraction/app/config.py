@@ -29,8 +29,9 @@ DATASET_ID = f"docs_extractor_{APP_ENV}"
 # Re-query BigQuery at most once per this many seconds. There's no external
 # signal available to invalidate the cache on write (the Express admin routes
 # and this service are separate processes), so a short TTL is used instead of
-# caching forever.
-_CACHE_TTL_SECONDS = 5 * 60
+# caching forever. Kept small so admin edits propagate within ~30s; extraction
+# spends 5-30s in Gemini anyway, so the extra BigQuery read is invisible.
+_CACHE_TTL_SECONDS = 30
 
 _cache = {"data": None, "loaded_at": 0.0}
 
@@ -122,6 +123,11 @@ def list_templates() -> list[dict]:
 
 def get_template(template_key: str) -> dict:
     templates = _load_all()
+    if template_key not in templates:
+        # A template created since the cache was loaded won't be in it yet --
+        # force one fresh read before giving up.
+        reload_config()
+        templates = _load_all()
     if template_key not in templates:
         raise TemplateNotFoundError(
             f"Unknown template '{template_key}'. Available: {', '.join(templates)}"
