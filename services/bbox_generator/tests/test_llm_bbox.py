@@ -3,17 +3,21 @@ Tests for llm_bbox.py. All Gemini calls are monkeypatched via FakeGenaiClient
 (same convention as services/validation/tests/test_api.py) — these never
 call the real Gemini/Vertex AI API, so they run in CI with no credentials.
 """
+import io
 import json
 
 import pytest
+from PIL import Image
 
 from services.bbox_generator.llm_bbox import (
     LlmConfigError,
+    _encode_png,
     align_extraction_llm,
     build_prompt,
     evaluate,
     get_client,
     iou,
+    render_pages,
     verify_llm_box,
 )
 
@@ -62,6 +66,18 @@ class TestBuildPrompt:
         prompt = build_prompt(template, {"some_field": "value"})
         assert "(no description)" in prompt
 
+    def test_explicit_row_disambiguation_instruction_present(self):
+        # the fix for boxes landing in the wrong column of a repeating
+        # table (e.g. wrong financial year) -- the prompt must tell Gemini
+        # the fields listed together are one row/instance.
+        prompt = build_prompt({"key": "t", "fields": {}}, {"revenue": 100})
+        assert "SAME row/instance" in prompt
+
+    def test_explicit_bbox_drawing_steps_present(self):
+        prompt = build_prompt({"key": "t", "fields": {}}, {"revenue": 100})
+        assert "TOP-LEFT corner" in prompt
+        assert "box_2d = [ymin, xmin, ymax, xmax]" in prompt
+
     def test_falls_back_to_key_when_no_name(self):
         template = {"key": "bank_statements", "fields": {}}
         prompt = build_prompt(template, {})
@@ -103,6 +119,27 @@ class TestVerifyLlmBox:
         assert verify_llm_box(bbox, "SEBASTIAN", words) == "unverified"
 
 
+class TestEncodePngAndRenderPages:
+    def test_small_image_untouched(self):
+        img = Image.new("RGB", (400, 300), "white")
+        out = _encode_png(img, max_dim=1600)
+        assert Image.open(io.BytesIO(out)).size == (400, 300)
+
+    def test_oversized_image_downscaled_preserving_aspect_ratio(self):
+        img = Image.new("RGB", (3200, 1600), "white")  # 2:1 aspect ratio
+        out = _encode_png(img, max_dim=1600)
+        w, h = Image.open(io.BytesIO(out)).size
+        assert max(w, h) == 1600
+        assert round(w / h, 2) == 2.0
+
+    def test_render_pages_image_input_is_capped(self, tmp_path):
+        p = tmp_path / "big.png"
+        Image.new("RGB", (3200, 3200), "white").save(p)
+        pages = render_pages(str(p))
+        assert len(pages) == 1
+        assert max(Image.open(io.BytesIO(pages[0])).size) == 1600
+
+
 class TestIouAndEvaluate:
     def test_identical_boxes_iou_1(self):
         b = {"page": 1, "x0": 0.1, "y0": 0.1, "x1": 0.3, "y1": 0.3}
@@ -128,11 +165,32 @@ class TestIouAndEvaluate:
 
 class TestGetClient:
     def test_raises_without_project_id(self, monkeypatch):
-        monkeypatch.delenv("GCP_PROJECT_ID", raising=False)
         import services.bbox_generator.llm_bbox as mod
         monkeypatch.setattr(mod, "GCP_PROJECT_ID", None)
+        monkeypatch.setattr(mod, "_client", None)
         with pytest.raises(LlmConfigError):
             get_client()
+
+    def test_reuses_singleton_across_calls(self, monkeypatch):
+        # Cloud Run keeps the process warm across requests; a fresh
+        # genai.Client() (and its auth handshake) per call was measurable
+        # latency for no benefit -- get_client() should build it once.
+        import services.bbox_generator.llm_bbox as mod
+        monkeypatch.setattr(mod, "GCP_PROJECT_ID", "fake-project")
+        monkeypatch.setattr(mod, "_client", None)
+
+        created = []
+
+        class FakeClient:
+            def __init__(self, **kwargs):
+                created.append(kwargs)
+
+        monkeypatch.setattr(mod.genai, "Client", FakeClient)
+
+        first = get_client()
+        second = get_client()
+        assert first is second
+        assert len(created) == 1
 
 
 class TestAlignExtractionLlm:
