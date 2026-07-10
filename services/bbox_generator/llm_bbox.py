@@ -22,6 +22,7 @@ import os
 
 from google import genai
 from google.genai import types
+from PIL import Image
 
 from .bbox_aligner import _load_words, _norm_token, _try_parse_date, _try_parse_number
 
@@ -30,48 +31,73 @@ MODEL = "gemini-2.5-flash"  # pin exact version here, same convention as gemini_
 GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
 VERTEX_LOCATION = os.environ.get("VERTEX_LOCATION", "asia-southeast1")
 
+_client = None  # lazy singleton -- see get_client()
+
 
 class LlmConfigError(RuntimeError):
     """Raised when required config (e.g. GCP_PROJECT_ID) is missing."""
 
 
 def get_client() -> genai.Client:
+    """Reuses one genai.Client per process instead of creating a fresh one
+    (with its own auth handshake) on every /align request -- this was a
+    measurable chunk of the "why is this so slow" latency, since Cloud Run
+    keeps the process warm across requests anyway."""
+    global _client
+    if _client is not None:
+        return _client
     if not GCP_PROJECT_ID:
         raise LlmConfigError(
             "GCP_PROJECT_ID is not set. Set it as an environment variable "
             "(Cloud Run: --set-env-vars=GCP_PROJECT_ID=...; local: in .env)."
         )
-    return genai.Client(vertexai=True, project=GCP_PROJECT_ID, location=VERTEX_LOCATION)
+    _client = genai.Client(vertexai=True, project=GCP_PROJECT_ID, location=VERTEX_LOCATION)
+    return _client
 
 # ── the prompt: value-as-param + template description + page image ──────────
 
-LOCALIZE_PROMPT = """You are a document localization engine. You are given a
-page image from a document and a list of values that were already extracted
-from it by a separate process. Your only job is to find WHERE each value
-appears on THIS page image — you are not extracting or verifying the values
-themselves, only locating them.
+LOCALIZE_PROMPT = """You are a document localization engine. Treat the page
+image below exactly like a picture: your only job is to find the precise
+region where each already-extracted value is drawn in that picture, and
+draw a tight bounding box around it. You are NOT extracting, verifying, or
+correcting the values — they are already correct. You are only pointing at
+where they visually appear on the page.
 
 Document type: {template_name}
 {template_description}
 
+All of the values below come from the SAME row/instance of this document
+(e.g. all belong to the same year's column in a multi-year financial
+table, or the same person's row in a multi-signatory list). They must all
+be found in the same visual column/row band on the page — use that
+constraint actively: if you can confidently place one value, use its
+column/row position on the page to resolve the others whenever a value
+could plausibly match more than one place.
+
 Values to locate:
 {field_blocks}
 
-Rules:
-1. Return box_2d as [ymin, xmin, ymax, xmax], each coordinate normalized to
-   0-1000 relative to this page image's full width/height.
-2. The box must tightly enclose ONLY the value text itself, not its label
-   (e.g. for "Revenue: RM 4,820,500.00", box just "RM 4,820,500.00").
-3. If the value appears more than once on this page, use the field's
-   description to disambiguate (e.g. a summary-table total, not a line item;
-   the current year's column, not a prior-year comparison).
-4. Numbers may be formatted differently on the page than the value given
-   (thousand separators, currency prefixes, parentheses for negatives) —
-   match the underlying number, not the exact string.
-5. Dates may appear in a different format or language on the page (including
-   Malay month names) — match the underlying date, not the exact string.
-6. If you cannot find the value anywhere on THIS page, set found=false.
-   Never guess or invent a box — a missing box is far better than a wrong one.
+How to find each box_2d, step by step:
+1. Visually scan the ENTIRE page image for text matching the value (see the
+   formatting-variance rules below — the page text rarely matches the
+   value's exact string).
+2. Once you find it, draw a box around ONLY that value's rendered text —
+   not its label, not surrounding whitespace, not the whole table cell/row.
+3. Express the box as box_2d = [ymin, xmin, ymax, xmax], each an integer
+   0-1000, normalized to THIS image's full width/height, where (0,0) is the
+   TOP-LEFT corner of the image and (1000,1000) is the BOTTOM-RIGHT corner.
+
+Formatting-variance rules:
+- Numbers: thousand separators, currency prefixes, parentheses for
+  negatives all count as the same number (e.g. 340980 == "340,980.00" ==
+  "RM 340,980.00" == "(340,980.00)" for a negative value).
+- Dates: may appear in a different format or language, including Malay
+  month names (e.g. "14 Mac 2023" == "14 March 2023" == "2023-03-14").
+- If a value appears more than once on the page, prefer the occurrence in
+  this record's own row/column (see above) over any other instance.
+
+If you cannot find a value anywhere on THIS page, set found=false. Never
+guess or invent a box — a missing box is far better than a wrong one.
 Return JSON matching the schema exactly, one entry per value listed above."""
 
 FIELD_BLOCK = """- field: {field}
@@ -166,24 +192,35 @@ def verify_llm_box(bbox: dict, value, words: list, pad: float = 0.01) -> str:
 
 _IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".tif", ".tiff")
 
+# Cap the longer edge before sending to Gemini. A financial statement
+# rendered at 150dpi can exceed 2000px on its long edge -- that costs more
+# upload time and more image tokens per request without improving
+# localization accuracy (Gemini's vision encoder downsamples internally
+# anyway), so this was pure wasted latency.
+_MAX_DIM = 1600
+
+
+def _encode_png(img: Image.Image, max_dim: int = _MAX_DIM) -> bytes:
+    if max(img.size) > max_dim:
+        scale = max_dim / max(img.size)
+        img = img.resize((round(img.width * scale), round(img.height * scale)), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="PNG")
+    return buf.getvalue()
+
 
 def render_pages(doc_path: str, resolution: int = 150) -> list:
     """Returns a list of PNG bytes, one per page. Single-page for images.
     Uses pdfplumber's built-in renderer (no poppler/imagemagick needed)."""
     if doc_path.lower().endswith(_IMAGE_EXTS):
-        from PIL import Image
         with Image.open(doc_path) as img:
-            buf = io.BytesIO()
-            img.convert("RGB").save(buf, format="PNG")
-            return [buf.getvalue()]
+            return [_encode_png(img)]
 
     import pdfplumber
     pages = []
     with pdfplumber.open(doc_path) as pdf:
         for page in pdf.pages:
-            buf = io.BytesIO()
-            page.to_image(resolution=resolution).save(buf, format="PNG")
-            pages.append(buf.getvalue())
+            pages.append(_encode_png(page.to_image(resolution=resolution).original))
     return pages
 
 # ── public entry point: same {field: {value, bbox, match_quality}} shape ────
