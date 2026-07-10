@@ -7,12 +7,19 @@ Given the file a document was extracted from, plus its extracted
 
 Two alignment strategies, picked via the `method` field:
   - "ocr" (default) — bbox_aligner.py: pure PDF text-layer / OCR word
-    geometry matching. No LLM call.
+    geometry matching. No LLM call. Uses align_extraction() (not the plain
+    align_fields()) so that an optional `_locations` key inside `extracted`
+    (the extraction agent's own page/section hints) is used as a soft
+    scoring prior, and the record's first field anchors the rest to the
+    same row band — this is what disambiguates a value that repeats
+    elsewhere in the document (e.g. a bank statement's monthly summary
+    figure also appearing as an individual transaction line).
   - "llm" — llm_bbox.py: Gemini vision localizes each value directly on the
-    page image, then a deterministic verifier (reusing bbox_aligner's word
-    geometry) confirms the box before it's trusted. Requires `template`
-    (name/description + per-field descriptions) for a useful prompt, and
-    GCP_PROJECT_ID/VERTEX_LOCATION configured on this service.
+    page image, then snapped to the nearest matching OCR word window
+    (falling back to a plain containment check) before being trusted.
+    Requires `template` (name/description + per-field descriptions) for a
+    useful prompt, and GCP_PROJECT_ID/VERTEX_LOCATION configured on this
+    service.
 
 To mount into another service's own FastAPI app (so it shares that app's
 prefix/middleware/auth instead of running as a separate process):
@@ -31,7 +38,7 @@ from typing import Optional
 
 from fastapi import APIRouter, FastAPI, Form, HTTPException, UploadFile
 
-from .bbox_aligner import align_fields
+from .bbox_aligner import align_extraction
 from .llm_bbox import LlmConfigError, align_extraction_llm
 
 router = APIRouter(tags=["bbox_generator"])
@@ -74,7 +81,7 @@ async def align(
             if method == "llm":
                 result = align_extraction_llm(extracted_data, field_types_data, template_data, tmp.name)
             else:
-                result = align_fields(extracted_data, field_types_data, tmp.name)
+                result = align_extraction(extracted_data, field_types_data, tmp.name)
         except LlmConfigError as e:
             raise HTTPException(status_code=503, detail=str(e))
         except Exception as e:

@@ -199,6 +199,27 @@ class TestAlignExtractionLlm:
         monkeypatch.setattr(mod, "_load_words", lambda path: words)
         monkeypatch.setattr(mod, "render_pages", lambda path: page_images or [b"page1png"])
 
+    def test_locations_hint_checks_hinted_page_first(self, monkeypatch):
+        # speed fix: a value living only on page 2 of a multi-page doc used
+        # to cost a wasted Gemini call against page 1 first, every time.
+        # With a `_locations` hint pointing at page 2, that page should be
+        # tried first -- resolving in a single call instead of two.
+        words = [_word("July 2023", page=2, x0=0.0, x1=0.3)]
+        self._patch_common(monkeypatch, words, page_images=[b"page1png", b"page2png"])
+        client = FakeGenaiClient([
+            # only ONE response queued -- if page 1 were tried first (and
+            # itself queried Gemini), this test would fail with an
+            # IndexError from popping an empty response list.
+            json.dumps([{"field": "month", "found": True, "box_2d": [0, 0, 50, 300]}]),
+        ])
+        template = {"key": "t", "fields": {}}
+        record = {"month": "July 2023", "_locations": {"month": {"page": 2}}}
+        result = align_extraction_llm(record, {"month": "string"}, template, "doc.pdf", client=client)
+
+        assert len(client.calls) == 1
+        assert result["month"]["bbox"]["page"] == 2
+        assert result["month"]["match_quality"] == "llm_snapped:exact_date"
+
     def test_single_record_snapped_on_first_page(self, monkeypatch):
         words = [_word("Acme", x0=0.0, x1=0.2)]
         self._patch_common(monkeypatch, words)

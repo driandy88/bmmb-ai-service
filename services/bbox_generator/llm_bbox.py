@@ -245,16 +245,31 @@ def render_pages(doc_path: str, resolution: int = 150) -> list:
 
 # ── public entry point: same {field: {value, bbox, match_quality}} shape ────
 
+def _hinted_page_order(hints: dict, n_pages: int) -> list:
+    """Hinted pages first (in ascending order, deduped, clamped to the
+    document's actual page count), then every remaining page in natural
+    order. Checking the hinted page first instead of always starting from
+    page 1 was a real chunk of the reported slowness — a value that only
+    lives on page 2 of a 3-page doc used to cost a wasted Gemini call
+    against page 1 first, every time."""
+    hinted = sorted({h.get("page") for h in hints.values()
+                     if isinstance(h, dict) and isinstance(h.get("page"), int)
+                     and 1 <= h["page"] <= n_pages})
+    return hinted + [p for p in range(1, n_pages + 1) if p not in hinted]
+
+
 def _align_record_llm(client, page_images: list, words: list,
                       template: dict, record: dict, field_types: dict) -> dict:
     fields = {k: v for k, v in record.items() if not k.startswith("_") and v is not None}
     null_fields = {k: v for k, v in record.items() if not k.startswith("_") and v is None}
+    hints = record.get("_locations", {}) or {}
 
     resolved = {}
     remaining = dict(fields)
-    for page_no, page_bytes in enumerate(page_images, start=1):
+    for page_no in _hinted_page_order(hints, len(page_images)):
         if not remaining:
             break
+        page_bytes = page_images[page_no - 1]
         page_result = localize_page(client, page_bytes, template, remaining, page_no)
         still_remaining = {}
         for field, value in remaining.items():
