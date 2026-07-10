@@ -12,6 +12,7 @@ from services.bbox_generator.bbox_aligner import (
     align_fields,
     find_value_bbox,
     find_value_candidates,
+    snap_to_words,
 )
 
 
@@ -163,6 +164,57 @@ class TestMerge:
         window = [_word("a", x0=0.1, y0=0.2, x1=0.2, y1=0.3),
                    _word("b", x0=0.2, y0=0.1, x1=0.3, y1=0.25)]
         assert _merge(window) == {"page": 1, "x0": 0.1, "y0": 0.1, "x1": 0.3, "y1": 0.3}
+
+
+class TestSnapToWords:
+    def test_snaps_to_nearby_matching_word(self):
+        words = [_word("SEBASTIAN", x0=0.20, y0=0.10, x1=0.40, y1=0.13)]
+        # coarse proposal centered near, but not exactly on, the real word
+        proposal = {"page": 1, "x0": 0.22, "y0": 0.09, "x1": 0.42, "y1": 0.14}
+        bbox, tier = snap_to_words(proposal, "SEBASTIAN", words)
+        assert tier == "snapped:exact"
+        assert (bbox["x0"], bbox["y0"], bbox["x1"], bbox["y1"]) == (0.20, 0.10, 0.40, 0.13)
+
+    def test_snap_only_lands_on_a_window_that_matches_the_value(self):
+        # a wrong-value word sits closer to the proposal center than the
+        # correct value's word -- snap must never land on it, since
+        # find_value_candidates() only returns windows matching the value.
+        words = [
+            _word("WrongValue", x0=0.05, y0=0.10, x1=0.15, y1=0.13),
+            _word("SEBASTIAN", x0=0.60, y0=0.10, x1=0.80, y1=0.13),
+        ]
+        proposal = {"page": 1, "x0": 0.06, "y0": 0.10, "x1": 0.16, "y1": 0.13}
+        bbox, tier = snap_to_words(proposal, "SEBASTIAN", words, radius=1.0)
+        assert tier == "snapped:exact"
+        assert bbox["x0"] == 0.60
+
+    def test_out_of_radius_fails_to_snap(self):
+        words = [_word("SEBASTIAN", x0=0.90, y0=0.90, x1=0.99, y1=0.95)]
+        proposal = {"page": 1, "x0": 0.0, "y0": 0.0, "x1": 0.05, "y1": 0.05}
+        bbox, tier = snap_to_words(proposal, "SEBASTIAN", words, radius=0.1)
+        assert bbox is None
+        assert tier == "snap_failed"
+
+    def test_no_matching_value_anywhere_fails_to_snap(self):
+        words = [_word("Unrelated", x0=0.0, x1=0.2)]
+        proposal = {"page": 1, "x0": 0.0, "y0": 0.0, "x1": 0.2, "y1": 0.05}
+        bbox, tier = snap_to_words(proposal, "SEBASTIAN", words, radius=1.0)
+        assert bbox is None
+        assert tier == "snap_failed"
+
+    def test_different_page_from_proposal_is_ignored(self):
+        words = [_word("SEBASTIAN", page=2, x0=0.0, x1=0.2)]
+        proposal = {"page": 1, "x0": 0.0, "y0": 0.0, "x1": 0.2, "y1": 0.05}
+        bbox, tier = snap_to_words(proposal, "SEBASTIAN", words, radius=1.0)
+        assert bbox is None
+        assert tier == "snap_failed"
+
+    def test_numeric_value_snaps_to_formatted_variant(self):
+        words = [_word("340,980.00", x0=0.50, y0=0.20, x1=0.62, y1=0.23)]
+        proposal = {"page": 1, "x0": 0.48, "y0": 0.19, "x1": 0.60, "y1": 0.24}
+        bbox, tier = snap_to_words(proposal, 340980, words, data_type="float")
+        assert tier == "snapped:exact_number"
+        assert bbox["x0"] == 0.50
 
 
 class TestFindValueBboxBackCompat:

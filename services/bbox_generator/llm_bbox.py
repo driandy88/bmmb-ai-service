@@ -5,11 +5,20 @@ Design: for each extracted value, prompt Gemini with (value, template field
 description, page image) -> box_2d coordinates. Gemini natively outputs
 box_2d as [ymin, xmin, ymax, xmax] normalized 0-1000.
 
-IMPORTANT — this ships with verify_llm_box() always applied. Measured on
-real docs, raw LLM boxes score IoU ~0.4-0.65 on simple cards and ~0.1-0.35 on
-dense tables (sometimes the wrong cell entirely). The verifier turns a
-confidently-wrong box into an explicit "unverified" flag instead of a
-silently-wrong highlight.
+IMPORTANT — every LLM box is reconciled against bbox_aligner.py's OCR word
+geometry before being trusted, in two steps:
+  1. snap_to_words() (preferred): the LLM's box is treated as a coarse
+     proposal — "roughly here" — and snapped to the nearest word window that
+     actually matches the value. Self-verifying by construction (it can only
+     land on a window containing the value) and gives OCR-exact edges. This
+     is what fixes the LLM picking the wrong table column/row: even if the
+     proposed box is in the wrong column, snapping finds the nearest
+     matching occurrence rather than trusting the proposal's position.
+  2. verify_llm_box() (fallback): if nothing was within snapping radius,
+     falls back to a plain "is the value literally inside this box" check.
+     Measured on real docs, raw LLM boxes score IoU ~0.4-0.65 on simple cards
+     and ~0.1-0.35 on dense tables (sometimes the wrong cell entirely) — this
+     turns a confidently-wrong box into an explicit "unverified" flag.
 
 This is the second alignment strategy alongside bbox_aligner.py's OCR/text-
 layer approach (never removed — api.py's `method` param picks between them).
@@ -24,7 +33,18 @@ from google import genai
 from google.genai import types
 from PIL import Image
 
-from .bbox_aligner import _load_words, _norm_token, _try_parse_date, _try_parse_number
+from .bbox_aligner import (
+    _load_words,
+    _norm_token,
+    _try_parse_date,
+    _try_parse_number,
+    snap_to_words,
+)
+
+# Max normalized distance (page units) for snap_to_words to accept a match.
+# Larger = more rescues of imprecise LLM boxes, but more risk of snapping to
+# an equal-valued neighbor (e.g. the same amount on an adjacent row).
+SNAP_RADIUS = float(os.environ.get("BBOX_SNAP_RADIUS", "0.18"))
 
 MODEL = "gemini-2.5-flash"  # pin exact version here, same convention as gemini_client.py
 
@@ -239,18 +259,33 @@ def _align_record_llm(client, page_images: list, words: list,
         still_remaining = {}
         for field, value in remaining.items():
             bbox = page_result.get(field, {}).get("bbox")
+            if bbox is None:
+                still_remaining[field] = value
+                continue
+
+            # 1) snap: treat the LLM's box as "roughly here" and snap to the
+            # nearest OCR word window that actually matches the value — this
+            # corrects a wrong-column/wrong-row proposal instead of just
+            # accepting or rejecting it outright.
+            snapped_bbox, snap_tier = snap_to_words(
+                bbox, value, words, field_types.get(field, "string"), radius=SNAP_RADIUS)
+            if snapped_bbox:
+                resolved[field] = {"value": value, "bbox": snapped_bbox,
+                                   "match_quality": f"llm_{snap_tier}"}
+                continue
+
+            # 2) snap failed (nothing matching nearby) — fall back to a
+            # plain containment check on the LLM's raw proposal.
             quality = verify_llm_box(bbox, value, words)
             if quality == "verified":
                 resolved[field] = {"value": value, "bbox": bbox, "match_quality": "llm_verified"}
-            elif bbox is not None:
+            else:
                 # found something on this page but couldn't verify it — keep
                 # trying other pages in case the real occurrence is elsewhere,
                 # but remember this as a fallback if nothing better turns up.
                 still_remaining[field] = value
                 resolved.setdefault(f"__unverified__{field}", {
                     "value": value, "bbox": bbox, "match_quality": "llm_unverified"})
-            else:
-                still_remaining[field] = value
         remaining = still_remaining
 
     out = {}
