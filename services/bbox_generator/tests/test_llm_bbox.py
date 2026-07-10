@@ -199,7 +199,7 @@ class TestAlignExtractionLlm:
         monkeypatch.setattr(mod, "_load_words", lambda path: words)
         monkeypatch.setattr(mod, "render_pages", lambda path: page_images or [b"page1png"])
 
-    def test_single_record_verified_on_first_page(self, monkeypatch):
+    def test_single_record_snapped_on_first_page(self, monkeypatch):
         words = [_word("Acme", x0=0.0, x1=0.2)]
         self._patch_common(monkeypatch, words)
         client = FakeGenaiClient([
@@ -209,8 +209,33 @@ class TestAlignExtractionLlm:
         result = align_extraction_llm(
             {"business_name": "Acme"}, {"business_name": "string"}, template, "doc.pdf", client=client
         )
-        assert result["business_name"]["match_quality"] == "llm_verified"
-        assert result["business_name"]["bbox"]["page"] == 1
+        assert result["business_name"]["match_quality"] == "llm_snapped:exact"
+        # snapped box has OCR-exact edges, not the LLM's coarse proposal
+        bbox = result["business_name"]["bbox"]
+        assert (bbox["page"], bbox["x0"], bbox["y0"], bbox["x1"], bbox["y1"]) == (1, 0.0, 0.0, 0.2, 0.05)
+
+    def test_wrong_column_proposal_snaps_to_correct_occurrence(self, monkeypatch):
+        # the bug this fixes: the LLM's box lands in the wrong table column
+        # (e.g. a prior-year figure), but the correct occurrence for THIS
+        # row is nearby -- snap should correct to it rather than trusting
+        # the LLM's position.
+        words = [
+            _word("4,820,500", x0=0.5, y0=0.10, x1=0.6, y1=0.13),  # correct column
+            _word("3,960,200", x0=0.3, y0=0.10, x1=0.4, y1=0.13),  # wrong (prior year) column
+        ]
+        self._patch_common(monkeypatch, words)
+        # LLM proposes a box near the WRONG column (x~0.3) instead of the
+        # correct one (x~0.5) -- but still close enough (within radius 0.18)
+        # to the correct word for snap to find and correct it.
+        client = FakeGenaiClient([
+            json.dumps([{"field": "revenue", "found": True, "box_2d": [100, 380, 130, 460]}]),
+        ])
+        template = {"key": "t", "fields": {}}
+        result = align_extraction_llm(
+            {"revenue": 4820500.0}, {"revenue": "float"}, template, "doc.pdf", client=client
+        )
+        assert result["revenue"]["match_quality"] == "llm_snapped:exact_number"
+        assert result["revenue"]["bbox"]["x0"] == 0.5  # snapped to the CORRECT column, not the proposal's
 
     def test_not_found_flag_skips_verification(self, monkeypatch):
         words = [_word("Acme", x0=0.0, x1=0.2)]
@@ -260,8 +285,8 @@ class TestAlignExtractionLlm:
         records = [{"month": "January"}, {"month": "February"}]
         result = align_extraction_llm(records, {"month": "string"}, template, "doc.pdf", client=client)
         assert isinstance(result, list) and len(result) == 2
-        assert result[0]["month"]["match_quality"] == "llm_verified"
-        assert result[1]["month"]["match_quality"] == "llm_verified"
+        assert result[0]["month"]["match_quality"] == "llm_snapped:exact"
+        assert result[1]["month"]["match_quality"] == "llm_snapped:exact"
 
     def test_underscore_prefixed_keys_excluded(self, monkeypatch):
         words = [_word("Acme", x0=0.0, x1=0.2)]
@@ -273,4 +298,4 @@ class TestAlignExtractionLlm:
         record = {"_locations": {}, "business_name": "Acme"}
         result = align_extraction_llm(record, {"business_name": "string"}, template, "doc.pdf", client=client)
         assert "_locations" not in result
-        assert result["business_name"]["match_quality"] == "llm_verified"
+        assert result["business_name"]["match_quality"] == "llm_snapped:exact"

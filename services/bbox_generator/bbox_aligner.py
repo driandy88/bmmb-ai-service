@@ -19,7 +19,16 @@ v3 generalizations (the "works for all form types" pass):
      that row band. Fixes repeated values across table rows/pages.
   4. HINTS ARE SOFT — _locations comes from the LLM, so it only adds score
      weight; it can never force a match the geometry doesn't support.
+
+Also exposes snap_to_words(): "LLM points, OCR measures" — given a coarse
+box proposed by an LLM vision call (llm_bbox.py), snap it to the nearest
+find_value_candidates() window that actually matches the value. A
+successful snap is self-verifying (it only ever lands on a window
+containing the value) and has OCR-exact edges, which is a materially
+better reconciliation than asking the LLM to reason about which table
+column/row a value belongs to.
 """
+import math
 import re
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -246,6 +255,29 @@ def find_value_bbox(value, words, data_type="string", ocr_tolerance=0.82):
         return None, "null_value"
     cands = find_value_candidates(value, words, data_type, ocr_tolerance)
     return _pick(cands, None, words, None)
+
+
+def snap_to_words(proposal: dict, value, words, data_type="string",
+                  radius: float = 0.18):
+    """LLM points -> OCR measures. Given a coarse LLM proposal (a box), snap
+    to the matching-value word window nearest its center, within `radius`
+    (normalized page units). The returned box has OCR-exact edges, and
+    snapping only ever lands on a window that actually contains the value —
+    so a successful snap is self-verifying. Returns (bbox, "snapped:<tier>")
+    or (None, "snap_failed")."""
+    cx = (proposal["x0"] + proposal["x1"]) / 2
+    cy = (proposal["y0"] + proposal["y1"]) / 2
+    cands = [c for c in find_value_candidates(value, words, data_type)
+             if c["bbox"]["page"] == proposal["page"]]
+    best, best_d = None, radius
+    for c in cands:
+        b = c["bbox"]
+        d = math.hypot((b["x0"] + b["x1"]) / 2 - cx, (b["y0"] + b["y1"]) / 2 - cy)
+        if d < best_d:
+            best, best_d = c, d
+    if best:
+        return best["bbox"], f"snapped:{best['tier']}"
+    return None, "snap_failed"
 
 def align_fields(extracted: dict, field_types: dict, doc_path: str) -> dict:
     """Back-compat: single record, no hints/anchoring."""
