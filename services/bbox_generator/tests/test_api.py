@@ -1,5 +1,5 @@
 """
-Tests for the bbox-generator FastAPI router. align_fields/align_extraction_llm
+Tests for the bbox-generator FastAPI router. align_extraction/align_extraction_llm
 are unit tested in test_bbox_aligner.py/test_llm_bbox.py; here we only verify
 the HTTP layer (request parsing, method dispatch, error handling, response
 passthrough) by monkeypatching both.
@@ -25,12 +25,12 @@ def test_health(client):
 
 
 def test_align_success(client, monkeypatch):
-    def fake_align_fields(extracted, field_types, doc_path):
+    def fake_align_extraction(extracted, field_types, doc_path):
         return {k: {"value": v, "bbox": {"page": 1, "x0": 0, "y0": 0, "x1": 1, "y1": 1},
                     "match_quality": "exact"} for k, v in extracted.items()}
 
     import services.bbox_generator.api as mod
-    monkeypatch.setattr(mod, "align_fields", fake_align_fields)
+    monkeypatch.setattr(mod, "align_extraction", fake_align_extraction)
 
     resp = client.post(
         "/align",
@@ -56,11 +56,11 @@ def test_align_invalid_json(client):
 
 
 def test_align_alignment_failure_returns_422(client, monkeypatch):
-    def fake_align_fields(extracted, field_types, doc_path):
+    def fake_align_extraction(extracted, field_types, doc_path):
         raise ValueError("boom")
 
     import services.bbox_generator.api as mod
-    monkeypatch.setattr(mod, "align_fields", fake_align_fields)
+    monkeypatch.setattr(mod, "align_extraction", fake_align_extraction)
 
     resp = client.post(
         "/align",
@@ -73,12 +73,12 @@ def test_align_alignment_failure_returns_422(client, monkeypatch):
 def test_align_defaults_to_ocr_method(client, monkeypatch):
     calls = {}
 
-    def fake_align_fields(extracted, field_types, doc_path):
+    def fake_align_extraction(extracted, field_types, doc_path):
         calls["called"] = True
         return {}
 
     import services.bbox_generator.api as mod
-    monkeypatch.setattr(mod, "align_fields", fake_align_fields)
+    monkeypatch.setattr(mod, "align_extraction", fake_align_extraction)
 
     resp = client.post(
         "/align",
@@ -87,6 +87,34 @@ def test_align_defaults_to_ocr_method(client, monkeypatch):
     )
     assert resp.status_code == 200
     assert calls.get("called") is True
+
+
+def test_align_ocr_passes_through_locations_hints(client, monkeypatch):
+    # the fix: the OCR path must use align_extraction() (hint/row-anchor
+    # aware), not align_fields() (no hints at all) -- assert the `_locations`
+    # key inside `extracted` actually reaches it untouched.
+    seen = {}
+
+    def fake_align_extraction(extracted, field_types, doc_path):
+        seen["extracted"] = extracted
+        return {}
+
+    import services.bbox_generator.api as mod
+    monkeypatch.setattr(mod, "align_extraction", fake_align_extraction)
+
+    resp = client.post(
+        "/align",
+        files={"file": ("doc.pdf", b"fake", "application/pdf")},
+        data={
+            "extracted": json.dumps({
+                "month": "July 2023",
+                "_locations": {"month": {"page": 2, "section": "MONTHLY SUMMARY"}},
+            }),
+            "field_types": json.dumps({"month": "string"}),
+        },
+    )
+    assert resp.status_code == 200
+    assert seen["extracted"]["_locations"] == {"month": {"page": 2, "section": "MONTHLY SUMMARY"}}
 
 
 def test_align_unknown_method_returns_400(client):
