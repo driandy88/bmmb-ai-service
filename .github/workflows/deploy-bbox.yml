@@ -33,8 +33,10 @@ jobs:
         working-directory: ${{ env.WORKDIR }}
         run: pip install -r requirements.txt -r requirements-dev.txt
 
-      # No GCP credentials needed here: this service never calls Gemini/Vertex
-      # AI or BigQuery -- it's pure PDF text-layer / OCR geometry matching.
+      # No GCP credentials needed here: the llm_bbox tests monkeypatch
+      # genai.Client (see tests/test_llm_bbox.py), same convention as
+      # services/validation/tests/test_api.py. The OCR path (bbox_aligner.py)
+      # never touches Gemini/Vertex AI or BigQuery at all.
       - name: Run tests
         working-directory: ${{ env.WORKDIR }}
         run: pytest tests/ -v
@@ -81,7 +83,13 @@ jobs:
             --region=${{ env.REGION }} \
             --platform=managed \
             --allow-unauthenticated \
-            --service-account=bbox-generator-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
+            --service-account=bbox-generator-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+            --set-env-vars=GCP_PROJECT_ID=${{ env.PROJECT_ID }},VERTEX_LOCATION=${{ env.REGION }}
+          # GCP_PROJECT_ID/VERTEX_LOCATION are only used by the method=llm
+          # path (llm_bbox.py) -- the default method=ocr path (bbox_aligner.py)
+          # ignores them entirely. bbox-generator-sa needs roles/aiplatform.user
+          # granted for the llm path to actually work (one-time IAM setup,
+          # same as validation-service-sa).
 
       - name: Show deployed URL
         run: gcloud run services describe ${{ env.SERVICE_NAME }} --region=${{ env.REGION }} --format="value(status.url)"
