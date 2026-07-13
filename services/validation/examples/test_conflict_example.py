@@ -1,10 +1,10 @@
 """
 Demonstrates the blind spot the agentic path exists to cover.
 
-services/validation/adapter.py's _adapt_consent_form has a deliberate bug:
+examples/buggy_adapter_demo.py's _adapt_consent_form has a deliberate bug:
 it maps a consent form's "Authorized Names" raw field into entity_name
-instead of individual_name/nric_passport (see adapter.py's module
-docstring for the full story). test2_conflict.json is the canonical bundle
+instead of individual_name/nric_passport (see buggy_adapter_demo.py's
+module docstring for the full story). test2_conflict.json is the canonical bundle
 that bug produces — run `./venv/bin/python -m examples.generate_conflict_demo`
 to regenerate it from raw_extraction_example.json if either changes.
 

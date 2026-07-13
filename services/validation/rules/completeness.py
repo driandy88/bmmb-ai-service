@@ -87,12 +87,15 @@ def verify_financial_sections_present(financial_statement_data: List[Dict[str, o
     """Check the Balance Sheet / P&L / Cash Flow / Auditor's Report flags on financial statements.
 
     Use this for every financial_statement document in the bundle to confirm
-    the extraction agent found all 4 required sections in each one.
+    the extraction agent found all 4 required sections in each one. Each
+    flag is a tri-state: True (confirmed present), False (confirmed
+    absent -- a real gap), or null (extraction couldn't determine it --
+    "needs review", not the same as a confirmed absence).
 
     Args:
         financial_statement_data: One entry per financial_statement
             document, with its entity_name, financial_year_end, and the 4
-            boolean section-present flags.
+            tri-state section-present flags.
     """
     section_flags = {
         "balance_sheet_present": "Balance Sheet",
@@ -101,32 +104,36 @@ def verify_financial_sections_present(financial_statement_data: List[Dict[str, o
         "auditors_report_present": "Auditor's Report",
     }
 
-    incomplete_documents = []
+    incomplete_documents = []  # has at least one confirmed-absent (False) section
+    needs_review_documents = []  # no confirmed-absent sections, but at least one unconfirmed (null)
     for doc in financial_statement_data:
-        missing_sections = [
-            label for flag, label in section_flags.items() if not doc.get(flag, False)
-        ]
+        missing_sections = [label for flag, label in section_flags.items() if doc.get(flag) is False]
+        unconfirmed_sections = [label for flag, label in section_flags.items() if doc.get(flag) is None]
+        entry = {
+            "entity_name": doc.get("entity_name"),
+            "financial_year_end": doc.get("financial_year_end"),
+        }
         if missing_sections:
-            incomplete_documents.append(
-                {
-                    "entity_name": doc.get("entity_name"),
-                    "financial_year_end": doc.get("financial_year_end"),
-                    "missing_sections": missing_sections,
-                }
-            )
+            incomplete_documents.append({**entry, "missing_sections": missing_sections})
+        elif unconfirmed_sections:
+            needs_review_documents.append({**entry, "unconfirmed_sections": unconfirmed_sections})
 
-    passed = len(incomplete_documents) == 0
+    passed = False if incomplete_documents else (None if needs_review_documents else True)
+
+    if incomplete_documents:
+        message = f"{len(incomplete_documents)} financial statement(s) are missing required sections."
+    elif needs_review_documents:
+        message = f"{len(needs_review_documents)} financial statement(s) have unconfirmed sections -- needs review."
+    else:
+        message = "All financial statements include the required sections."
 
     return {
         "passed": passed,
-        "message": (
-            "All financial statements include the required sections."
-            if passed
-            else f"{len(incomplete_documents)} financial statement(s) are missing required sections."
-        ),
+        "message": message,
         "details": {
             "documents_checked": len(financial_statement_data),
             "incomplete_documents": incomplete_documents,
+            "needs_review_documents": needs_review_documents,
         },
     }
 
@@ -173,43 +180,115 @@ def check_ic_front_and_back(ic_documents: List[Dict[str, object]]) -> Dict:
     """Verify that front_image_present and back_image_present are both true for every IC.
 
     Use this for every identity_document in the bundle to catch partial
-    uploads (e.g. front of NRIC submitted but not the back).
+    uploads (e.g. front of NRIC submitted but not the back). Each side is a
+    tri-state: True (confirmed present), False (confirmed missing -- a real
+    gap), or null (extraction couldn't tell -- "needs review", not the same
+    as a confirmed miss).
 
     Args:
         ic_documents: The identity_document documents in the bundle, each
             with individual_name, nric_passport, front_image_present, and
             back_image_present.
     """
-    incomplete = []
+    incomplete = []  # at least one side confirmed False
+    needs_review = []  # no confirmed-False side, but at least one null side
     for doc in ic_documents:
-        front = doc.get("front_image_present", False)
-        back = doc.get("back_image_present", False)
-        if not (front and back):
-            missing_sides = []
-            if not front:
-                missing_sides.append("front")
-            if not back:
-                missing_sides.append("back")
-            incomplete.append(
-                {
-                    "individual_name": doc.get("individual_name"),
-                    "nric_passport": doc.get("nric_passport"),
-                    "missing_sides": missing_sides,
-                }
-            )
+        front = doc.get("front_image_present")
+        back = doc.get("back_image_present")
+        missing_sides = [side for side, val in (("front", front), ("back", back)) if val is False]
+        unconfirmed_sides = [side for side, val in (("front", front), ("back", back)) if val is None]
+        entry = {"individual_name": doc.get("individual_name"), "nric_passport": doc.get("nric_passport")}
+        if missing_sides:
+            incomplete.append({**entry, "missing_sides": missing_sides})
+        elif unconfirmed_sides:
+            needs_review.append({**entry, "unconfirmed_sides": unconfirmed_sides})
 
-    passed = len(incomplete) == 0
+    passed = False if incomplete else (None if needs_review else True)
+
+    if incomplete:
+        message = f"{len(incomplete)} IC document(s) are missing front and/or back images."
+    elif needs_review:
+        message = f"{len(needs_review)} IC document(s) have unconfirmed front/back images -- needs review."
+    else:
+        message = "All IC documents have both front and back images present."
+
+    return {
+        "passed": passed,
+        "message": message,
+        "details": {
+            "ic_documents_count": len(ic_documents),
+            "incomplete_documents": incomplete,
+            "needs_review_documents": needs_review,
+        },
+    }
+
+
+def verify_consent_form_count(director_count: int, consent_form_count: int) -> Dict:
+    """Check that the total number of Consent Forms equals the number of directors plus one.
+
+    BMMB requires one signed Consent Form per director/owner/partner, plus
+    one additional form for the entity itself. Use this once you know how
+    many unique directors are listed across the SSM corporate form(s) and
+    how many consent_form documents are in the bundle.
+
+    Args:
+        director_count: The number of unique directors listed on the SSM
+            corporate form(s) (deduplicated by NRIC/passport).
+        consent_form_count: The number of consent_form documents present in
+            the bundle.
+    """
+    required = director_count + 1
+    passed = consent_form_count >= required
 
     return {
         "passed": passed,
         "message": (
-            "All IC documents have both front and back images present."
+            f"{consent_form_count} Consent Form(s) provided, meeting the required {required}."
             if passed
-            else f"{len(incomplete)} IC document(s) are missing front and/or back images."
+            else f"Only {consent_form_count} Consent Form(s) provided; {required} required "
+                 f"({director_count} director(s) + 1)."
         ),
         "details": {
-            "ic_documents_count": len(ic_documents),
-            "incomplete_documents": incomplete,
+            "director_count": director_count,
+            "consent_form_count": consent_form_count,
+            "required_count": required,
+        },
+    }
+
+
+def verify_application_details_completeness(customer_information: Dict[str, object]) -> Dict:
+    """Check that the mandatory Application Details fields are all present.
+
+    Use this once the customer_information document has been extracted, to
+    confirm the mandatory main-contact fields were actually filled in rather
+    than left blank.
+
+    Args:
+        customer_information: The customer_information document's data:
+            main_contact_names, main_contact_emails, main_contact_phone_numbers.
+    """
+    field_labels = {
+        "main_contact_names": "Main Contact Name(s)",
+        "main_contact_emails": "Main Contact Email(s)",
+        "main_contact_phone_numbers": "Main Contact Phone Number(s)",
+    }
+
+    missing_fields = [
+        label
+        for field, label in field_labels.items()
+        if not customer_information.get(field)
+    ]
+    passed = len(missing_fields) == 0
+
+    return {
+        "passed": passed,
+        "message": (
+            "All mandatory Application Details fields are completed."
+            if passed
+            else f"Missing mandatory field(s): {', '.join(missing_fields)}."
+        ),
+        "details": {
+            "missing_fields": missing_fields,
         },
     }
 
@@ -219,7 +298,10 @@ def verify_consent_signatures(ssm_people: List[Dict[str, object]], consent_forms
 
     Use this to confirm every director/shareholder listed on the SSM forms
     has a matching consent_form document, and that its signature_present
-    flag is true, matched by NRIC/passport number.
+    flag is true, matched by NRIC/passport number. signature_present is a
+    tri-state: True (confirmed signed), False (confirmed unsigned -- a real
+    gap), or null (not confirmed either way -- "needs review", not the same
+    as a confirmed-unsigned form).
 
     Args:
         ssm_people: Directors/shareholders from the SSM corporate form(s),
@@ -229,32 +311,43 @@ def verify_consent_signatures(ssm_people: List[Dict[str, object]], consent_forms
     """
     consent_by_id = {normalize_id(form["nric_passport"]): form for form in consent_forms}
 
-    missing_consent = []
-    unsigned_consent = []
+    missing_consent = []  # no consent_form found at all -- a real gap
+    unsigned_consent = []  # consent_form found, signature_present is confirmed False -- a real gap
+    unconfirmed_consent = []  # consent_form found, signature_present is null -- needs review
     for person in ssm_people:
         person_id = normalize_id(person["nric_passport"])
         form = consent_by_id.get(person_id)
+        entry = {"name": person["name"], "nric_passport": person["nric_passport"]}
         if form is None:
-            missing_consent.append({"name": person["name"], "nric_passport": person["nric_passport"]})
-        elif not form.get("signature_present", False):
-            unsigned_consent.append({"name": person["name"], "nric_passport": person["nric_passport"]})
+            missing_consent.append(entry)
+        elif form.get("signature_present") is False:
+            unsigned_consent.append(entry)
+        elif form.get("signature_present") is None:
+            unconfirmed_consent.append(entry)
 
-    passed = len(missing_consent) == 0 and len(unsigned_consent) == 0
+    passed = (
+        False if (missing_consent or unsigned_consent)
+        else (None if unconfirmed_consent else True)
+    )
+
+    if missing_consent or unsigned_consent:
+        message = (
+            f"{len(missing_consent)} missing Consent Form(s), "
+            f"{len(unsigned_consent)} confirmed-unsigned Consent Form(s)."
+        )
+    elif unconfirmed_consent:
+        message = f"{len(unconfirmed_consent)} Consent Form(s) have an unconfirmed signature -- needs review."
+    else:
+        message = "All required parties have a signed Consent Form."
 
     return {
         "passed": passed,
-        "message": (
-            "All required parties have a signed Consent Form."
-            if passed
-            else (
-                f"{len(missing_consent)} missing Consent Form(s), "
-                f"{len(unsigned_consent)} unsigned Consent Form(s)."
-            )
-        ),
+        "message": message,
         "details": {
             "ssm_people_count": len(ssm_people),
             "consent_forms_count": len(consent_forms),
             "missing_consent": missing_consent,
             "unsigned_consent": unsigned_consent,
+            "unconfirmed_consent": unconfirmed_consent,
         },
     }

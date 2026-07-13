@@ -1,27 +1,30 @@
 """
-Adapter from raw (pre-canonical) extraction fields to the ValidationBundle schema.
+TEACHING FIXTURE, NOT THE REAL ADAPTER. This is a deliberately-bugged
+example adapter from a made-up raw-extraction shape ({"raw_documents": [...]}
+with "raw_fields" per item -- see examples/raw_extraction_example.json) to
+the ValidationBundle schema, kept ONLY to demonstrate a blind spot in the
+deterministic engine via examples/test_conflict_example.py: the engine can
+only see the canonical bundle, so an adapter mapping bug looks identical to
+a real compliance gap.
 
-This models the real-world step between an extraction agent's raw output
-(whatever field names/shapes it happens to produce) and the canonical
-bundle our rules/engine operate on. It contains ONE deliberate bug in
-_adapt_consent_form, used by examples/test_conflict_example.py to
-demonstrate a blind spot in the deterministic engine: it can only see the
-canonical bundle, so an adapter mapping bug looks identical to a real
-compliance gap.
+For the real extraction -> ValidationBundle adapter (mapping
+services.extraction's actual POST /extract output), see
+extraction_adapter.py instead -- different module,
+different input shape, no intentional bugs.
 
-The bug: raw consent-form extraction has two similarly-named fields,
-"Entity Name" (the actual entity) and "Authorized Names" (the signatories'
-names). _adapt_consent_form's `.get("Authorized Names", ...)` fallback
-order means it prefers "Authorized Names" whenever present, silently
-overwriting entity_name with the signatory names instead of the entity —
-and never maps "Authorized Names"/"Authorized NRICs" into
+The bug in this file: raw consent-form extraction has two similarly-named
+fields, "Entity Name" (the actual entity) and "Authorized Names" (the
+signatories' names). _adapt_consent_form's `.get("Authorized Names", ...)`
+fallback order means it prefers "Authorized Names" whenever present,
+silently overwriting entity_name with the signatory names instead of the
+entity — and never maps "Authorized Names"/"Authorized NRICs" into
 individual_name/nric_passport at all, leaving those blank.
 """
 
 from datetime import date
 from typing import Any, Dict, List
 
-from .bundle import (
+from services.validation.bundle import (
     BundleMetadata,
     ConsentFormData,
     ConsentFormDoc,

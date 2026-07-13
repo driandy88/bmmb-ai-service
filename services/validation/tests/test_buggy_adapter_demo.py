@@ -1,16 +1,18 @@
 """
-Tests for adapter.py: raw-extraction -> ValidationBundle mapping.
+Tests for examples/buggy_adapter_demo.py: raw-extraction -> ValidationBundle
+mapping. This is the deliberately-bugged teaching fixture, NOT the real
+extraction adapter (see extraction_adapter.py for that).
 
 _adapt_ssm_corporate_form is tested for correct mapping. _adapt_consent_form
-has a *known, deliberate* bug (see adapter.py's module docstring and
-examples/test_conflict_example.py) — the test below characterizes that
+has a *known, deliberate* bug (see buggy_adapter_demo.py's module docstring
+and examples/test_conflict_example.py) — the test below characterizes that
 existing behavior so a future fix is a deliberate, visible diff here rather
 than a silent regression either way.
 """
 
 import pytest
 
-from services.validation.adapter import adapt_raw_extraction
+from services.validation.examples.buggy_adapter_demo import adapt_raw_extraction
 
 
 class TestAdaptSsmCorporateForm:
@@ -34,7 +36,7 @@ class TestAdaptSsmCorporateForm:
 
 
 class TestAdaptConsentFormKnownBug:
-    """Characterizes adapter.py's documented _adapt_consent_form bug.
+    """Characterizes buggy_adapter_demo.py's documented _adapt_consent_form bug.
 
     Once this is fixed, this test should be rewritten to assert the correct
     mapping (entity_name stays the entity; individual_name/nric_passport are

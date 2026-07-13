@@ -18,6 +18,16 @@ Two ways to validate a bundle:
   only results back (no GCP project/credentials required in that case):
     report = run_agentic_validation(bundle, raw_extraction, enable_ai_review=False)
 
+- Starting from raw extraction results instead of an already-built bundle
+  (calls extraction_adapter.py internally, then the same
+  pipeline as above). Only the extraction results are required -- everything
+  else is auto-derived or defaulted, with a warning recorded for anything
+  that had to be guessed (see build_validation_bundle()'s docstring):
+    from services.validation import run_agentic_validation_from_extraction
+    report = run_agentic_validation_from_extraction(
+        {"SSM Form 24": {...}, ...},
+    )
+
 - As a FastAPI router, to mount into another service's app (see api.py):
     from services.validation.api import router
     app.include_router(router)
@@ -26,16 +36,17 @@ Two ways to validate a bundle:
   actually use the router.)
 
 Submodules:
-    bundle    — ValidationBundle schema (pydantic) for the canonical, already-extracted document bundle.
-    rules     — Individual BMMB rule functions (date logic, completeness, name/ID matching).
-    engine    — ValidationEngine: runs every applicable rule against a bundle.
-    adapter   — Example raw-extraction -> ValidationBundle mapping (see examples/ for the bug it demonstrates).
-    schemas   — AgenticValidationReport / AIFinding / AIReview output models.
-    agent     — run_agentic_validation(): engine runs in Python, one Gemini call reviews the result.
-    api       — FastAPI APIRouter exposing /health and /validate for host services to mount.
+    bundle              — The canonical ValidationBundle schema (pydantic).
+    rules               — Individual BMMB rule functions (date logic, completeness, name/ID matching).
+    engine              — ValidationEngine: runs every applicable rule against a bundle.
+    extraction_adapter  — Maps services.extraction's raw POST /extract output into a ValidationBundle.
+    schemas             — AgenticValidationReport / AIFinding / AIReview output models.
+    agent               — run_agentic_validation() / run_agentic_validation_from_extraction():
+                           engine runs in Python, one Gemini call reviews the result.
+    api                 — FastAPI APIRouter exposing /health, /validate, /validate/from-extraction.
 """
 
-from .agent import run_agentic_validation
+from .agent import run_agentic_validation, run_agentic_validation_from_extraction
 from .bundle import ValidationBundle
 from .engine import CheckResult, ValidationEngine, ValidationReport
 from .schemas import AgenticValidationReport, AIFinding
@@ -48,4 +59,5 @@ __all__ = [
     "AgenticValidationReport",
     "AIFinding",
     "run_agentic_validation",
+    "run_agentic_validation_from_extraction",
 ]

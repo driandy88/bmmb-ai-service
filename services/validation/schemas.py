@@ -5,6 +5,7 @@ from typing import List
 from pydantic import BaseModel
 
 from .engine import ValidationReport
+from .extraction_adapter import AdapterWarning
 
 
 class AIFinding(BaseModel):
@@ -35,6 +36,15 @@ class AIReview(BaseModel):
 
 
 class AgenticValidationReport(BaseModel):
+    # Only ever populated by run_agentic_validation_from_extraction() --
+    # empty for a bundle built by hand and passed to run_agentic_validation()
+    # directly, since there's no adapter step in that path. Each entry
+    # states a data anomaly (null value / array misalignment) the adapter
+    # hit while building the bundle, with current_state vs expected_state
+    # spelled out -- see extraction_adapter.py's module docstring. Listed
+    # first: these are inputs the deterministic/AI checks
+    # below were run against, not a result of them.
+    adapter_warnings: List[AdapterWarning] = []
     deterministic: ValidationReport
     ai_findings: List[AIFinding]
     narrative: str

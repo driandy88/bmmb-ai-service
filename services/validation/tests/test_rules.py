@@ -7,6 +7,8 @@ module docstrings). No pydantic bundle, no FastAPI, no network.
 from services.validation.rules import (
     calculate_financial_18_month_rule,
     check_bank_statement_continuity,
+    check_bank_statement_freshness,
+    check_bank_statement_overdraft,
     check_financial_consecutive_years,
     check_ic_front_and_back,
     entity_similarity,
@@ -18,7 +20,9 @@ from services.validation.rules import (
     strict_match_entity_names,
     strict_match_ic_numbers,
     validate_form_d_expiry,
+    verify_application_details_completeness,
     verify_bank_statement_duration,
+    verify_consent_form_count,
     verify_consent_signatures,
     verify_financial_sections_present,
     verify_ssm_completeness,
@@ -62,6 +66,28 @@ class TestVerifyFinancialSectionsPresent:
         assert result["passed"] is False
         assert result["details"]["incomplete_documents"][0]["missing_sections"] == ["Profit & Loss"]
 
+    def test_unconfirmed_section_is_needs_review_not_failed(self):
+        # null ("couldn't determine") must NOT be treated the same as False
+        # ("confirmed absent") -- this is the tri-state fix.
+        result = verify_financial_sections_present(
+            [{"entity_name": "X", "financial_year_end": "2025-12-31",
+              "balance_sheet_present": True, "profit_and_loss_present": None,
+              "cash_flow_present": True, "auditors_report_present": True}]
+        )
+        assert result["passed"] is None  # needs review, not a failure
+        assert result["details"]["incomplete_documents"] == []
+        assert result["details"]["needs_review_documents"][0]["unconfirmed_sections"] == ["Profit & Loss"]
+
+    def test_confirmed_missing_outranks_unconfirmed(self):
+        # A real confirmed-False failure must still fail the check even if
+        # another section on the same document is merely unconfirmed.
+        result = verify_financial_sections_present(
+            [{"entity_name": "X", "financial_year_end": "2025-12-31",
+              "balance_sheet_present": False, "profit_and_loss_present": None,
+              "cash_flow_present": True, "auditors_report_present": True}]
+        )
+        assert result["passed"] is False
+
 
 class TestFindMissingIcDocuments:
     def test_everyone_has_ic(self):
@@ -95,6 +121,20 @@ class TestCheckIcFrontAndBack:
         assert result["passed"] is False
         assert result["details"]["incomplete_documents"][0]["missing_sides"] == ["back"]
 
+    def test_unconfirmed_side_is_needs_review_not_failed(self):
+        result = check_ic_front_and_back(
+            [{"individual_name": "A", "nric_passport": "1", "front_image_present": True, "back_image_present": None}]
+        )
+        assert result["passed"] is None
+        assert result["details"]["incomplete_documents"] == []
+        assert result["details"]["needs_review_documents"][0]["unconfirmed_sides"] == ["back"]
+
+    def test_confirmed_missing_outranks_unconfirmed(self):
+        result = check_ic_front_and_back(
+            [{"individual_name": "A", "nric_passport": "1", "front_image_present": False, "back_image_present": None}]
+        )
+        assert result["passed"] is False
+
 
 class TestVerifyConsentSignatures:
     def test_signed_consent_for_everyone(self):
@@ -116,6 +156,22 @@ class TestVerifyConsentSignatures:
         result = verify_consent_signatures(ssm_people, consent_forms)
         assert result["passed"] is False
         assert len(result["details"]["unsigned_consent"]) == 1
+
+    def test_unconfirmed_signature_is_needs_review_not_failed(self):
+        # null ("not confirmed either way") must NOT be treated the same as
+        # False ("confirmed unsigned") -- this is the tri-state fix.
+        ssm_people = [{"name": "A", "nric_passport": "1"}]
+        consent_forms = [{"nric_passport": "1", "signature_present": None}]
+        result = verify_consent_signatures(ssm_people, consent_forms)
+        assert result["passed"] is None
+        assert result["details"]["unsigned_consent"] == []
+        assert len(result["details"]["unconfirmed_consent"]) == 1
+
+    def test_missing_form_outranks_unconfirmed(self):
+        ssm_people = [{"name": "A", "nric_passport": "1"}, {"name": "B", "nric_passport": "2"}]
+        consent_forms = [{"nric_passport": "1", "signature_present": None}]  # B has no form at all
+        result = verify_consent_signatures(ssm_people, consent_forms)
+        assert result["passed"] is False
 
 
 class TestCalculateFinancial18MonthRule:
@@ -269,3 +325,82 @@ class TestEntityAndPersonMatching:
 
     def test_person_similarity_is_1_for_aliased_names(self):
         assert person_similarity("MOHD AIMAN", "MUHAMMAD AIMAN") == 1.0
+
+
+class TestCheckBankStatementFreshness:
+    def test_recent_statement_passes(self):
+        result = check_bank_statement_freshness("2026-06-30", "2026-07-07")
+        assert result["passed"] is True
+
+    def test_statement_within_two_months_passes(self):
+        result = check_bank_statement_freshness("2026-05-10", "2026-07-09")
+        assert result["passed"] is True
+
+    def test_statement_older_than_two_months_fails(self):
+        result = check_bank_statement_freshness("2026-01-01", "2026-07-07")
+        assert result["passed"] is False
+
+
+class TestCheckBankStatementOverdraft:
+    def test_all_positive_balances_pass(self):
+        result = check_bank_statement_overdraft([
+            {"month": "January 2026", "end_balance": 1000.0},
+            {"month": "February 2026", "end_balance": 500.5},
+        ])
+        assert result["passed"] is True
+
+    def test_negative_balance_is_flagged(self):
+        result = check_bank_statement_overdraft([
+            {"month": "January 2026", "end_balance": 1000.0},
+            {"month": "February 2026", "end_balance": -250.0},
+        ])
+        assert result["passed"] is False
+        assert result["details"]["overdrawn_months"] == [{"month": "February 2026", "end_balance": -250.0}]
+
+    def test_empty_list_passes_trivially(self):
+        result = check_bank_statement_overdraft([])
+        assert result["passed"] is True
+
+
+class TestVerifyConsentFormCount:
+    def test_exact_required_count_passes(self):
+        result = verify_consent_form_count(director_count=2, consent_form_count=3)
+        assert result["passed"] is True
+
+    def test_more_than_required_still_passes(self):
+        result = verify_consent_form_count(director_count=2, consent_form_count=4)
+        assert result["passed"] is True
+
+    def test_below_required_count_fails(self):
+        result = verify_consent_form_count(director_count=2, consent_form_count=2)
+        assert result["passed"] is False
+        assert result["details"]["required_count"] == 3
+
+    def test_zero_directors_still_requires_one(self):
+        result = verify_consent_form_count(director_count=0, consent_form_count=0)
+        assert result["passed"] is False
+        assert result["details"]["required_count"] == 1
+
+
+class TestVerifyApplicationDetailsCompleteness:
+    def test_all_fields_present_passes(self):
+        result = verify_application_details_completeness({
+            "main_contact_names": ["MOHD AIMAN"],
+            "main_contact_emails": ["aiman@example.com"],
+            "main_contact_phone_numbers": ["+60123456789"],
+        })
+        assert result["passed"] is True
+
+    def test_missing_field_fails(self):
+        result = verify_application_details_completeness({
+            "main_contact_names": ["MOHD AIMAN"],
+            "main_contact_emails": [],
+            "main_contact_phone_numbers": ["+60123456789"],
+        })
+        assert result["passed"] is False
+        assert "Main Contact Email(s)" in result["details"]["missing_fields"]
+
+    def test_all_fields_missing_fails(self):
+        result = verify_application_details_completeness({})
+        assert result["passed"] is False
+        assert len(result["details"]["missing_fields"]) == 3

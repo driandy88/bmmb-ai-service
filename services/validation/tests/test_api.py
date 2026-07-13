@@ -128,12 +128,13 @@ class TestValidateAgenticPath:
 
 
 class TestConflictExampleEndToEnd:
-    """The scenario adapter.py/examples/test_conflict_example.py document:
-    deterministic engine alone sees a real-looking consent-form failure that
-    the raw extraction shows is actually an adapter mapping artifact."""
+    """The scenario buggy_adapter_demo.py/examples/test_conflict_example.py
+    document: deterministic engine alone sees a real-looking consent-form
+    failure that the raw extraction shows is actually an adapter mapping
+    artifact."""
 
     def test_adapter_bug_produces_a_deterministic_failure(self, raw_extraction_conflict):
-        from services.validation.adapter import adapt_raw_extraction
+        from services.validation.examples.buggy_adapter_demo import adapt_raw_extraction
 
         bundle = adapt_raw_extraction(raw_extraction_conflict)
         r = client.post(
@@ -146,3 +147,58 @@ class TestConflictExampleEndToEnd:
             res for res in body["deterministic"]["results"] if res["check"] == "verify_consent_signatures"
         )
         assert consent_check["passed"] is False
+
+
+class TestValidateFromExtraction:
+    """POST /validate/from-extraction -- body is a bare extraction results
+    dump (no wrapper), everything else is an optional query param."""
+
+    def _extraction_results(self):
+        import json
+        from pathlib import Path
+
+        path = (
+            Path(__file__).resolve().parents[1]
+            / "examples" / "extraction_results_example.json"
+        )
+        raw = json.loads(path.read_text())
+        raw.pop("_comment", None)
+        return raw
+
+    def test_bare_extraction_dump_as_body_succeeds(self):
+        r = client.post(
+            "/validate/from-extraction",
+            params={"enable_ai_review": False},
+            json=self._extraction_results(),
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["deterministic"]["entity_name"] == "ALPHA TECH SOLUTIONS SDN BHD"
+
+    def test_no_field_ever_causes_a_400(self):
+        # Nothing supplied beyond the bare dump -- tenure_months etc. are
+        # all missing, but this must still succeed with warnings, not fail.
+        r = client.post(
+            "/validate/from-extraction",
+            params={"enable_ai_review": False},
+            json=self._extraction_results(),
+        )
+        assert r.status_code == 200
+        assert len(r.json()["adapter_warnings"]) > 0
+
+    def test_query_param_overrides_are_applied(self):
+        r = client.post(
+            "/validate/from-extraction",
+            params={
+                "enable_ai_review": False,
+                "tenure_months": 24,
+                "repayment_frequency": "Quarterly",
+                "signature_present": True,
+            },
+            json=self._extraction_results(),
+        )
+        assert r.status_code == 200
+        fields = {w["field"] for w in r.json()["adapter_warnings"]}
+        assert "tenure_months" not in fields
+        assert "repayment_frequency" not in fields
+        assert "signature_present" not in fields

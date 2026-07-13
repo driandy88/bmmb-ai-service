@@ -1,7 +1,7 @@
 {
   "bundle_id": "BUNDLE-2026-99999",
   "metadata": {
-    "total_documents_received": 12,
+    "total_documents_received": 13,
     "system_date": "2026-07-07",
     "document_types_present": [
       "customer_information",
@@ -108,7 +108,12 @@
       "data": {
         "entity_name": "ALPHA TECH SOLUTIONS SDN BHD",
         "statement_start_date": "2026-01-01",
-        "statement_end_date": "2026-03-31"
+        "statement_end_date": "2026-03-31",
+        "monthly_balances": [
+          {"month": "January 2026", "end_balance": 42500.00},
+          {"month": "February 2026", "end_balance": 38900.50},
+          {"month": "March 2026", "end_balance": 51200.75}
+        ]
       }
     },
     {
@@ -117,7 +122,12 @@
       "data": {
         "entity_name": "ALPHA TECH SOLUTIONS SDN BHD",
         "statement_start_date": "2026-04-01",
-        "statement_end_date": "2026-06-30"
+        "statement_end_date": "2026-06-30",
+        "monthly_balances": [
+          {"month": "April 2026", "end_balance": 47300.00},
+          {"month": "May 2026", "end_balance": 55600.25},
+          {"month": "June 2026", "end_balance": 60100.00}
+        ]
       }
     },
     {
@@ -159,6 +169,17 @@
         "individual_name": "NURUL AIN BINTI ZULKIFLI",
         "nric_passport": "900101-10-1234",
         "position": "DIRECTOR",
+        "signature_present": true
+      }
+    },
+    {
+      "document_id": "doc_006c",
+      "document_type": "consent_form",
+      "data": {
+        "entity_name": "ALPHA TECH SOLUTIONS SDN BHD",
+        "individual_name": "MOHD AIMAN BIN ZULKIFLI",
+        "nric_passport": "880214-14-5123",
+        "position": "COMPANY REPRESENTATIVE",
         "signature_present": true
       }
     }
