@@ -1,9 +1,9 @@
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
-from app.config import TemplateNotFoundError, get_template, list_templates
+from app.config import TemplateNotFoundError, get_template
 from app.gemini_client import GeminiCallError, GeminiConfigError, GeminiParseError, run_extraction
 from app.schema_builder import build_gemini_schema, generate_extraction_prompt
-from app.schemas import ApiResponse, TemplateOut
+from app.schemas import ApiResponse
 
 router = APIRouter(tags=["Extraction"])
 
@@ -22,19 +22,6 @@ MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 @router.get("/health")
 def health():
     return {"status": "ok"}
-
-
-@router.get("/templates", response_model=list[TemplateOut])
-def get_templates():
-    return list_templates()
-
-
-@router.get("/templates/{template_id}", response_model=TemplateOut)
-def get_template_detail(template_id: int):
-    try:
-        return get_template(template_id)
-    except TemplateNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router.post("/extract", status_code=status.HTTP_200_OK)

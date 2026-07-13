@@ -51,6 +51,7 @@ jobs:
           INSTANCE_CONNECTION_NAME: ${{ secrets.INSTANCE_CONNECTION_NAME }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASS: ${{ secrets.DB_PASS }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
         run: pytest tests/ -v
 
   # Only runs after tests pass, and only on pushes to main (not on PRs)
@@ -96,7 +97,7 @@ jobs:
             --allow-unauthenticated \
             --service-account=extraction-service-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
             --set-env-vars=ALLOWED_ORIGINS=${{ secrets.ALLOWED_ORIGINS }},GCP_PROJECT_ID=${{ env.PROJECT_ID }},APP_ENV=prod,INSTANCE_CONNECTION_NAME=${{ secrets.INSTANCE_CONNECTION_NAME }},DB_USER=${{ secrets.DB_USER }} \
-            --set-secrets=DB_PASS=${{ secrets.DB_PASS_SECRET_NAME }}:latest
+            --set-secrets=DB_PASS=${{ secrets.DB_PASS_SECRET_NAME }}:latest,ADMIN_API_KEY=${{ secrets.ADMIN_API_KEY_SECRET_NAME }}:latest
 
       - name: Show deployed URL
         run: gcloud run services describe ${{ env.SERVICE_NAME }} --region=${{ env.REGION }} --format="value(status.url)"

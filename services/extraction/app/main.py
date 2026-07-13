@@ -6,12 +6,14 @@ load_dotenv()
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.attributes import router as attributes_router
 from app.extraction import router as extraction_router
+from app.templates import router as templates_router
 
 app = FastAPI(
     title="Document Extraction Service",
-    description="Standalone Gemini-powered document extraction API. "
-                 "No database — templates are defined in app/templates_config.json.",
+    description="Gemini-powered document extraction API. Templates and "
+                 "attributes are managed via Cloud SQL (PostgreSQL).",
     version="1.0.0",
 )
 
@@ -25,6 +27,8 @@ app.add_middleware(
 )
 
 app.include_router(extraction_router)
+app.include_router(templates_router)
+app.include_router(attributes_router)
 
 
 @app.get("/")

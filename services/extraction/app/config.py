@@ -87,6 +87,21 @@ class TemplateNotFoundError(KeyError):
     pass
 
 
+class AttributeNotFoundError(KeyError):
+    pass
+
+
+class NameAlreadyExistsError(ValueError):
+    pass
+
+
+class AttributeInUseError(ValueError):
+    """Raised when deleting an attribute still referenced by one or more templates."""
+    def __init__(self, message: str, template_names: list[str]):
+        super().__init__(message)
+        self.template_names = template_names
+
+
 # The datatype/frequency Postgres enums (schema.sql) store the Python enum
 # *names* from universal_data_extractor's models.py (e.g. "alphanumeric",
 # "unique"), not the display values its Pydantic schemas serialise (e.g.
@@ -103,6 +118,8 @@ _FREQUENCY_DISPLAY = {
     "unique": "Unique",
     "multiple": "Multiple",
 }
+_DATA_TYPE_DB = {v: k for k, v in _DATA_TYPE_DISPLAY.items()}
+_FREQUENCY_DB = {v: k for k, v in _FREQUENCY_DISPLAY.items()}
 
 
 def _query_templates() -> dict:
@@ -111,6 +128,10 @@ def _query_templates() -> dict:
     llm_prompt, template_attributes: [{id, attribute_id, frequency,
     row_group, attribute: {id, name, description, data_type, example}}]}}
     -- the same shape universal_data_extractor's TemplateOut returns.
+
+    LEFT JOINs (not inner) because a template can have zero attributes --
+    right after creation via POST /templates/, or if all of them are later
+    removed via PUT -- and must still show up with template_attributes: [].
     """
     sql = sqlalchemy.text("""
         SELECT
@@ -128,8 +149,8 @@ def _query_templates() -> dict:
             a.example AS example,
             a.data_type AS data_type
         FROM templates t
-        JOIN template_attributes ta ON ta.template_id = t.id
-        JOIN attributes a ON a.id = ta.attribute_id
+        LEFT JOIN template_attributes ta ON ta.template_id = t.id
+        LEFT JOIN attributes a ON a.id = ta.attribute_id
         ORDER BY t.id, ta.id
     """)
     with _get_engine().connect() as conn:
@@ -148,6 +169,8 @@ def _query_templates() -> dict:
                 "template_attributes": [],
             },
         )
+        if row["template_attribute_id"] is None:
+            continue  # template has no attributes -- LEFT JOIN produced an all-NULL row
         tmpl["template_attributes"].append({
             "id": row["template_attribute_id"],
             "attribute_id": row["attribute_id"],
@@ -197,3 +220,187 @@ def reload_config():
     """Clears the cache — useful in tests or to force a refresh sooner than
     the TTL (e.g. right after seeding/editing templates via the admin API)."""
     _cache["data"] = None
+
+
+# ── Attributes: read + write ────────────────────────────────────────────────
+
+def list_attributes() -> list[dict]:
+    sql = sqlalchemy.text("SELECT id, name, description, data_type, example FROM attributes ORDER BY id")
+    with _get_engine().connect() as conn:
+        rows = conn.execute(sql).mappings().all()
+    return [
+        {
+            "id": row["id"],
+            "name": row["name"],
+            "description": row["description"],
+            "data_type": _DATA_TYPE_DISPLAY.get(row["data_type"], row["data_type"]),
+            "example": row["example"],
+        }
+        for row in rows
+    ]
+
+
+def get_attribute(attribute_id: int) -> dict:
+    for attr in list_attributes():
+        if attr["id"] == attribute_id:
+            return attr
+    raise AttributeNotFoundError(f"Unknown attribute id {attribute_id}.")
+
+
+def create_attribute(name: str, description: str | None, data_type: str, example: str | None) -> dict:
+    with _get_engine().begin() as conn:
+        exists = conn.execute(
+            sqlalchemy.text("SELECT 1 FROM attributes WHERE name = :name"), {"name": name}
+        ).first()
+        if exists:
+            raise NameAlreadyExistsError(f"Attribute name {name!r} already exists.")
+        row = conn.execute(
+            sqlalchemy.text("""
+                INSERT INTO attributes (name, description, data_type, example)
+                VALUES (:name, :description, :data_type, :example)
+                RETURNING id
+            """),
+            {
+                "name": name,
+                "description": description,
+                "data_type": _DATA_TYPE_DB.get(data_type, data_type),
+                "example": example,
+            },
+        ).mappings().first()
+    return get_attribute(row["id"])
+
+
+def update_attribute(attribute_id: int, fields: dict) -> dict:
+    """`fields` holds only the keys the caller actually supplied (name,
+    description, data_type, example) -- partial update, matching
+    AttributeUpdate's exclude_unset semantics."""
+    get_attribute(attribute_id)  # raises AttributeNotFoundError if missing
+    if not fields:
+        return get_attribute(attribute_id)
+
+    updates = dict(fields)
+    if "data_type" in updates:
+        updates["data_type"] = _DATA_TYPE_DB.get(updates["data_type"], updates["data_type"])
+
+    set_clause = ", ".join(f"{col} = :{col}" for col in updates)
+    with _get_engine().begin() as conn:
+        if "name" in updates:
+            clash = conn.execute(
+                sqlalchemy.text("SELECT 1 FROM attributes WHERE name = :name AND id != :id"),
+                {"name": updates["name"], "id": attribute_id},
+            ).first()
+            if clash:
+                raise NameAlreadyExistsError(f"Attribute name {updates['name']!r} already exists.")
+        conn.execute(
+            sqlalchemy.text(f"UPDATE attributes SET {set_clause} WHERE id = :id"),
+            {**updates, "id": attribute_id},
+        )
+    return get_attribute(attribute_id)
+
+
+def delete_attribute(attribute_id: int) -> None:
+    get_attribute(attribute_id)  # raises AttributeNotFoundError if missing
+    with _get_engine().begin() as conn:
+        used_in = conn.execute(
+            sqlalchemy.text("""
+                SELECT DISTINCT t.name FROM templates t
+                JOIN template_attributes ta ON ta.template_id = t.id
+                WHERE ta.attribute_id = :id
+            """),
+            {"id": attribute_id},
+        ).scalars().all()
+        if used_in:
+            raise AttributeInUseError(
+                f"Attribute id {attribute_id} is still used by template(s): {', '.join(used_in)}.",
+                list(used_in),
+            )
+        conn.execute(sqlalchemy.text("DELETE FROM attributes WHERE id = :id"), {"id": attribute_id})
+
+
+# ── Templates: write ─────────────────────────────────────────────────────────
+
+def _sync_template_attributes(conn, template_id: int, attribute_entries: list[dict]) -> None:
+    conn.execute(
+        sqlalchemy.text("DELETE FROM template_attributes WHERE template_id = :id"),
+        {"id": template_id},
+    )
+    for entry in attribute_entries:
+        exists = conn.execute(
+            sqlalchemy.text("SELECT 1 FROM attributes WHERE id = :id"),
+            {"id": entry["attribute_id"]},
+        ).first()
+        if not exists:
+            raise AttributeNotFoundError(f"Unknown attribute id {entry['attribute_id']}.")
+        conn.execute(
+            sqlalchemy.text("""
+                INSERT INTO template_attributes (template_id, attribute_id, frequency, row_group)
+                VALUES (:template_id, :attribute_id, :frequency, :row_group)
+            """),
+            {
+                "template_id": template_id,
+                "attribute_id": entry["attribute_id"],
+                "frequency": _FREQUENCY_DB.get(entry.get("frequency", "Unique"), "unique"),
+                "row_group": entry.get("row_group"),
+            },
+        )
+
+
+def create_template(
+    name: str,
+    description: str | None,
+    group_name: str | None,
+    llm_prompt: str | None,
+    attributes: list[dict],
+) -> dict:
+    with _get_engine().begin() as conn:
+        exists = conn.execute(
+            sqlalchemy.text("SELECT 1 FROM templates WHERE name = :name"), {"name": name}
+        ).first()
+        if exists:
+            raise NameAlreadyExistsError(f"Template name {name!r} already exists.")
+        row = conn.execute(
+            sqlalchemy.text("""
+                INSERT INTO templates (name, description, group_name, llm_prompt)
+                VALUES (:name, :description, :group_name, :llm_prompt)
+                RETURNING id
+            """),
+            {"name": name, "description": description, "group_name": group_name, "llm_prompt": llm_prompt},
+        ).mappings().first()
+        template_id = row["id"]
+        _sync_template_attributes(conn, template_id, attributes)
+    reload_config()
+    return get_template(template_id)
+
+
+def update_template(template_id: int, fields: dict, attributes: list[dict] | None) -> dict:
+    """`fields` holds only the keys the caller actually supplied (name,
+    description, group_name, llm_prompt) -- partial update. `attributes`,
+    if not None, fully replaces the template's attribute wiring."""
+    get_template(template_id)  # raises TemplateNotFoundError if missing
+
+    with _get_engine().begin() as conn:
+        if fields:
+            if "name" in fields:
+                clash = conn.execute(
+                    sqlalchemy.text("SELECT 1 FROM templates WHERE name = :name AND id != :id"),
+                    {"name": fields["name"], "id": template_id},
+                ).first()
+                if clash:
+                    raise NameAlreadyExistsError(f"Template name {fields['name']!r} already exists.")
+            set_clause = ", ".join(f"{col} = :{col}" for col in fields)
+            conn.execute(
+                sqlalchemy.text(f"UPDATE templates SET {set_clause} WHERE id = :id"),
+                {**fields, "id": template_id},
+            )
+        if attributes is not None:
+            _sync_template_attributes(conn, template_id, attributes)
+    reload_config()
+    return get_template(template_id)
+
+
+def delete_template(template_id: int) -> None:
+    get_template(template_id)  # raises TemplateNotFoundError if missing
+    with _get_engine().begin() as conn:
+        conn.execute(sqlalchemy.text("DELETE FROM template_attributes WHERE template_id = :id"), {"id": template_id})
+        conn.execute(sqlalchemy.text("DELETE FROM templates WHERE id = :id"), {"id": template_id})
+    reload_config()
