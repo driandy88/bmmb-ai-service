@@ -13,21 +13,29 @@ class ApiResponse(BaseModel):
     error: Optional[str] = None
 
 
-class TemplateSummary(BaseModel):
-    key: str
-    description: str
-    kind: str  # "single" | "array"
-    field_count: int
+# Mirrors universal_data_extractor's schemas.py so a frontend built against
+# that project's API contract works against this service unchanged.
 
-
-class FieldDetail(BaseModel):
+class AttributeOut(BaseModel):
+    id: int
+    name: str
     description: Optional[str] = None
-    example: Any = None
-    data_type: str
+    data_type: str  # "Alphabet" | "Alphanumeric" | "Numeric" | "Datetime" | "Boolean"
+    example: Optional[str] = None
 
 
-class TemplateDetail(BaseModel):
-    key: str
-    description: str
-    kind: str
-    fields: dict[str, FieldDetail]
+class TemplateAttributeOut(BaseModel):
+    id: int
+    attribute_id: int
+    frequency: str  # "Unique" | "Multiple"
+    row_group: Optional[str] = None
+    attribute: AttributeOut
+
+
+class TemplateOut(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    group_name: Optional[str] = None
+    llm_prompt: Optional[str] = None
+    template_attributes: list[TemplateAttributeOut] = []

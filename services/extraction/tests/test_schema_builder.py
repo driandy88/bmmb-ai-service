@@ -1,120 +1,121 @@
 """
-Tests for app.config and app.schema_builder, run against the REAL
-docs_extractor_dev BigQuery dataset (the 6 SME-financing document templates,
-seeded from the original templates_config.json) so a broken config is caught
-immediately, not just a synthetic fixture. Requires GCP credentials with
-BigQuery read access — see the `test` job in .github/workflows/deploy.yml
-for how CI provides them.
+Tests for app.config and app.schema_builder, run against the REAL bmmb_dev
+Cloud SQL database (the 15 BMMB document templates, seeded from
+seed_templates_attributes.sql) so a broken config is caught immediately, not
+just a synthetic fixture. Requires Cloud SQL credentials -- see the `test`
+job in .github/workflows/deploy.yml for how CI provides them.
 """
 import pytest
 
 from app.config import TemplateNotFoundError, get_template, list_templates
 from app.schema_builder import build_gemini_schema, generate_extraction_prompt
 
-REAL_TEMPLATE_KEYS = {
-    "business_registration_ssm",
-    "audited_financial_statements",
-    "bank_statements",
-    "ic_photocopies",
-    "consent_form",
-    "customer_information_details",
-}
+COMPANY_ACT_SECTION_14 = 1  # 3 unique alphanumeric fields, no row_group
+BANK_STATEMENTS = 9  # 4 "Multiple" fields (one numeric) + 1 "Unique"
+FINANCIAL_STATEMENTS = 7  # includes a "Boolean" field
+CUSTOMER_INFORMATION_FORM = 12  # 24 fields, mix of Unique/Multiple
 
 
 class TestConfigLoading:
-    def test_all_expected_templates_present(self):
-        keys = {t["key"] for t in list_templates()}
-        assert REAL_TEMPLATE_KEYS <= keys
+    def test_all_templates_present(self):
+        ids = {t["id"] for t in list_templates()}
+        assert ids == set(range(1, 16))
 
     def test_unknown_template_raises(self):
         with pytest.raises(TemplateNotFoundError):
-            get_template("does_not_exist")
+            get_template(9999)
 
-    @pytest.mark.parametrize("key", sorted(REAL_TEMPLATE_KEYS))
-    def test_template_has_fields(self, key):
-        tmpl = get_template(key)
-        assert tmpl["kind"] in {"single", "array"}
-        assert len(tmpl["fields"]) > 0
+    @pytest.mark.parametrize("template_id", range(1, 16))
+    def test_template_has_attributes(self, template_id):
+        tmpl = get_template(template_id)
+        assert tmpl["name"]
+        assert len(tmpl["template_attributes"]) > 0
+
+    def test_attribute_shape(self):
+        tmpl = get_template(COMPANY_ACT_SECTION_14)
+        ta = tmpl["template_attributes"][0]
+        assert set(ta.keys()) == {"id", "attribute_id", "frequency", "row_group", "attribute"}
+        assert ta["frequency"] in {"Unique", "Multiple"}
+        attr = ta["attribute"]
+        assert set(attr.keys()) == {"id", "name", "description", "data_type", "example"}
+        assert attr["data_type"] in {"Alphabet", "Alphanumeric", "Numeric", "Datetime", "Boolean"}
+
+    def test_llm_prompt_is_precomputed(self):
+        # Seeded templates already carry a stored llm_prompt.
+        tmpl = get_template(COMPANY_ACT_SECTION_14)
+        assert tmpl["llm_prompt"]
+        assert tmpl["name"] in tmpl["llm_prompt"]
 
 
-class TestSchemaKind:
-    def test_single_kind_templates_produce_object_schema(self):
-        # business_registration_ssm uses "fields" -> single object per document
-        schema = build_gemini_schema("business_registration_ssm")
+class TestSchemaShape:
+    def test_object_schema_for_ungrouped_template(self):
+        schema = build_gemini_schema(COMPANY_ACT_SECTION_14)
         assert schema["type"] == "OBJECT"
         assert "properties" in schema
 
-    def test_array_kind_templates_produce_array_schema(self):
-        # bank_statements uses "statement_object_fields" -> array of objects
-        schema = build_gemini_schema("bank_statements")
-        assert schema["type"] == "ARRAY"
-        assert schema["items"]["type"] == "OBJECT"
-
     def test_unknown_template_raises(self):
         with pytest.raises(TemplateNotFoundError):
-            build_gemini_schema("nope")
+            build_gemini_schema(9999)
+
+    def test_multiple_frequency_produces_array(self):
+        schema = build_gemini_schema(BANK_STATEMENTS)
+        props = schema["properties"]
+        assert props["Bank Statement Month"]["type"] == "ARRAY"
+        assert props["Bank Statement Month"]["items"]["type"] == "STRING"
+
+    def test_unique_frequency_produces_scalar(self):
+        schema = build_gemini_schema(BANK_STATEMENTS)
+        assert schema["properties"]["Document Type"]["type"] == "STRING"
 
 
 class TestFieldTypeMapping:
-    def test_string_field_maps_to_STRING(self):
-        schema = build_gemini_schema("business_registration_ssm")
-        assert schema["properties"]["business_name"]["type"] == "STRING"
-
-    def test_float_field_maps_to_NUMBER(self):
-        schema = build_gemini_schema("bank_statements")
-        props = schema["items"]["properties"]
-        assert props["monthly_withdrawal"]["type"] == "NUMBER"
-
-    def test_date_field_maps_to_STRING(self):
-        schema = build_gemini_schema("business_registration_ssm")
-        assert schema["properties"]["incorporation_date"]["type"] == "STRING"
-
-    def test_list_string_field_maps_to_array_of_string(self):
-        schema = build_gemini_schema("consent_form")
-        field = schema["properties"]["authorized_names"]
+    def test_numeric_multiple_maps_to_array_of_number(self):
+        schema = build_gemini_schema(BANK_STATEMENTS)
+        field = schema["properties"]["Monthly Withdrawal"]
         assert field["type"] == "ARRAY"
-        assert field["items"]["type"] == "STRING"
+        assert field["items"]["type"] == "NUMBER"
+
+    def test_boolean_maps_to_BOOLEAN(self):
+        schema = build_gemini_schema(FINANCIAL_STATEMENTS)
+        assert schema["properties"]["Balance Sheet Present"]["type"] == "BOOLEAN"
+
+    def test_alphanumeric_maps_to_STRING(self):
+        schema = build_gemini_schema(COMPANY_ACT_SECTION_14)
+        assert schema["properties"]["MISC Code"]["type"] == "STRING"
 
     def test_all_fields_nullable(self):
-        schema = build_gemini_schema("customer_information_details")
+        schema = build_gemini_schema(CUSTOMER_INFORMATION_FORM)
         for name, meta in schema["properties"].items():
             assert meta.get("nullable") is True, f"{name} is not nullable"
 
-    def test_all_fields_in_required(self):
-        # required + nullable is the mechanism that forces Gemini to return
-        # null instead of omitting a key it couldn't find. `_locations` is
-        # deliberately excluded from `required` — it's a best-effort
-        # location hint, not core data, so we'd rather do without it than
-        # force a schema-validation failure over it.
-        schema = build_gemini_schema("customer_information_details")
-        data_fields = set(schema["properties"].keys()) - {"_locations"}
-        assert set(schema["required"]) == data_fields
-
-    def test_locations_present_but_not_required(self):
-        schema = build_gemini_schema("customer_information_details")
+    def test_locations_present_for_every_field(self):
+        schema = build_gemini_schema(CUSTOMER_INFORMATION_FORM)
         assert "_locations" in schema["properties"]
-        assert "_locations" not in schema["required"]
+        location_fields = set(schema["properties"]["_locations"]["properties"])
+        data_fields = set(schema["properties"]) - {"_locations"}
+        assert location_fields == data_fields
+
+    def test_location_schema_has_all_four_keys(self):
+        schema = build_gemini_schema(COMPANY_ACT_SECTION_14)
+        loc = schema["properties"]["_locations"]["properties"]["MISC Code"]
+        assert set(loc["properties"]) == {"real_page", "shown_page", "section", "document"}
 
 
 class TestPrompt:
     def test_prompt_is_non_empty(self):
-        prompt = generate_extraction_prompt("business_registration_ssm")
+        prompt = generate_extraction_prompt(COMPANY_ACT_SECTION_14)
         assert isinstance(prompt, str) and len(prompt) > 0
 
     def test_prompt_mentions_null_instruction(self):
-        prompt = generate_extraction_prompt("business_registration_ssm")
+        prompt = generate_extraction_prompt(COMPANY_ACT_SECTION_14)
         assert "null" in prompt.lower()
 
     def test_prompt_lists_every_field(self):
-        tmpl = get_template("customer_information_details")
-        prompt = generate_extraction_prompt("customer_information_details")
-        for field_name in tmpl["fields"]:
-            assert field_name in prompt
-
-    def test_array_kind_prompt_mentions_multiple_instances(self):
-        prompt = generate_extraction_prompt("bank_statements")
-        assert "array" in prompt.lower() or "multiple" in prompt.lower()
+        tmpl = get_template(COMPANY_ACT_SECTION_14)
+        prompt = generate_extraction_prompt(COMPANY_ACT_SECTION_14)
+        for ta in tmpl["template_attributes"]:
+            assert ta["attribute"]["name"] in prompt
 
     def test_unknown_template_raises(self):
         with pytest.raises(TemplateNotFoundError):
-            generate_extraction_prompt("nope")
+            generate_extraction_prompt(9999)
