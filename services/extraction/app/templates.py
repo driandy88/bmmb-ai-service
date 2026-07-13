@@ -23,7 +23,7 @@ def get_templates():
 
 
 @router.get("/{template_id}", response_model=TemplateOut)
-def get_template_detail(template_id: int):
+def get_template_detail(template_id: str):
     try:
         return get_template(template_id)
     except TemplateNotFoundError as exc:
@@ -53,7 +53,7 @@ def post_template(payload: TemplateCreate):
 
 
 @router.put("/{template_id}", response_model=TemplateOut, dependencies=[Depends(require_admin_key)])
-def put_template(template_id: int, payload: TemplateUpdate):
+def put_template(template_id: str, payload: TemplateUpdate):
     fields = payload.model_dump(exclude_unset=True, exclude={"attributes"})
     attributes = None if payload.attributes is None else [a.model_dump() for a in payload.attributes]
     try:
@@ -67,7 +67,7 @@ def put_template(template_id: int, payload: TemplateUpdate):
 
 
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin_key)])
-def delete_template_route(template_id: int):
+def delete_template_route(template_id: str):
     try:
         delete_template(template_id)
     except TemplateNotFoundError as exc:

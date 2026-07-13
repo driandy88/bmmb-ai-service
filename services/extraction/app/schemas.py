@@ -17,7 +17,7 @@ class ApiResponse(BaseModel):
 # that project's API contract works against this service unchanged.
 
 class AttributeOut(BaseModel):
-    id: int
+    id: str
     name: str
     description: Optional[str] = None
     data_type: str  # "Alphabet" | "Alphanumeric" | "Numeric" | "Datetime" | "Boolean"
@@ -25,15 +25,15 @@ class AttributeOut(BaseModel):
 
 
 class TemplateAttributeOut(BaseModel):
-    id: int
-    attribute_id: int
+    id: str
+    attribute_id: str
     frequency: str  # "Unique" | "Multiple"
     row_group: Optional[str] = None
     attribute: AttributeOut
 
 
 class TemplateOut(BaseModel):
-    id: int
+    id: str
     name: str
     description: Optional[str] = None
     group_name: Optional[str] = None
@@ -58,7 +58,7 @@ class AttributeUpdate(BaseModel):
 
 
 class TemplateAttributeIn(BaseModel):
-    attribute_id: int
+    attribute_id: str
     frequency: str = "Unique"  # "Unique" | "Multiple"
     row_group: Optional[str] = None
 

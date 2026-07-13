@@ -158,10 +158,15 @@ def _query_templates() -> dict:
 
     templates: dict = {}
     for row in rows:
+        # ta.id/t.id/a.id come back as uuid.UUID (pg8000's native uuid type),
+        # but every downstream consumer (TemplateOut/AttributeOut, dict
+        # lookups by template_id) expects plain str -- stringify at the
+        # source so nothing further down has to know about uuid.UUID.
+        template_id = str(row["template_id"])
         tmpl = templates.setdefault(
-            row["template_id"],
+            template_id,
             {
-                "id": row["template_id"],
+                "id": template_id,
                 "name": row["template_name"],
                 "description": row["template_description"],
                 "group_name": row["group_name"],
@@ -171,13 +176,14 @@ def _query_templates() -> dict:
         )
         if row["template_attribute_id"] is None:
             continue  # template has no attributes -- LEFT JOIN produced an all-NULL row
+        attribute_id = str(row["attribute_id"])
         tmpl["template_attributes"].append({
-            "id": row["template_attribute_id"],
-            "attribute_id": row["attribute_id"],
+            "id": str(row["template_attribute_id"]),
+            "attribute_id": attribute_id,
             "frequency": _FREQUENCY_DISPLAY.get(row["frequency"], row["frequency"]),
             "row_group": row["row_group"],
             "attribute": {
-                "id": row["attribute_id"],
+                "id": attribute_id,
                 "name": row["attribute_name"],
                 "description": row["attribute_description"],
                 "data_type": _DATA_TYPE_DISPLAY.get(row["data_type"], row["data_type"]),
@@ -201,7 +207,7 @@ def list_templates() -> list[dict]:
     return list(_load_all().values())
 
 
-def get_template(template_id: int) -> dict:
+def get_template(template_id: str) -> dict:
     templates = _load_all()
     if template_id not in templates:
         # A template created since the cache was loaded won't be in it yet --
@@ -230,7 +236,7 @@ def list_attributes() -> list[dict]:
         rows = conn.execute(sql).mappings().all()
     return [
         {
-            "id": row["id"],
+            "id": str(row["id"]),
             "name": row["name"],
             "description": row["description"],
             "data_type": _DATA_TYPE_DISPLAY.get(row["data_type"], row["data_type"]),
@@ -240,7 +246,7 @@ def list_attributes() -> list[dict]:
     ]
 
 
-def get_attribute(attribute_id: int) -> dict:
+def get_attribute(attribute_id: str) -> dict:
     for attr in list_attributes():
         if attr["id"] == attribute_id:
             return attr
@@ -267,10 +273,10 @@ def create_attribute(name: str, description: str | None, data_type: str, example
                 "example": example,
             },
         ).mappings().first()
-    return get_attribute(row["id"])
+    return get_attribute(str(row["id"]))
 
 
-def update_attribute(attribute_id: int, fields: dict) -> dict:
+def update_attribute(attribute_id: str, fields: dict) -> dict:
     """`fields` holds only the keys the caller actually supplied (name,
     description, data_type, example) -- partial update, matching
     AttributeUpdate's exclude_unset semantics."""
@@ -298,7 +304,7 @@ def update_attribute(attribute_id: int, fields: dict) -> dict:
     return get_attribute(attribute_id)
 
 
-def delete_attribute(attribute_id: int) -> None:
+def delete_attribute(attribute_id: str) -> None:
     get_attribute(attribute_id)  # raises AttributeNotFoundError if missing
     with _get_engine().begin() as conn:
         used_in = conn.execute(
@@ -319,7 +325,7 @@ def delete_attribute(attribute_id: int) -> None:
 
 # ── Templates: write ─────────────────────────────────────────────────────────
 
-def _sync_template_attributes(conn, template_id: int, attribute_entries: list[dict]) -> None:
+def _sync_template_attributes(conn, template_id: str, attribute_entries: list[dict]) -> None:
     conn.execute(
         sqlalchemy.text("DELETE FROM template_attributes WHERE template_id = :id"),
         {"id": template_id},
@@ -366,13 +372,13 @@ def create_template(
             """),
             {"name": name, "description": description, "group_name": group_name, "llm_prompt": llm_prompt},
         ).mappings().first()
-        template_id = row["id"]
+        template_id = str(row["id"])
         _sync_template_attributes(conn, template_id, attributes)
     reload_config()
     return get_template(template_id)
 
 
-def update_template(template_id: int, fields: dict, attributes: list[dict] | None) -> dict:
+def update_template(template_id: str, fields: dict, attributes: list[dict] | None) -> dict:
     """`fields` holds only the keys the caller actually supplied (name,
     description, group_name, llm_prompt) -- partial update. `attributes`,
     if not None, fully replaces the template's attribute wiring."""
@@ -398,7 +404,7 @@ def update_template(template_id: int, fields: dict, attributes: list[dict] | Non
     return get_template(template_id)
 
 
-def delete_template(template_id: int) -> None:
+def delete_template(template_id: str) -> None:
     get_template(template_id)  # raises TemplateNotFoundError if missing
     with _get_engine().begin() as conn:
         conn.execute(sqlalchemy.text("DELETE FROM template_attributes WHERE template_id = :id"), {"id": template_id})
