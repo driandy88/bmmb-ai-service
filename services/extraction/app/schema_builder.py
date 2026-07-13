@@ -1,118 +1,148 @@
 """
-Builds the Gemini `response_schema` dict and the extraction prompt for a given
-template, driven entirely by app/templates_config.json (via app.config).
-
-No database involved. This is the whole point of this service: given a
-template key, produce (1) a JSON schema Gemini must fill exactly, and
-(2) a human-readable prompt describing each field.
+Builds the Gemini `response_schema` dict and the extraction prompt for a
+given template, driven by app.config (Cloud SQL). Ported from
+universal_data_extractor's utils.py so this service's schema/prompt shape
+matches that project's exactly: per-attribute frequency (Unique/Multiple)
+drives scalar-vs-array, and attributes sharing a non-null row_group are
+extracted together as one correlated array of row-objects.
 """
 from app.config import get_template
 
 _TYPE_MAP = {
-    "string": "STRING",
-    "float": "NUMBER",
-    "date": "STRING",  # no native Gemini date type; the field description carries the expected format
+    "Numeric": "NUMBER",
+    "Boolean": "BOOLEAN",
+    # Alphabet / Alphanumeric / Datetime all have no native Gemini type
+    # distinct from string; the field description carries the expected format.
 }
 
 
-def _field_schema(meta: dict) -> dict:
-    dtype = meta.get("data_type", "string")
-    if dtype == "list[string]":
-        return {
-            "type": "ARRAY",
-            "description": meta.get("description"),
-            "nullable": True,
-            "items": {"type": "STRING"},
-        }
-    return {
-        "type": _TYPE_MAP.get(dtype, "STRING"),
-        "description": meta.get("description"),
-        "nullable": True,
-    }
+def _scalar_schema(data_type: str) -> dict:
+    return {"type": _TYPE_MAP.get(data_type, "STRING"), "nullable": True}
 
 
-def _locations_schema(field_names: list[str]) -> dict:
-    """One {page, section} slot per field, so the caller can point a document
-    preview at the page a value was actually read from. Not in `required` —
-    unlike the data fields, we'd rather silently do without it than force a
-    schema-validation failure if a field-scale document confuses the model.
-    """
+def _location_schema() -> dict:
+    """One {real_page, shown_page, section, document} slot per field/group,
+    so the caller can point a document preview at the page a value was
+    actually read from."""
     return {
         "type": "OBJECT",
         "nullable": True,
         "properties": {
-            name: {
-                "type": "OBJECT",
-                "nullable": True,
-                "properties": {
-                    "page": {"type": "INTEGER", "nullable": True},
-                    "section": {"type": "STRING", "nullable": True},
-                },
-            }
-            for name in field_names
+            "real_page": {"type": "INTEGER", "nullable": True},
+            "shown_page": {"type": "STRING", "nullable": True},
+            "section": {"type": "STRING", "nullable": True},
+            "document": {"type": "STRING", "nullable": True},
         },
     }
 
 
-def build_gemini_schema(template_key: str) -> dict:
+def _attr_schema(data_type: str, frequency: str) -> dict:
+    base = _scalar_schema(data_type)
+    if frequency == "Multiple":
+        return {"type": "ARRAY", "nullable": True, "items": base}
+    return base
+
+
+def _partition(template_attributes: list[dict]):
+    """Split a template's attributes into standalone fields and row_group
+    clusters. Attributes sharing the same non-null row_group are extracted
+    together as one correlated array of row-objects instead of independent
+    fields."""
+    ungrouped = []
+    grouped: dict[str, list[dict]] = {}
+    for ta in template_attributes:
+        if ta["row_group"]:
+            grouped.setdefault(ta["row_group"], []).append(ta)
+        else:
+            ungrouped.append(ta)
+    return ungrouped, grouped
+
+
+def build_gemini_schema(template_id: int) -> dict:
     """Returns a dict suitable for GenerateContentConfig(response_schema=...).
 
-    Every field is nullable and listed in `required` — this is deliberate: it
-    forces Gemini to emit `null` for anything it can't find rather than
-    omitting the key, so the caller always gets a complete, predictable shape.
-
-    Each object also carries a sibling `_locations` map (one {page, section}
-    per field) — for "array" templates this means every row gets its own
-    locations, which is what a per-row "jump to page" UI needs.
+    Every top-level field/group also carries a sibling `_locations` entry so
+    a document viewer can jump straight to where a value was read from.
     """
-    tmpl = get_template(template_key)
-    properties = {name: _field_schema(meta) for name, meta in tmpl["fields"].items()}
-    field_names = list(properties.keys())
-    properties["_locations"] = _locations_schema(field_names)
-    obj_schema = {
-        "type": "OBJECT",
-        "properties": properties,
-        "required": field_names,
-    }
-    if tmpl["kind"] == "array":
-        return {
+    tmpl = get_template(template_id)
+    ungrouped, grouped = _partition(tmpl["template_attributes"])
+
+    properties = {}
+    location_props = {}
+
+    for ta in ungrouped:
+        attr = ta["attribute"]
+        properties[attr["name"]] = _attr_schema(attr["data_type"], ta["frequency"])
+        location_props[attr["name"]] = _location_schema()
+
+    for group_name, members in grouped.items():
+        row_props = {m["attribute"]["name"]: _scalar_schema(m["attribute"]["data_type"]) for m in members}
+        properties[group_name] = {
             "type": "ARRAY",
-            "description": tmpl["description"],
-            "items": obj_schema,
+            "nullable": True,
+            "items": {"type": "OBJECT", "properties": row_props},
         }
-    return obj_schema
+        location_props[group_name] = _location_schema()
+
+    if location_props:
+        properties["_locations"] = {
+            "type": "OBJECT",
+            "nullable": True,
+            "properties": location_props,
+        }
+
+    return {"type": "OBJECT", "properties": properties}
 
 
-def generate_extraction_prompt(template_key: str) -> str:
-    """Builds the field-level instruction string injected into every Gemini call."""
-    tmpl = get_template(template_key)
-    lines = [f'You are extracting structured data from a "{template_key}" document.']
+def render_extraction_prompt(tmpl: dict) -> str:
+    """Builds the prompt text from a template's current attributes, ignoring
+    any stored llm_prompt. Used both as generate_extraction_prompt()'s
+    fallback and by scripts/regenerate_prompts.py to bring a stale stored
+    prompt back in sync with template_attributes."""
+    lines = [f'You are extracting structured data from a "{tmpl["name"]}" document.']
     if tmpl["description"]:
-        lines.append(tmpl["description"])
-    if tmpl["kind"] == "array":
-        lines.append(
-            "This document type may contain MULTIPLE instances (e.g. multiple "
-            "months, years, or individuals). Return one object per instance in a JSON array."
-        )
+        lines.append(f"Document description: {tmpl['description']}")
     lines += ["", "Fields to extract:", ""]
 
-    for i, (name, meta) in enumerate(tmpl["fields"].items(), 1):
-        dtype = meta.get("data_type", "string")
-        example = meta.get("example")
-        example_info = f" — e.g. {example}" if example is not None else ""
-        lines.append(f"{i}. {name}  |  Type: {dtype}{example_info}")
-        if meta.get("description"):
-            lines.append(f"   {meta['description']}")
+    ungrouped, grouped = _partition(tmpl["template_attributes"])
+    i = 1
+
+    for ta in ungrouped:
+        attr = ta["attribute"]
+        freq_note = " (multiple occurrences expected)" if ta["frequency"] == "Multiple" else ""
+        example_info = f" — e.g. {attr['example']}" if attr["example"] else ""
+        lines.append(f"{i}. {attr['name']}  |  Type: {attr['data_type']}{freq_note}{example_info}")
+        if attr["description"]:
+            lines.append(f"   {attr['description']}")
+        i += 1
+
+    for group_name, members in grouped.items():
+        col_names = [m["attribute"]["name"] for m in members]
+        lines.append(f"{i}. {group_name} (repeating group)  |  Columns: {', '.join(col_names)}")
+        i += 1
 
     lines += [
         "",
-        "Return null for any field not found or unclear in the document. "
-        "Do not guess or infer values that are not present.",
-        "",
         "For each field above, also populate its entry in _locations with:",
-        "  page    — 1-based page number where the value appears (null if unknown)",
-        "  section — nearest heading or section title on that page (null if unknown)",
-        "If this document type may contain multiple instances, give each instance's "
-        "object its own _locations reflecting where THAT instance's values were found.",
+        "  real_page  — the actual sequential page number of the source document/PDF file, counting the",
+        "               first page as 1 regardless of any printed page numbers or cover/title pages",
+        "               (null if unknown). This is used to jump to the right page in the file.",
+        "  shown_page — the page number or label as it is printed/displayed on the page itself (e.g. a",
+        "               footer or header page number, which may be a roman numeral or differ from",
+        "               real_page due to unnumbered front matter) (null if no visible label).",
+        "  section    — nearest heading or section title on that page (null if unknown)",
+        "  document   — the source document name the value came from, if more than one was provided (null if unknown)",
+        "",
+        "Return null for any field not found or unclear in the document.",
     ]
     return "\n".join(lines)
+
+
+def generate_extraction_prompt(template_id: int) -> str:
+    """Returns the template's stored llm_prompt if present (the normal case
+    -- templates are seeded/authored with a precomputed prompt), otherwise
+    builds an equivalent one from its attributes."""
+    tmpl = get_template(template_id)
+    if tmpl["llm_prompt"]:
+        return tmpl["llm_prompt"]
+    return render_extraction_prompt(tmpl)

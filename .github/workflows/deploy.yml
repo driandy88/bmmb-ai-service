@@ -28,9 +28,11 @@ jobs:
         name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          # tests hit the real docs_extractor_dev BigQuery dataset (see
+          # tests hit the real bmmb_dev Cloud SQL database (see
           # tests/test_schema_builder.py) — same credentials as the deploy
-          # job below, just scoped to reads against dev, never prod.
+          # job below, just scoped to reads against dev, never prod. This
+          # service account also needs the "Cloud SQL Client" IAM role for
+          # the Cloud SQL Python Connector to open a connection.
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - uses: actions/setup-python@v5
@@ -46,6 +48,9 @@ jobs:
         env:
           APP_ENV: dev
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          INSTANCE_CONNECTION_NAME: ${{ secrets.INSTANCE_CONNECTION_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASS: ${{ secrets.DB_PASS }}
         run: pytest tests/ -v
 
   # Only runs after tests pass, and only on pushes to main (not on PRs)
@@ -90,7 +95,8 @@ jobs:
             --platform=managed \
             --allow-unauthenticated \
             --service-account=extraction-service-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
-            --set-env-vars=ALLOWED_ORIGINS=${{ secrets.ALLOWED_ORIGINS }},GCP_PROJECT_ID=${{ env.PROJECT_ID }},APP_ENV=prod
+            --set-env-vars=ALLOWED_ORIGINS=${{ secrets.ALLOWED_ORIGINS }},GCP_PROJECT_ID=${{ env.PROJECT_ID }},APP_ENV=prod,INSTANCE_CONNECTION_NAME=${{ secrets.INSTANCE_CONNECTION_NAME }},DB_USER=${{ secrets.DB_USER }} \
+            --set-secrets=DB_PASS=${{ secrets.DB_PASS_SECRET_NAME }}:latest
 
       - name: Show deployed URL
         run: gcloud run services describe ${{ env.SERVICE_NAME }} --region=${{ env.REGION }} --format="value(status.url)"
