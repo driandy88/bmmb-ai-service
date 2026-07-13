@@ -158,10 +158,15 @@ def _query_templates() -> dict:
 
     templates: dict = {}
     for row in rows:
+        # ta.id/t.id/a.id come back as uuid.UUID (pg8000's native uuid type),
+        # but every downstream consumer (TemplateOut/AttributeOut, dict
+        # lookups by template_id) expects plain str -- stringify at the
+        # source so nothing further down has to know about uuid.UUID.
+        template_id = str(row["template_id"])
         tmpl = templates.setdefault(
-            row["template_id"],
+            template_id,
             {
-                "id": row["template_id"],
+                "id": template_id,
                 "name": row["template_name"],
                 "description": row["template_description"],
                 "group_name": row["group_name"],
@@ -171,13 +176,14 @@ def _query_templates() -> dict:
         )
         if row["template_attribute_id"] is None:
             continue  # template has no attributes -- LEFT JOIN produced an all-NULL row
+        attribute_id = str(row["attribute_id"])
         tmpl["template_attributes"].append({
-            "id": row["template_attribute_id"],
-            "attribute_id": row["attribute_id"],
+            "id": str(row["template_attribute_id"]),
+            "attribute_id": attribute_id,
             "frequency": _FREQUENCY_DISPLAY.get(row["frequency"], row["frequency"]),
             "row_group": row["row_group"],
             "attribute": {
-                "id": row["attribute_id"],
+                "id": attribute_id,
                 "name": row["attribute_name"],
                 "description": row["attribute_description"],
                 "data_type": _DATA_TYPE_DISPLAY.get(row["data_type"], row["data_type"]),
@@ -230,7 +236,7 @@ def list_attributes() -> list[dict]:
         rows = conn.execute(sql).mappings().all()
     return [
         {
-            "id": row["id"],
+            "id": str(row["id"]),
             "name": row["name"],
             "description": row["description"],
             "data_type": _DATA_TYPE_DISPLAY.get(row["data_type"], row["data_type"]),
@@ -267,7 +273,7 @@ def create_attribute(name: str, description: str | None, data_type: str, example
                 "example": example,
             },
         ).mappings().first()
-    return get_attribute(row["id"])
+    return get_attribute(str(row["id"]))
 
 
 def update_attribute(attribute_id: str, fields: dict) -> dict:
@@ -366,7 +372,7 @@ def create_template(
             """),
             {"name": name, "description": description, "group_name": group_name, "llm_prompt": llm_prompt},
         ).mappings().first()
-        template_id = row["id"]
+        template_id = str(row["id"])
         _sync_template_attributes(conn, template_id, attributes)
     reload_config()
     return get_template(template_id)

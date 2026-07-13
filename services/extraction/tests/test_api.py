@@ -11,6 +11,7 @@ import io
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import list_templates
 from app.main import app
 
 client = TestClient(app)
@@ -21,8 +22,13 @@ TINY_PNG = bytes.fromhex(
     "3df40000000a4944415478da6360000002000155a2d0870000000049454e44ae426082"
 )
 
-COMPANY_ACT_SECTION_14 = 1  # single-object schema, no "Multiple" fields
-BANK_STATEMENTS = 9  # has "Multiple" fields -> array-valued properties
+# Ids are DB-generated uuids (not stable across re-seeds), so look them up by
+# name -- the templates themselves are stable, seeded via
+# seed_templates_attributes.sql.
+_BY_NAME = {t["name"]: t["id"] for t in list_templates()}
+COMPANY_ACT_SECTION_14 = _BY_NAME["Company Act Section 14"]  # single-object schema, no "Multiple" fields
+BANK_STATEMENTS = _BY_NAME["Bank Statements"]  # has "Multiple" fields -> array-valued properties
+UNKNOWN_TEMPLATE_ID = "00000000-0000-0000-0000-000000000000"
 
 
 @pytest.fixture(autouse=True)
@@ -55,19 +61,21 @@ class TestHealthAndTemplates:
         assert "Bank Statement Month" in names
 
     def test_get_unknown_template_404(self):
-        r = client.get("/templates/9999")
+        r = client.get(f"/templates/{UNKNOWN_TEMPLATE_ID}")
         assert r.status_code == 404
 
-    def test_get_template_non_integer_422(self):
-        r = client.get("/templates/not-a-number")
-        assert r.status_code == 422
+    def test_get_template_malformed_id_404(self):
+        # template_id is a plain str path param now (uuid, not int) -- any
+        # non-matching string 404s as "not found" rather than 422 validation.
+        r = client.get("/templates/not-a-uuid")
+        assert r.status_code == 404
 
 
 class TestExtractValidation:
     def test_unknown_template_404(self):
         r = client.post(
             "/extract",
-            data={"template_id": 9999},
+            data={"template_id": UNKNOWN_TEMPLATE_ID},
             files={"files": ("doc.pdf", io.BytesIO(TINY_PDF), "application/pdf")},
         )
         assert r.status_code == 404

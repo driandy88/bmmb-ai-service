@@ -97,13 +97,14 @@ class TestAttributeCRUD:
         assert client.get(f"/attributes/{attr_id}").status_code == 404
 
     def test_delete_unknown_404(self):
-        r = client.delete("/attributes/999999", headers=AUTH_HEADERS)
+        r = client.delete("/attributes/00000000-0000-0000-0000-000000000000", headers=AUTH_HEADERS)
         assert r.status_code == 404
 
     def test_delete_attribute_in_use_409(self):
-        # Attribute id 1 ("MISC Code") is wired to the seeded "Company Act
-        # Section 14" template -- must refuse deletion, not silently orphan it.
-        r = client.delete("/attributes/1", headers=AUTH_HEADERS)
+        # "MISC Code" is wired to the seeded "Company Act Section 14"
+        # template -- must refuse deletion, not silently orphan it.
+        misc_code_id = next(a["id"] for a in client.get("/attributes/").json() if a["name"] == "MISC Code")
+        r = client.delete(f"/attributes/{misc_code_id}", headers=AUTH_HEADERS)
         assert r.status_code == 409
         assert "Company Act Section 14" in r.json()["detail"]
 
@@ -151,7 +152,10 @@ class TestTemplateCRUD:
     def test_create_unknown_attribute_404(self):
         r = client.post(
             "/templates/",
-            json={"name": "__test_tmpl__ bad ref", "attributes": [{"attribute_id": 999999, "frequency": "Unique"}]},
+            json={
+                "name": "__test_tmpl__ bad ref",
+                "attributes": [{"attribute_id": "00000000-0000-0000-0000-000000000000", "frequency": "Unique"}],
+            },
             headers=AUTH_HEADERS,
         )
         assert r.status_code == 404
@@ -202,5 +206,5 @@ class TestTemplateCRUD:
         assert client.get(f"/templates/{template_id}").status_code == 404
 
     def test_delete_unknown_404(self):
-        r = client.delete("/templates/999999", headers=AUTH_HEADERS)
+        r = client.delete("/templates/00000000-0000-0000-0000-000000000000", headers=AUTH_HEADERS)
         assert r.status_code == 404
