@@ -266,6 +266,82 @@ def verify_bank_statement_duration(statements: List[Dict[str, object]], entity_t
     }
 
 
+_BANK_STATEMENT_MAX_AGE_MONTHS = 2  # how stale the latest statement can be before it's "outdated"
+
+
+def check_bank_statement_freshness(latest_end_date: str, system_date: str) -> Dict:
+    """Check that the most recent bank statement is recent enough to be accepted (not outdated).
+
+    Use this once you know the latest statement_end_date across every
+    bank_statement document in the bundle. Bank statements go stale much
+    faster than financial statements, so the allowed age is much shorter
+    than the 18-month financial statement rule.
+
+    Args:
+        latest_end_date: The latest statement_end_date across all
+            bank_statement documents in the bundle, as an ISO 'YYYY-MM-DD'
+            date.
+        system_date: The current system/application date, as an ISO
+            'YYYY-MM-DD' date.
+    """
+    latest = to_date(latest_end_date)
+    today = to_date(system_date)
+
+    deadline = latest + relativedelta(months=_BANK_STATEMENT_MAX_AGE_MONTHS)
+    passed = today <= deadline
+
+    return {
+        "passed": passed,
+        "message": (
+            f"Latest bank statement (ending {latest.isoformat()}) is within the "
+            f"{_BANK_STATEMENT_MAX_AGE_MONTHS}-month freshness window."
+            if passed
+            else f"Latest bank statement (ending {latest.isoformat()}) is older than the "
+                 f"{_BANK_STATEMENT_MAX_AGE_MONTHS}-month freshness window."
+        ),
+        "details": {
+            "latest_statement_end_date": latest.isoformat(),
+            "system_date": today.isoformat(),
+            "max_age_months": _BANK_STATEMENT_MAX_AGE_MONTHS,
+            "freshness_deadline": deadline.isoformat(),
+        },
+    }
+
+
+def check_bank_statement_overdraft(monthly_balances: List[Dict[str, object]]) -> Dict:
+    """Check that every monthly bank statement end balance is positive (not overdrawn).
+
+    Use this for the combined monthly_balances of every bank_statement
+    document in the bundle. A negative end balance (or a balance shown in
+    parentheses, which is how negatives are often printed) on a debit
+    (current/savings) account means the account was overdrawn that month.
+
+    Args:
+        monthly_balances: One entry per statement month, each with month
+            (e.g. "July 2023") and end_balance (a number; already negative
+            if the account was overdrawn).
+    """
+    overdrawn = [
+        {"month": m.get("month"), "end_balance": m.get("end_balance")}
+        for m in monthly_balances
+        if m.get("end_balance") is not None and m["end_balance"] < 0
+    ]
+    passed = len(overdrawn) == 0
+
+    return {
+        "passed": passed,
+        "message": (
+            "No overdrawn months found across the bank statements."
+            if passed
+            else f"{len(overdrawn)} month(s) show a negative (overdrawn) end balance."
+        ),
+        "details": {
+            "months_checked": len(monthly_balances),
+            "overdrawn_months": overdrawn,
+        },
+    }
+
+
 def validate_form_d_expiry(expiry_date: str, tenure_months: int, system_date: str) -> Dict:
     """Check that the SSM Form D validity period covers the requested financing tenure.
 

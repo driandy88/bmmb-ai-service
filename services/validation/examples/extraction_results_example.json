@@ -1,0 +1,101 @@
+{
+  "_comment": "One entry per POST /extract call made for this application, keyed by template name. Each value is exactly that call's `data.extracted_data` (see docs/api_contracts.md). Same persona (Alpha Tech Solutions Sdn Bhd) as services/validation/examples/sample_bundle_passing.json, so extraction_adapter.build_validation_bundle() on this fixture produces an equivalent, all-checks-passing bundle.",
+
+  "SSM Form 24": {
+    "Entity Name": "ALPHA TECH SOLUTIONS SDN BHD",
+    "Business Registration Number": "202301098765",
+    "Incorporation Date": "12-03-2023",
+    "Registered Address": "LOT 2-4-19, WISMA RAMPAI, TAMAN SRI RAMPAI, SETAPAK, KUALA LUMPUR",
+    "Business Nature": ["SOFTWARE DEVELOPMENT"],
+    "Shareholder Name": ["MOHD AIMAN BIN ZULKIFLI", "NURUL AIN BINTI ZULKIFLI"],
+    "Shareholder Address": [
+      "NO 29, JALAN AMAN SERENIA 11/7, BANDAR SERENIA, 43900 SEPANG, SELANGOR",
+      "NO 12, JALAN DAMAI 3/2, TAMAN DAMAI, 43900 SEPANG, SELANGOR"
+    ],
+    "Shareholder Percentage": ["18,000", "12,000"],
+    "Director NRIC or Passport Number": ["880214-14-5123"],
+    "Document Type": "SSM Form 24"
+  },
+
+  "SSM Form 44": {
+    "Entity Name": "ALPHA TECH SOLUTIONS SDN BHD",
+    "Registered Address": "LOT 2-4-19, WISMA RAMPAI, TAMAN SRI RAMPAI, SETAPAK, KUALA LUMPUR",
+    "Document Type": "SSM Form 44"
+  },
+
+  "SSM Form 49": {
+    "Entity Name": "ALPHA TECH SOLUTIONS SDN BHD",
+    "Business Registration Number": "202301098765",
+    "Incorporation Date": "12-03-2023",
+    "Registered Address": "LOT 2-4-19, WISMA RAMPAI, TAMAN SRI RAMPAI, SETAPAK, KUALA LUMPUR",
+    "Business Address": "LOT 2-4-19, WISMA RAMPAI, TAMAN SRI RAMPAI, SETAPAK, KUALA LUMPUR",
+    "Business Nature": ["SOFTWARE DEVELOPMENT"],
+    "Director Name": ["MOHD AIMAN BIN ZULKIFLI", "NURUL AIN BINTI ZULKIFLI"],
+    "Director Address": [
+      "NO 29, JALAN AMAN SERENIA 11/7, BANDAR SERENIA, 43900 SEPANG, SELANGOR",
+      "NO 12, JALAN DAMAI 3/2, TAMAN DAMAI, 43900 SEPANG, SELANGOR"
+    ],
+    "Director NRIC or Passport Number": ["880214-14-5123", "900101-10-1234"],
+    "Document Type": "SSM Form 49"
+  },
+
+  "Financial Statements (Sdn Bhd)": {
+    "Financial Statement Date": ["31-12-2025", "31-12-2024"],
+    "Balance Sheet Present": true,
+    "Profit and Loss Statement Present": true,
+    "Cash Flow Statement Present": true,
+    "Auditor's Report Present": true,
+    "Revenue or Turnover or Sales": [1820500, 1420300],
+    "Costs or COGS": [720000, 610500],
+    "Gross Profit": [1100500, 809800],
+    "Expenses or Opex or SG&A or Overheads": [416700, 388900],
+    "Operating Profit or EBIT": [683800, 420900],
+    "Financing Cost": [42100, 38700],
+    "Net Profit": [461092, 285600],
+    "Asset Value or Total Current Assets": [2466400, 2011200],
+    "Liability Value": [1405975, 1180400],
+    "Net Worth or Total Equity": [1060425, 830800],
+    "Advances Due to Director": [50000, 40000],
+    "Depreciation & Amortisation": [101500, 95200],
+    "EBITDA": [785300, 516100],
+    "Other Income": [0, 0],
+    "Document Type": "Financial Statements (Sdn Bhd)"
+  },
+
+  "Bank Statements": {
+    "Bank Statement Month": ["January 2026", "February 2026", "March 2026", "April 2026", "May 2026", "June 2026"],
+    "Monthly Deposit": [362700, 340200, 398100, 355600, 410200, 425900],
+    "Monthly Withdrawal": [340980, 355100, 351400, 372100, 348900, 390200],
+    "Monthly End Balance": [42500.00, 38900.50, 51200.75, 47300.00, 55600.25, 60100.00],
+    "Document Type": "Bank Statements"
+  },
+
+  "MyKad (Director ID or Passport)": {
+    "Director Name": ["MOHD AIMAN BIN ZULKIFLI", "NURUL AIN BINTI ZULKIFLI"],
+    "Director NRIC or Passport Number": ["880214-14-5123", "900101-10-1234"],
+    "Front Side IC Present": [true, true],
+    "Back Side IC Present": [true, true],
+    "ID Type": ["MyKad", "MyKad"],
+    "Document Type": "MyKad (Director ID or Passport)"
+  },
+
+  "Consent Form": {
+    "Entity Name": "ALPHA TECH SOLUTIONS SDN BHD",
+    "Director Name": ["MOHD AIMAN BIN ZULKIFLI", "NURUL AIN BINTI ZULKIFLI", "MOHD AIMAN BIN ZULKIFLI"],
+    "Director NRIC or Passport Number": ["880214-14-5123", "900101-10-1234", "880214-14-5123"],
+    "Document Type": "Consent Form"
+  },
+
+  "Application Details": {
+    "Main Contact Name": ["MOHD AIMAN BIN ZULKIFLI"],
+    "Main Contact Email": ["aiman@alphatech.my"],
+    "Main Contact Phone Number": ["+60123456789"],
+    "Business Entity Type": "Sdn Bhd",
+    "Proposed Program": "SME Term Financing",
+    "Proposed Financing Amount": 500000.00,
+    "Referrer": "Branch",
+    "Referrer Detail": "Kota Bharu Branch",
+    "Additional Notes": null,
+    "Document Type": "Application Details"
+  }
+}

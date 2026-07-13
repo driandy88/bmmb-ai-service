@@ -63,6 +63,11 @@ service's copy and forgotten in another's. Worth doing this move **before**
 `judgement-rag` lands, not after — it's a bigger diff once there are two
 services to untangle from a flat layout.
 
+(A `libs/bmmb_common/` was actually created and then folded back into
+`services/validation/` — see that section below — once it turned out to have
+exactly one real consumer. Re-extract it once a second service genuinely
+needs the same code, not before.)
+
 ---
 
 ## Validation Agent (`services/validation/`)
@@ -85,35 +90,46 @@ Two ways to validate a bundle:
   override a deterministic pass/fail — see `services/validation/agent.py`'s
   module docstring.
 
-> **Not yet integrated with extraction.** This service takes an
-> already-structured `ValidationBundle` (or a raw-extraction-shaped dict via
-> `services/validation/adapter.py`) as its input — it does not call the
-> extraction service, and nothing in `services/extraction/` calls it either.
-> `adapter.py`'s expected raw-extraction shape (`raw_documents` /
-> `raw_fields`) also doesn't match `services/extraction`'s actual output
-> shape yet (per-template dynamic field dicts — see
-> `services/extraction/app/schemas.py`), and their document-type names don't
-> line up either (e.g. extraction's `business_registration_ssm` vs.
-> validation's `ssm_corporate_form`). Wiring the two together end to end is
-> a future task, not something that works today.
+**Integrated with extraction** via `services/validation/extraction_adapter.py`:
+- Maps `services.extraction`'s actual `POST /extract` output (per-template
+  `{attribute_name: value}` dicts, one call per document) into a
+  `ValidationBundle` (`bundle.py`). Handles the real gaps between the two
+  services (field names that don't line up, values extraction doesn't
+  capture at all, nulls, misaligned arrays) by degrading gracefully — never
+  crashes, records an `AdapterWarning` for anything it had to default or
+  couldn't determine, and feeds those warnings into the AI review step. See
+  its module docstring for the full list of known gaps.
+- `agent.run_agentic_validation_from_extraction()` / `POST
+  /validate/from-extraction` — the entry points that take raw extraction
+  results directly and call the adapter internally; only the extraction
+  results are required, everything else is auto-derived or defaulted.
+- Lives inside `services/validation/` rather than a shared `libs/` package
+  since extraction never needs to import it — see the note in "Restructuring
+  for the next two services" above.
+
+`services/validation/examples/buggy_adapter_demo.py` is unrelated to the
+above — a deliberately-bugged teaching fixture (different, made-up input
+shape) used only by `examples/test_conflict_example.py` to demonstrate a
+blind spot in the deterministic engine. Don't confuse it with the real
+adapter.
 
 ### Structure
 
 ```
 services/validation/
-├── bundle.py               # ValidationBundle schema (pydantic) -- the canonical input
-├── rules/                  # Individual BMMB rule functions (date logic, completeness, matching)
-├── engine.py                # ValidationEngine -- runs every applicable rule against a bundle
-├── adapter.py               # Example raw-extraction -> ValidationBundle mapping (contains one
-│                             # deliberate bug -- see its module docstring -- used to demonstrate
-│                             # what the agentic review step is meant to catch)
-├── schemas.py               # AgenticValidationReport / AIFinding / AIReview output models
-├── agent.py                 # run_agentic_validation() -- engine in Python + one Gemini review call
-├── api.py                    # FastAPI router/app -- GET /health, POST /validate
-├── examples/                 # Sample bundles, a raw-extraction conflict demo, curl requests
-├── tests/                    # pytest -- rules, engine, adapter, and API tests (Gemini call mocked)
-├── requirements.txt          # runtime deps only
-└── requirements-dev.txt      # + pytest
+├── bundle.py                 # The canonical ValidationBundle schema (pydantic)
+├── extraction_adapter.py     # Maps extraction's real POST /extract output -> ValidationBundle
+├── rules/                    # Individual BMMB rule functions (date logic, completeness, matching)
+├── engine.py                 # ValidationEngine -- runs every applicable rule against a bundle
+├── schemas.py                 # AgenticValidationReport / AIFinding / AIReview output models
+├── agent.py                   # run_agentic_validation() / run_agentic_validation_from_extraction()
+├── api.py                     # FastAPI router/app -- /health, /validate, /validate/from-extraction
+├── examples/                  # Sample bundles, extraction_results_example.json, curl requests, and
+│                              # buggy_adapter_demo.py (a deliberately-bugged teaching fixture --
+│                              # NOT the real adapter, see extraction_adapter.py for that)
+├── tests/                     # pytest -- rules, engine, adapter, adapter demo, and API tests (Gemini call mocked)
+├── requirements.txt           # runtime deps only
+└── requirements-dev.txt       # + pytest
 ```
 
 ### Running it

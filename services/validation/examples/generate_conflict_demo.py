@@ -2,7 +2,7 @@
 Regenerates test2_conflict.json from raw_extraction_example.json.
 
 Run this after editing raw_extraction_example.json or
-services/validation/adapter.py's mapping logic.
+buggy_adapter_demo.py's mapping logic.
 
 Usage (from repo root, or just "Run" this file directly in an IDE):
     ./venv/bin/python -m examples.generate_conflict_demo
@@ -17,7 +17,7 @@ import sys
 # the repo root on sys.path ourselves — otherwise `services` isn't importable.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from services.validation.adapter import adapt_raw_extraction
+from services.validation.examples.buggy_adapter_demo import adapt_raw_extraction
 
 EXAMPLES_DIR = os.path.dirname(os.path.abspath(__file__))
 

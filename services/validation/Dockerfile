@@ -11,6 +11,7 @@ WORKDIR /srv
 COPY services/validation/requirements.txt ./services/validation/requirements.txt
 RUN pip install --no-cache-dir -r services/validation/requirements.txt
 
+COPY services/__init__.py ./services/__init__.py
 COPY services/validation/ ./services/validation/
 
 # Cloud Run injects $PORT at runtime; default 8080 for local `docker run`.

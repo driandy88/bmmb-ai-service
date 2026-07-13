@@ -29,6 +29,18 @@ Usage (as a library, from a host application):
     # Deterministic-only, no Gemini call and no GCP credentials required:
     report = run_agentic_validation(bundle, raw_extraction, enable_ai_review=False)
 
+    # Starting from raw extraction results instead of an already-built
+    # bundle -- builds the bundle via extraction_adapter.py
+    # first, then runs the same pipeline as above with that bundle as both
+    # the canonical bundle AND the raw_extraction passed to the AI review
+    # (so it can compare the adapter's mapping against the source). Only
+    # extracted_by_template is required -- everything else is auto-derived
+    # or defaulted (see build_validation_bundle()'s docstring):
+    from services.validation import run_agentic_validation_from_extraction
+    report = run_agentic_validation_from_extraction(
+        {"SSM Form 24": {...}, "Bank Statements": {...}, ...},
+    )
+
 The Gemini call goes through Vertex AI, authenticated via Application
 Default Credentials (`gcloud auth application-default login`, or a service
 account in the runtime environment) rather than an API key. Vertex still
@@ -47,6 +59,7 @@ import logging
 import os
 import sys
 import time
+from datetime import date
 from typing import Optional
 
 import httpx
@@ -59,6 +72,7 @@ from pydantic import ValidationError
 
 from .bundle import ValidationBundle
 from .engine import ValidationEngine, ValidationReport
+from .extraction_adapter import build_validation_bundle
 from .schemas import AgenticValidationReport, AIReview
 
 logger = logging.getLogger(__name__)
@@ -145,15 +159,38 @@ def review_deterministic_report(
     bundle: ValidationBundle,
     deterministic: ValidationReport,
     raw_extraction: Optional[dict],
+    adapter_warnings: Optional[list] = None,
 ) -> AIReview:
-    """The single Gemini call: review the deterministic report for likely data-mapping artifacts."""
+    """The single Gemini call: review the deterministic report for likely data-mapping artifacts.
+
+    `adapter_warnings`, when the bundle came from
+    run_agentic_validation_from_extraction(), is the list of
+    AdapterWarnings the adapter itself already flagged (null values,
+    array-length mismatches) while building the bundle -- handed to the
+    model explicitly rather than making it re-derive the same anomalies by
+    comparing the bundle against raw_extraction from scratch.
+    """
+    warnings_block = (
+        "\n".join(
+            f"- [{w.document_type}/{w.document_id}] {w.field}: {w.message} "
+            f"(current: {w.current_state}; expected: {w.expected_state})"
+            for w in adapter_warnings
+        )
+        if adapter_warnings
+        else "None."
+    )
     prompt = (
         "Deterministic validation report:\n"
         f"```json\n{deterministic.model_dump_json(indent=2)}\n```\n\n"
         "Canonical document bundle:\n"
         f"```json\n{bundle.model_dump_json(indent=2)}\n```\n\n"
         "Raw pre-adapter extraction:\n"
-        f"```json\n{json.dumps(raw_extraction, indent=2) if raw_extraction else 'Not available.'}\n```"
+        f"```json\n{json.dumps(raw_extraction, indent=2) if raw_extraction else 'Not available.'}\n```\n\n"
+        "Adapter warnings (data anomalies the extraction->bundle adapter already "
+        "detected while building this bundle -- each states what it found vs what "
+        "was expected; treat every one of these as worth a finding, not just the "
+        "checks that failed):\n"
+        f"{warnings_block}"
     )
 
     last_error: Optional[Exception] = None
@@ -212,20 +249,28 @@ def run_agentic_validation(
     bundle: ValidationBundle,
     raw_extraction: Optional[dict] = None,
     enable_ai_review: bool = True,
+    adapter_warnings: Optional[list] = None,
 ) -> AgenticValidationReport:
     """Run the deterministic engine, then optionally have Gemini review the result.
 
     enable_ai_review defaults to True (opt-out) to preserve existing behavior.
     Set it to False to skip the Gemini call entirely and get deterministic-only
     results back — in that case no GCP project/credentials are needed.
+
+    `adapter_warnings` is normally left unset here -- it's populated by
+    run_agentic_validation_from_extraction() (which has an adapter step to
+    generate them from); passed through so the caller always gets the same
+    AgenticValidationReport shape either way.
     """
     deterministic = ValidationEngine().run(bundle)
+    adapter_warnings = adapter_warnings or []
 
     if not enable_ai_review:
         return AgenticValidationReport(
             deterministic=deterministic,
             ai_findings=[],
             narrative="(AI review disabled; showing deterministic results only.)",
+            adapter_warnings=adapter_warnings,
         )
 
     project = os.environ.get("GCP_PROJECT_ID")
@@ -242,7 +287,7 @@ def run_agentic_validation(
     client = genai.Client(vertexai=True, project=project, location=location)
 
     try:
-        review = review_deterministic_report(client, bundle, deterministic, raw_extraction)
+        review = review_deterministic_report(client, bundle, deterministic, raw_extraction, adapter_warnings)
     except (ValidationError, ValueError) as e:
         logger.warning("AI review response failed to parse: %s", e)
         review = AIReview(
@@ -272,6 +317,65 @@ def run_agentic_validation(
         deterministic=deterministic,
         ai_findings=review.ai_findings,
         narrative=review.narrative,
+        adapter_warnings=adapter_warnings,
+    )
+
+
+def run_agentic_validation_from_extraction(
+    extracted_by_template: dict,
+    *,
+    bundle_id: Optional[str] = None,
+    system_date: Optional[date] = None,
+    entity_type: Optional[str] = None,
+    tenure_months: Optional[int] = None,
+    repayment_frequency: Optional[str] = None,
+    signature_present: Optional[bool] = None,
+    tax_declaration_entity_name: Optional[str] = None,
+    tax_declaration_fye_dates: Optional[list] = None,
+    enable_ai_review: bool = True,
+) -> AgenticValidationReport:
+    """Entry point for callers that have raw extraction results, not an
+    already-built ValidationBundle -- calls
+    extraction_adapter.build_validation_bundle() to map
+    `extracted_by_template` (one entry per POST /extract call, keyed by
+    template name -- see examples/extraction_results_example.json)
+    into a bundle, then runs the same deterministic + AI-review pipeline as
+    run_agentic_validation().
+
+    `extracted_by_template` is the only required argument -- a raw
+    extraction results dump, unmodified, is a valid call on its own. The
+    raw dict is also passed through as the AI review's raw_extraction
+    context, so a suspicious deterministic result can still be cross-checked
+    against the adapter's own mapping (the same mapping-bug detection
+    run_agentic_validation() already does for a hand-built bundle -- see
+    this module's docstring).
+
+    Every other keyword arg exists only because extraction has no source
+    attribute for it yet, or because the caller may want to override an
+    auto-derived value -- see
+    extraction_adapter.build_validation_bundle()'s
+    docstring for exactly what's derived/defaulted and which attribute to
+    add to close each gap for real. None of these ever raise: every
+    omission and every null/misaligned value found while building the
+    bundle is recorded as an AdapterWarning instead, so this always returns
+    a complete report -- check the returned report's `adapter_warnings`
+    even when every deterministic check passes, since a warning means a
+    value was defaulted rather than genuinely present.
+    """
+    result = build_validation_bundle(
+        extracted_by_template,
+        bundle_id=bundle_id,
+        system_date=system_date,
+        entity_type=entity_type,
+        tenure_months=tenure_months,
+        repayment_frequency=repayment_frequency,
+        signature_present=signature_present,
+        tax_declaration_entity_name=tax_declaration_entity_name,
+        tax_declaration_fye_dates=tax_declaration_fye_dates,
+    )
+    return run_agentic_validation(
+        result.bundle, extracted_by_template,
+        enable_ai_review=enable_ai_review, adapter_warnings=result.warnings,
     )
 
 

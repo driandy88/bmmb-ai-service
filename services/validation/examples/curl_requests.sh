@@ -49,3 +49,22 @@ echo "=== POST /validate — test2_conflict.json (adapter-mapping-bug demo bundl
 make_payload "$SCRIPT_DIR/test2_conflict.json" \
   | curl -s -X POST "$HOST/validate" -H "Content-Type: application/json" -d @- \
   | python3 -m json.tool
+echo
+
+echo "=== POST /validate/from-extraction — extraction_results_example.json ==="
+# This endpoint is the one to use from the extraction service: the request
+# body is the RAW extraction dump keyed by template name
+# (extracted_by_template), exactly what /extract returns per document -- no
+# {"bundle": ...} wrapping needed. Overrides that extraction has no source
+# for (loan terms, signature confirmation, etc.) are passed as query params.
+FROM_EXTRACTION_URL="$HOST/validate/from-extraction?enable_ai_review=false&entity_type=Sdn%20Bhd&tenure_months=60&repayment_frequency=Monthly&signature_present=true"
+python3 -c "
+import json
+with open('$SCRIPT_DIR/extraction_results_example.json') as f:
+    raw = json.load(f)
+raw.pop('_comment', None)
+print(json.dumps(raw))
+" | curl -s -X POST "$FROM_EXTRACTION_URL" \
+    -H "Content-Type: application/json" \
+    -d @- \
+  | python3 -m json.tool

@@ -121,3 +121,104 @@ class TestCrossDocumentMatching:
         assert mismatch_checks
         assert any(r.passed is False for r in mismatch_checks)
         assert report.overall_passed is False
+
+
+class TestNewRulesWiring:
+    def test_overdraft_is_caught(self, passing_bundle_raw):
+        raw = passing_bundle_raw.copy()
+        raw["extracted_documents"] = [
+            dict(doc, data=dict(doc["data"], monthly_balances=[
+                {"month": "January 2026", "end_balance": -100.0},
+            ]))
+            if doc["document_id"] == "doc_004a"
+            else doc
+            for doc in raw["extracted_documents"]
+        ]
+        report = _run(raw)
+        check = next(r for r in report.results if r.check == "check_bank_statement_overdraft")
+        assert check.passed is False
+        assert report.overall_passed is False
+
+    def test_stale_bank_statement_is_caught(self, passing_bundle_raw):
+        raw = passing_bundle_raw.copy()
+        raw["extracted_documents"] = [
+            dict(doc, data=dict(doc["data"], statement_end_date="2026-01-31"))
+            if doc["document_id"] == "doc_004b"
+            else doc
+            for doc in raw["extracted_documents"]
+        ]
+        report = _run(raw)
+        check = next(r for r in report.results if r.check == "check_bank_statement_freshness")
+        assert check.passed is False
+
+    def test_consent_form_count_below_directors_plus_one_is_caught(self, passing_bundle_raw):
+        raw = passing_bundle_raw.copy()
+        raw["extracted_documents"] = [
+            doc for doc in raw["extracted_documents"] if doc["document_id"] != "doc_006c"
+        ]
+        report = _run(raw)
+        check = next(r for r in report.results if r.check == "verify_consent_form_count")
+        assert check.passed is False
+        assert check.details["required_count"] == 3
+        assert check.details["consent_form_count"] == 2
+
+    def test_missing_application_details_field_is_caught(self, passing_bundle_raw):
+        raw = passing_bundle_raw.copy()
+        raw["extracted_documents"] = [
+            dict(doc, data=dict(doc["data"], main_contact_emails=[]))
+            if doc["document_type"] == "customer_information"
+            else doc
+            for doc in raw["extracted_documents"]
+        ]
+        report = _run(raw)
+        check = next(r for r in report.results if r.check == "verify_application_details_completeness")
+        assert check.passed is False
+
+
+class TestTaxDeclarationAlternatePath:
+    def _sole_prop_bundle(self, fye_dates):
+        return {
+            "bundle_id": "BUNDLE-SOLE-PROP",
+            "metadata": {
+                "total_documents_received": 1 + len(fye_dates),
+                "system_date": "2026-07-07",
+                "document_types_present": ["ssm_corporate_form", "tax_declaration"],
+            },
+            "extracted_documents": [
+                {
+                    "document_id": "doc_ssm",
+                    "document_type": "ssm_corporate_form",
+                    "document_subtype": "form_b",
+                    "data": {
+                        "entity_name": "SOLO TRADING",
+                        "business_registration_number": "SP0012345",
+                        "entity_type": "Sole Proprietor",
+                    },
+                },
+                *[
+                    {
+                        "document_id": f"doc_tax_{i}",
+                        "document_type": "tax_declaration",
+                        "data": {"entity_name": "SOLO TRADING", "financial_year_end": fye},
+                    }
+                    for i, fye in enumerate(fye_dates)
+                ],
+            ],
+        }
+
+    def test_two_consecutive_years_of_tax_declarations_pass(self):
+        report = _run(self._sole_prop_bundle(["2024-12-31", "2025-12-31"]))
+        consecutive = next(r for r in report.results if r.check == "check_financial_consecutive_years")
+        eighteen_month = next(r for r in report.results if r.check == "calculate_financial_18_month_rule")
+        assert consecutive.passed is True
+        assert eighteen_month.passed is True
+
+    def test_financial_sections_check_is_skipped_for_tax_declarations(self):
+        report = _run(self._sole_prop_bundle(["2024-12-31", "2025-12-31"]))
+        sections_check = next(r for r in report.results if r.check == "verify_financial_sections_present")
+        assert sections_check.passed is None
+
+    def test_gap_year_tax_declarations_fail(self):
+        report = _run(self._sole_prop_bundle(["2023-12-31", "2025-12-31"]))
+        consecutive = next(r for r in report.results if r.check == "check_financial_consecutive_years")
+        assert consecutive.passed is False
