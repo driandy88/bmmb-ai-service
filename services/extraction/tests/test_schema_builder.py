@@ -1,20 +1,34 @@
 """
 Tests for app.config and app.schema_builder, run against the REAL bmmb_dev
-Cloud SQL database (the 15 BMMB document templates, seeded from
+Cloud SQL database (the 15 seeded BMMB document templates, from
 seed_templates_attributes.sql) so a broken config is caught immediately, not
 just a synthetic fixture. Requires Cloud SQL credentials -- see the `test`
 job in .github/workflows/deploy.yml for how CI provides them.
+
+Assertions below check for the presence of these 15 known templates rather
+than an exact row count/exact id list: test_crud.py's CRUD tests create and
+delete throwaway "__test_tmpl__"/"__test_attr__" rows in this same real
+database, and a run that fails partway through (before its own cleanup)
+leaves one behind -- which must not fail *these* tests too.
 """
 import pytest
 
 from app.config import TemplateNotFoundError, get_template, list_templates
 from app.schema_builder import build_gemini_schema, generate_extraction_prompt
 
+_SEEDED_TEMPLATE_NAMES = {
+    "Company Act Section 14", "SSM Form 24", "SSM Form 44", "SSM Form 49",
+    "SSM Form 9 & 28", "Form 32A", "Financial Statements (Sdn Bhd)", "Borang B",
+    "Bank Statements", "MyKad (Director ID or Passport)", "Consent Form",
+    "Customer Information Form", "Application Details", "CTOS Report",
+    "CCRIS / CBM Report",
+}
+
 # Ids are DB-generated uuids (not stable across re-seeds), so look them up by
 # name -- the templates themselves are stable, seeded via
 # seed_templates_attributes.sql.
 _ALL_TEMPLATES = list_templates()
-_BY_NAME = {t["name"]: t["id"] for t in _ALL_TEMPLATES}
+_BY_NAME = {t["name"]: t["id"] for t in _ALL_TEMPLATES if t["name"] in _SEEDED_TEMPLATE_NAMES}
 
 COMPANY_ACT_SECTION_14 = _BY_NAME["Company Act Section 14"]  # 3 unique alphanumeric fields, no row_group
 BANK_STATEMENTS = _BY_NAME["Bank Statements"]  # 4 "Multiple" fields (one numeric) + 1 "Unique"
@@ -26,13 +40,14 @@ UNKNOWN_TEMPLATE_ID = "00000000-0000-0000-0000-000000000000"
 
 class TestConfigLoading:
     def test_all_templates_present(self):
-        assert len(list_templates()) == 15
+        names = {t["name"] for t in list_templates()}
+        assert _SEEDED_TEMPLATE_NAMES <= names
 
     def test_unknown_template_raises(self):
         with pytest.raises(TemplateNotFoundError):
             get_template(UNKNOWN_TEMPLATE_ID)
 
-    @pytest.mark.parametrize("template_id", [t["id"] for t in _ALL_TEMPLATES])
+    @pytest.mark.parametrize("template_id", list(_BY_NAME.values()))
     def test_template_has_attributes(self, template_id):
         tmpl = get_template(template_id)
         assert tmpl["name"]

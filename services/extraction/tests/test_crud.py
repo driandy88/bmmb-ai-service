@@ -21,10 +21,21 @@ AUTH_HEADERS = {"X-Admin-Key": ADMIN_KEY}
 
 @pytest.fixture
 def new_attribute():
-    """Creates a throwaway attribute, yields its JSON body, deletes it after."""
+    """Creates a throwaway attribute, yields its JSON body, deletes it after.
+
+    Best-effort cleanup of a same-named leftover first -- a prior run that
+    got killed mid-test (or crashed before its own teardown ran) leaves this
+    name behind in the real bmmb_dev database, which would otherwise 400
+    every subsequent run with "name already exists" instead of just this one.
+    """
+    name = "__test_attr__ Invoice Number"
+    leftover = next((a for a in client.get("/attributes/").json() if a["name"] == name), None)
+    if leftover:
+        client.delete(f"/attributes/{leftover['id']}", headers=AUTH_HEADERS)
+
     r = client.post(
         "/attributes/",
-        json={"name": "__test_attr__ Invoice Number", "description": "desc", "data_type": "Alphanumeric", "example": "INV-1"},
+        json={"name": name, "description": "desc", "data_type": "Alphanumeric", "example": "INV-1"},
         headers=AUTH_HEADERS,
     )
     assert r.status_code == 201, r.text
