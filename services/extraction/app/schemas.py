@@ -39,3 +39,41 @@ class TemplateOut(BaseModel):
     group_name: Optional[str] = None
     llm_prompt: Optional[str] = None
     template_attributes: list[TemplateAttributeOut] = []
+
+
+# ── Write request bodies ─────────────────────────────────────────────────────
+
+class AttributeCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    data_type: str  # "Alphabet" | "Alphanumeric" | "Numeric" | "Datetime" | "Boolean"
+    example: Optional[str] = None
+
+
+class AttributeUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    data_type: Optional[str] = None
+    example: Optional[str] = None
+
+
+class TemplateAttributeIn(BaseModel):
+    attribute_id: int
+    frequency: str = "Unique"  # "Unique" | "Multiple"
+    row_group: Optional[str] = None
+
+
+class TemplateCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    group_name: Optional[str] = None
+    llm_prompt: Optional[str] = None
+    attributes: list[TemplateAttributeIn] = []
+
+
+class TemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    group_name: Optional[str] = None
+    llm_prompt: Optional[str] = None
+    attributes: Optional[list[TemplateAttributeIn]] = None
