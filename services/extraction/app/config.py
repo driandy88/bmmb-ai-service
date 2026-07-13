@@ -201,7 +201,7 @@ def list_templates() -> list[dict]:
     return list(_load_all().values())
 
 
-def get_template(template_id: int) -> dict:
+def get_template(template_id: str) -> dict:
     templates = _load_all()
     if template_id not in templates:
         # A template created since the cache was loaded won't be in it yet --
@@ -240,7 +240,7 @@ def list_attributes() -> list[dict]:
     ]
 
 
-def get_attribute(attribute_id: int) -> dict:
+def get_attribute(attribute_id: str) -> dict:
     for attr in list_attributes():
         if attr["id"] == attribute_id:
             return attr
@@ -270,7 +270,7 @@ def create_attribute(name: str, description: str | None, data_type: str, example
     return get_attribute(row["id"])
 
 
-def update_attribute(attribute_id: int, fields: dict) -> dict:
+def update_attribute(attribute_id: str, fields: dict) -> dict:
     """`fields` holds only the keys the caller actually supplied (name,
     description, data_type, example) -- partial update, matching
     AttributeUpdate's exclude_unset semantics."""
@@ -298,7 +298,7 @@ def update_attribute(attribute_id: int, fields: dict) -> dict:
     return get_attribute(attribute_id)
 
 
-def delete_attribute(attribute_id: int) -> None:
+def delete_attribute(attribute_id: str) -> None:
     get_attribute(attribute_id)  # raises AttributeNotFoundError if missing
     with _get_engine().begin() as conn:
         used_in = conn.execute(
@@ -319,7 +319,7 @@ def delete_attribute(attribute_id: int) -> None:
 
 # ── Templates: write ─────────────────────────────────────────────────────────
 
-def _sync_template_attributes(conn, template_id: int, attribute_entries: list[dict]) -> None:
+def _sync_template_attributes(conn, template_id: str, attribute_entries: list[dict]) -> None:
     conn.execute(
         sqlalchemy.text("DELETE FROM template_attributes WHERE template_id = :id"),
         {"id": template_id},
@@ -372,7 +372,7 @@ def create_template(
     return get_template(template_id)
 
 
-def update_template(template_id: int, fields: dict, attributes: list[dict] | None) -> dict:
+def update_template(template_id: str, fields: dict, attributes: list[dict] | None) -> dict:
     """`fields` holds only the keys the caller actually supplied (name,
     description, group_name, llm_prompt) -- partial update. `attributes`,
     if not None, fully replaces the template's attribute wiring."""
@@ -398,7 +398,7 @@ def update_template(template_id: int, fields: dict, attributes: list[dict] | Non
     return get_template(template_id)
 
 
-def delete_template(template_id: int) -> None:
+def delete_template(template_id: str) -> None:
     get_template(template_id)  # raises TemplateNotFoundError if missing
     with _get_engine().begin() as conn:
         conn.execute(sqlalchemy.text("DELETE FROM template_attributes WHERE template_id = :id"), {"id": template_id})

@@ -26,7 +26,7 @@ def health():
 
 @router.post("/extract", status_code=status.HTTP_200_OK)
 async def extract_document(
-    template_id: int = Form(...),
+    template_id: str = Form(...),
     files: list[UploadFile] = File(...),
     model: str = Form("gemini-2.5-flash", description="Gemini model id"),
 ):

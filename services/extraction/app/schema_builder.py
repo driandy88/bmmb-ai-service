@@ -58,7 +58,7 @@ def _partition(template_attributes: list[dict]):
     return ungrouped, grouped
 
 
-def build_gemini_schema(template_id: int) -> dict:
+def build_gemini_schema(template_id: str) -> dict:
     """Returns a dict suitable for GenerateContentConfig(response_schema=...).
 
     Every top-level field/group also carries a sibling `_locations` entry so
@@ -138,7 +138,7 @@ def render_extraction_prompt(tmpl: dict) -> str:
     return "\n".join(lines)
 
 
-def generate_extraction_prompt(template_id: int) -> str:
+def generate_extraction_prompt(template_id: str) -> str:
     """Returns the template's stored llm_prompt if present (the normal case
     -- templates are seeded/authored with a precomputed prompt), otherwise
     builds an equivalent one from its attributes."""

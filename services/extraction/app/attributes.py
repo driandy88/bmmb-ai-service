@@ -22,7 +22,7 @@ def get_attributes():
 
 
 @router.get("/{attribute_id}", response_model=AttributeOut)
-def get_attribute_detail(attribute_id: int):
+def get_attribute_detail(attribute_id: str):
     try:
         return get_attribute(attribute_id)
     except AttributeNotFoundError as exc:
@@ -38,7 +38,7 @@ def post_attribute(payload: AttributeCreate):
 
 
 @router.put("/{attribute_id}", response_model=AttributeOut, dependencies=[Depends(require_admin_key)])
-def put_attribute(attribute_id: int, payload: AttributeUpdate):
+def put_attribute(attribute_id: str, payload: AttributeUpdate):
     try:
         return update_attribute(attribute_id, payload.model_dump(exclude_unset=True))
     except AttributeNotFoundError as exc:
@@ -48,7 +48,7 @@ def put_attribute(attribute_id: int, payload: AttributeUpdate):
 
 
 @router.delete("/{attribute_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin_key)])
-def delete_attribute_route(attribute_id: int):
+def delete_attribute_route(attribute_id: str):
     try:
         delete_attribute(attribute_id)
     except AttributeNotFoundError as exc:
