@@ -63,10 +63,19 @@
   },
 
   "Bank Statements": {
-    "Bank Statement Month": ["January 2026", "February 2026", "March 2026", "April 2026", "May 2026", "June 2026"],
-    "Monthly Deposit": [362700, 340200, 398100, 355600, 410200, 425900],
-    "Monthly Withdrawal": [340980, 355100, 351400, 372100, 348900, 390200],
-    "Monthly End Balance": [42500.00, 38900.50, 51200.75, 47300.00, 55600.25, 60100.00],
+    "Bank Name": "MAYBANK BERHAD",
+    "Account Number Masked": "****4567",
+    "Statement Period": "01 Jan 2026 to 30 Jun 2026",
+    "Transactions": [
+      {"Transaction Date": "2026-01-01", "Transaction Description": "OPENING BALANCE", "Transaction Debit": null, "Transaction Credit": 40000.00, "Transaction Balance": 40000.00},
+      {"Transaction Date": "2026-01-28", "Transaction Description": "CUSTOMER RECEIPT", "Transaction Debit": null, "Transaction Credit": 2500.00, "Transaction Balance": 42500.00},
+      {"Transaction Date": "2026-02-27", "Transaction Description": "SUPPLIER PAYMENT", "Transaction Debit": 3599.50, "Transaction Credit": null, "Transaction Balance": 38900.50},
+      {"Transaction Date": "2026-03-30", "Transaction Description": "CUSTOMER RECEIPT", "Transaction Debit": null, "Transaction Credit": 12300.25, "Transaction Balance": 51200.75},
+      {"Transaction Date": "2026-04-29", "Transaction Description": "SUPPLIER PAYMENT", "Transaction Debit": 3900.75, "Transaction Credit": null, "Transaction Balance": 47300.00},
+      {"Transaction Date": "2026-05-30", "Transaction Description": "CUSTOMER RECEIPT", "Transaction Debit": null, "Transaction Credit": 8300.25, "Transaction Balance": 55600.25},
+      {"Transaction Date": "2026-06-15", "Transaction Description": "CUSTOMER RECEIPT", "Transaction Debit": null, "Transaction Credit": 4499.75, "Transaction Balance": 55600.00},
+      {"Transaction Date": "2026-06-30", "Transaction Description": "CUSTOMER RECEIPT", "Transaction Debit": null, "Transaction Credit": 4500.00, "Transaction Balance": 60100.00}
+    ],
     "Document Type": "Bank Statements"
   },
 

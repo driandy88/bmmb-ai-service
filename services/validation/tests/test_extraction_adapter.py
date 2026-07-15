@@ -293,7 +293,8 @@ class TestBuildValidationBundle:
         assert all(d.data.entity_name == "ALPHA TECH SOLUTIONS SDN BHD" for d in bank_docs)
 
     def test_a_null_deep_in_the_extraction_result_does_not_crash_the_whole_bundle(self, extracted_by_template):
-        extracted_by_template["Bank Statements"]["Monthly End Balance"][2] = None
+        # null balance on Feb's month-end transaction row -> _safe_float warns, no crash
+        extracted_by_template["Bank Statements"]["Transactions"][2]["Transaction Balance"] = None
         result = build_validation_bundle(
             extracted_by_template,
             bundle_id="BUNDLE-TEST-4", system_date=date(2026, 7, 7),

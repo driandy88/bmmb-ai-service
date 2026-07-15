@@ -1,0 +1,87 @@
+name: Test, Build & Deploy — Aggregation
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ["services/aggregation/**"]
+  push:
+    branches: [main]
+    paths: ["services/aggregation/**"]
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: asia-southeast1
+  SERVICE_NAME: aggregation-service
+  REPO_NAME: bmmb-ai-service             # shared Artifact Registry repo across all services in this monorepo
+  WORKDIR: services/aggregation
+  DOCKERFILE: services/aggregation/Dockerfile
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: ${{ env.WORKDIR }}
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      # No GCP credentials needed: this service is pure deterministic Python
+      # (no Vertex AI, no Cloud SQL), so its tests never touch the network.
+      - name: Run tests
+        working-directory: ${{ env.WORKDIR }}
+        run: pytest tests/ -v
+
+  # Only runs after tests pass, and only on pushes to main (not on PRs)
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # required for keyless auth if you switch to Workload Identity later
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      # Build context is the repo root ("."), not $WORKDIR -- see
+      # services/aggregation/Dockerfile's header comment for why.
+      - name: Build image
+        run: |
+          docker build -f ${{ env.DOCKERFILE }} \
+            -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} \
+            .
+
+      - name: Push image
+        run: |
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+
+      # No Vertex AI / Cloud SQL, so no GCP env vars and no IAM roles needed on the
+      # runtime SA. aggregation-service-sa exists only for least-privilege isolation
+      # (created once, with zero role bindings) -- see README "Deployment".
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} \
+            --region=${{ env.REGION }} \
+            --platform=managed \
+            --allow-unauthenticated \
+            --service-account=aggregation-service-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
+
+      - name: Show deployed URL
+        run: gcloud run services describe ${{ env.SERVICE_NAME }} --region=${{ env.REGION }} --format="value(status.url)"

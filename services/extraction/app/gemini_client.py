@@ -47,6 +47,24 @@ SYSTEM_INSTRUCTION = (
 )
 
 
+# A row_group template (bank transactions, director lists) intermittently
+# "bails" and returns a near-empty result — every scalar null and the group
+# array empty. That's a strong failure signal (a bank statement always has
+# transactions; an IC upload always has a director), so retry a few times
+# before accepting it. Templates with no row_group never trigger a retry.
+_MAX_ATTEMPTS = 3
+
+
+def _bailed(result: dict, schema: dict) -> bool:
+    """True if the schema defines an ARRAY-of-OBJECT field (a row_group) that
+    came back missing or empty — treat as a failed extraction worth retrying."""
+    for name, spec in (schema or {}).get("properties", {}).items():
+        if spec.get("type") == "ARRAY" and spec.get("items", {}).get("type") == "OBJECT":
+            if not result.get(name):  # None or []
+                return True
+    return False
+
+
 class GeminiConfigError(Exception):
     """Raised when required config (e.g. GCP_PROJECT_ID) is missing."""
 
@@ -92,20 +110,31 @@ def run_extraction(
         contents.append(types.Part.from_bytes(data=file_bytes, mime_type=mime_type))
     contents.append(prompt)
 
-    try:
-        response = client.models.generate_content(
-            model=model,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_INSTRUCTION,
-                response_mime_type="application/json",
-                response_schema=schema,
-            ),
-        )
-    except Exception as exc:  # noqa: BLE001 - deliberately broad, re-raised as our own type
-        raise GeminiCallError(str(exc)) from exc
+    config = types.GenerateContentConfig(
+        system_instruction=SYSTEM_INSTRUCTION,
+        response_mime_type="application/json",
+        response_schema=schema,
+        # Give the model headroom to both think and emit the full JSON. Long
+        # row_group extractions (e.g. a bank statement's daily transactions)
+        # otherwise intermittently hit the default output ceiling once thinking
+        # tokens are counted and truncate to a near-empty result; 65535 is
+        # gemini-2.5-flash's max output. See _bailed()/_MAX_ATTEMPTS for the
+        # retry that recovers the residual failures.
+        max_output_tokens=65535,
+    )
 
-    try:
-        return json.loads(response.text)
-    except (ValueError, AttributeError) as exc:
-        raise GeminiParseError(str(exc)) from exc
+    result = None
+    for attempt in range(_MAX_ATTEMPTS):
+        try:
+            response = client.models.generate_content(model=model, contents=contents, config=config)
+        except Exception as exc:  # noqa: BLE001 - deliberately broad, re-raised as our own type
+            raise GeminiCallError(str(exc)) from exc
+        try:
+            result = json.loads(response.text)
+        except (ValueError, AttributeError) as exc:
+            raise GeminiParseError(str(exc)) from exc
+        if not _bailed(result, schema):
+            return result
+        # else: a defined row_group came back empty — likely a bail; retry
+        # (unless this was the last attempt, in which case return it as-is).
+    return result

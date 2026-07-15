@@ -31,7 +31,7 @@ _ALL_TEMPLATES = list_templates()
 _BY_NAME = {t["name"]: t["id"] for t in _ALL_TEMPLATES if t["name"] in _SEEDED_TEMPLATE_NAMES}
 
 COMPANY_ACT_SECTION_14 = _BY_NAME["Company Act Section 14"]  # 3 unique alphanumeric fields, no row_group
-BANK_STATEMENTS = _BY_NAME["Bank Statements"]  # 4 "Multiple" fields (one numeric) + 1 "Unique"
+BANK_STATEMENTS = _BY_NAME["Bank Statements"]  # 4 "Unique" header fields + a "Transactions" row_group
 FINANCIAL_STATEMENTS = _BY_NAME["Financial Statements (Sdn Bhd)"]  # includes a "Boolean" field
 CUSTOMER_INFORMATION_FORM = _BY_NAME["Customer Information Form"]  # 24 fields, mix of Unique/Multiple
 
@@ -80,20 +80,33 @@ class TestSchemaShape:
             build_gemini_schema(UNKNOWN_TEMPLATE_ID)
 
     def test_multiple_frequency_produces_array(self):
-        schema = build_gemini_schema(BANK_STATEMENTS)
+        # Financial Statements keeps top-level Multiple fields (one value per
+        # comparative year column); Bank Statements' Multiple fields now live
+        # inside the Transactions row_group instead (see test_row_group_*).
+        schema = build_gemini_schema(FINANCIAL_STATEMENTS)
         props = schema["properties"]
-        assert props["Bank Statement Month"]["type"] == "ARRAY"
-        assert props["Bank Statement Month"]["items"]["type"] == "STRING"
+        assert props["Financial Statement Date"]["type"] == "ARRAY"
+        assert props["Financial Statement Date"]["items"]["type"] == "STRING"
 
     def test_unique_frequency_produces_scalar(self):
         schema = build_gemini_schema(BANK_STATEMENTS)
         assert schema["properties"]["Document Type"]["type"] == "STRING"
 
+    def test_row_group_produces_array_of_objects(self):
+        # Bank Statements' daily transactions are a row_group: one array of
+        # correlated row-objects, keyed by the group name.
+        schema = build_gemini_schema(BANK_STATEMENTS)
+        txns = schema["properties"]["Transactions"]
+        assert txns["type"] == "ARRAY"
+        assert txns["items"]["type"] == "OBJECT"
+        cols = txns["items"]["properties"]
+        assert "Transaction Date" in cols and "Transaction Balance" in cols
+
 
 class TestFieldTypeMapping:
     def test_numeric_multiple_maps_to_array_of_number(self):
-        schema = build_gemini_schema(BANK_STATEMENTS)
-        field = schema["properties"]["Monthly Withdrawal"]
+        schema = build_gemini_schema(FINANCIAL_STATEMENTS)
+        field = schema["properties"]["Revenue or Turnover or Sales"]
         assert field["type"] == "ARRAY"
         assert field["items"]["type"] == "NUMBER"
 

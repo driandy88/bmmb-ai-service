@@ -45,8 +45,7 @@ fields (already possible via the CRUD API) removes this risk for real --
 until then, any length mismatch shows up as an AdapterWarning instead of a
 crash or a silently-wrong pairing.
 """
-import calendar
-from datetime import date, datetime
+from datetime import date
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -173,16 +172,6 @@ def _parse_ddmmyyyy(value: str) -> date:
     cosmetic -- Pydantic will reject 'DD-MM-YYYY' outright."""
     day, month, year = value.split("-")
     return date(int(year), int(month), int(day))
-
-
-def _parse_month_year(value: str) -> tuple[date, date]:
-    """'July 2023' -> (2023-07-01, 2023-07-31): the first and last calendar
-    day of that month, used as one statement period's start/end date."""
-    dt = datetime.strptime(value.strip(), "%B %Y")
-    start = date(dt.year, dt.month, 1)
-    last_day = calendar.monthrange(dt.year, dt.month)[1]
-    end = date(dt.year, dt.month, last_day)
-    return start, end
 
 
 def _zip_positional(
@@ -438,10 +427,12 @@ def build_bank_statement_doc(
     entity_name: str,
     warnings: Optional[list[AdapterWarning]] = None,
 ) -> Optional[BankStatementDoc]:
-    """One consolidated BankStatementDoc spanning every month in the "Bank
-    Statements" template's Multiple arrays (Bank Statement Month/Withdrawal/
-    Deposit/End Balance), covering the full min-to-max date range with a
-    monthly_balances breakdown for the overdraft check.
+    """One consolidated BankStatementDoc built from the "Bank Statements"
+    template's daily Transactions row_group. The monthly end balance is the
+    balance of the last-dated transaction in each calendar month (the same
+    rollup services/aggregation does for the frontend); the statement period
+    spans the earliest-to-latest transaction date. The overdraft check reads
+    the monthly end balances.
 
     `entity_name` has no source attribute on this template -- thread it in
     from the matching SSM extraction call.
@@ -452,33 +443,55 @@ def build_bank_statement_doc(
         return None
     document_id = "bank_statement"
 
-    rows = _zip_positional(
-        extracted, "Bank Statement Month", "Monthly End Balance",
-        warnings=warnings, document_type="bank_statement", document_id=document_id,
+    txns = _safe_list(
+        extracted.get("Transactions"), warnings=warnings,
+        document_type="bank_statement", document_id=document_id, field="Transactions",
     )
-    rows = [(month, balance) for month, balance in rows if month is not None]
-    if not rows:
+
+    # Group transaction rows by calendar month, skipping undatable rows (the
+    # adapter never crashes on bad data -- it records a warning and moves on).
+    by_month: dict[tuple[int, int], list] = {}
+    for i, row in enumerate(txns):
+        raw_date = (row or {}).get("Transaction Date")
+        try:
+            d = date.fromisoformat(str(raw_date))
+        except (TypeError, ValueError):
+            if raw_date:
+                warnings.append(AdapterWarning(
+                    document_type="bank_statement", document_id=document_id,
+                    field=f"Transactions[{i}].Transaction Date",
+                    message=f"unparseable transaction date {raw_date!r}; row excluded from monthly balances.",
+                    current_state=str(raw_date), expected_state="an ISO date (YYYY-MM-DD)",
+                ))
+            continue
+        by_month.setdefault((d.year, d.month), []).append((d, row))
+
+    if not by_month:
         return None
 
-    periods = [_parse_month_year(month) for month, _ in rows]
-    start = min(p[0] for p in periods)
-    end = max(p[1] for p in periods)
+    monthly_balances = []
+    all_dates: list[date] = []
+    for (year, month) in sorted(by_month):
+        rows = sorted(by_month[(year, month)], key=lambda dr: dr[0])  # by date; stable -> ties keep input order
+        all_dates.extend(d for d, _ in rows)
+        last_row = rows[-1][1]
+        monthly_balances.append(MonthlyBankBalance(
+            month=date(year, month, 1).strftime("%B %Y"),
+            end_balance=_safe_float(
+                last_row.get("Transaction Balance"), warnings=warnings,
+                document_type="bank_statement", document_id=document_id,
+                field=f"Transaction Balance[{year}-{month:02d}]",
+            ),
+        ))
 
     return BankStatementDoc(
         document_id=document_id,
         document_type="bank_statement",
         data=BankStatementData(
             entity_name=entity_name,
-            statement_start_date=start,
-            statement_end_date=end,
-            monthly_balances=[
-                MonthlyBankBalance(
-                    month=month,
-                    end_balance=_safe_float(balance, warnings=warnings, document_type="bank_statement",
-                                             document_id=document_id, field=f"Monthly End Balance[{month}]"),
-                )
-                for month, balance in rows
-            ],
+            statement_start_date=min(all_dates),
+            statement_end_date=max(all_dates),
+            monthly_balances=monthly_balances,
         ),
     )
 
