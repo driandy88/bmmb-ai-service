@@ -7,12 +7,18 @@
     "Incorporation Date": "12-03-2023",
     "Registered Address": "LOT 2-4-19, WISMA RAMPAI, TAMAN SRI RAMPAI, SETAPAK, KUALA LUMPUR",
     "Business Nature": ["SOFTWARE DEVELOPMENT"],
-    "Shareholder Name": ["MOHD AIMAN BIN ZULKIFLI", "NURUL AIN BINTI ZULKIFLI"],
-    "Shareholder Address": [
-      "NO 29, JALAN AMAN SERENIA 11/7, BANDAR SERENIA, 43900 SEPANG, SELANGOR",
-      "NO 12, JALAN DAMAI 3/2, TAMAN DAMAI, 43900 SEPANG, SELANGOR"
+    "Shareholders": [
+      {
+        "Shareholder Name": "MOHD AIMAN BIN ZULKIFLI",
+        "Shareholder Address": "NO 29, JALAN AMAN SERENIA 11/7, BANDAR SERENIA, 43900 SEPANG, SELANGOR",
+        "Shareholder Percentage": "18,000"
+      },
+      {
+        "Shareholder Name": "NURUL AIN BINTI ZULKIFLI",
+        "Shareholder Address": "NO 12, JALAN DAMAI 3/2, TAMAN DAMAI, 43900 SEPANG, SELANGOR",
+        "Shareholder Percentage": "12,000"
+      }
     ],
-    "Shareholder Percentage": ["18,000", "12,000"],
     "Director NRIC or Passport Number": ["880214-14-5123"],
     "Document Type": "SSM Form 24"
   },
@@ -30,12 +36,18 @@
     "Registered Address": "LOT 2-4-19, WISMA RAMPAI, TAMAN SRI RAMPAI, SETAPAK, KUALA LUMPUR",
     "Business Address": "LOT 2-4-19, WISMA RAMPAI, TAMAN SRI RAMPAI, SETAPAK, KUALA LUMPUR",
     "Business Nature": ["SOFTWARE DEVELOPMENT"],
-    "Director Name": ["MOHD AIMAN BIN ZULKIFLI", "NURUL AIN BINTI ZULKIFLI"],
-    "Director Address": [
-      "NO 29, JALAN AMAN SERENIA 11/7, BANDAR SERENIA, 43900 SEPANG, SELANGOR",
-      "NO 12, JALAN DAMAI 3/2, TAMAN DAMAI, 43900 SEPANG, SELANGOR"
+    "Directors": [
+      {
+        "Director Name": "MOHD AIMAN BIN ZULKIFLI",
+        "Director Address": "NO 29, JALAN AMAN SERENIA 11/7, BANDAR SERENIA, 43900 SEPANG, SELANGOR",
+        "Director NRIC or Passport Number": "880214-14-5123"
+      },
+      {
+        "Director Name": "NURUL AIN BINTI ZULKIFLI",
+        "Director Address": "NO 12, JALAN DAMAI 3/2, TAMAN DAMAI, 43900 SEPANG, SELANGOR",
+        "Director NRIC or Passport Number": "900101-10-1234"
+      }
     ],
-    "Director NRIC or Passport Number": ["880214-14-5123", "900101-10-1234"],
     "Document Type": "SSM Form 49"
   },
 
@@ -95,8 +107,11 @@
 
   "Consent Form": {
     "Entity Name": "ALPHA TECH SOLUTIONS SDN BHD",
-    "Director Name": ["MOHD AIMAN BIN ZULKIFLI", "NURUL AIN BINTI ZULKIFLI", "MOHD AIMAN BIN ZULKIFLI"],
-    "Director NRIC or Passport Number": ["880214-14-5123", "900101-10-1234", "880214-14-5123"],
+    "Directors": [
+      {"Director Name": "MOHD AIMAN BIN ZULKIFLI", "Director NRIC or Passport Number": "880214-14-5123"},
+      {"Director Name": "NURUL AIN BINTI ZULKIFLI", "Director NRIC or Passport Number": "900101-10-1234"},
+      {"Director Name": "MOHD AIMAN BIN ZULKIFLI", "Director NRIC or Passport Number": "880214-14-5123"}
+    ],
     "Document Type": "Consent Form"
   },
 

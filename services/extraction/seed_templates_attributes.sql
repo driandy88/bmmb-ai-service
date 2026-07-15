@@ -135,32 +135,35 @@ Document description: SSM Form 24, filed to report an allotment of shares. Conta
 
 Fields to extract:
 
-1. Entity Name  |  Type: Alphanumeric — e.g. AJS MAJU SERVICES SDN. BHD.
-   The registered legal name of the company exactly as printed on the form, typically in the header block beside ''Name of Company'' / ''Nama Syarikat''. Retain the full suffix and punctuation as printed (e.g. ''SDN. BHD.'', ''BHD.''). Extract only the subject company, not the names of any other companies mentioned as shareholders or agents.
-2. Business Registration Number  |  Type: Alphanumeric — e.g. 201401032382(1108466-M)
-   The company registration number issued by SSM, labelled as ''Registration No.'', ''No. Pendaftaran'', or ''Company No.'' Modern format is a 12-digit number followed by the legacy number in brackets, e.g. 201401032382(1108466-M). Older documents may show only the legacy format (e.g. 1108466-M). Extract the value exactly as printed including brackets and hyphens.
+1. Document Type  |  Type: Alphanumeric — e.g. SSM Form 24
+   Return the document type. Only return what is on this list [Company Act Section 14, SSM Form 24, SSM Form 44, SSM Form 49, SSM Form 9 & 28, Form 32A, Financial Statements (Sdn Bhd), Borang B, Bank Statements, MyKad (Director ID or Passport), Consent Form, Customer Information Form, Application Details, CTOS Report, CCRIS / CBM Report, Other]
+2. Business Nature  |  Type: Alphanumeric (multiple occurrences expected) — e.g. GENERAL CLEANING OF BUILDING
+   The stated nature of the company''s business, labelled ''Nature of Business'' / ''Sifat Perniagaan''. Usually a short phrase in capitals. Extract the phrase as printed. If multiple activities are listed as separate line items, extract each as a separate value.
 3. Incorporation Date  |  Type: Datetime — e.g. 10-09-2024
    The date the company was incorporated, labelled as ''Date of Incorporation'', ''Tarikh Pemerbadanan'', or written in prose within the certificate (e.g. ''incorporated on the 10th day of September 2014''). Normalise to DD-MM-YYYY. If the document shows the date in long prose form, convert it.
-4. Registered Address  |  Type: Alphanumeric — e.g. LOT 2-4-19
+4. Business Registration Number  |  Type: Alphanumeric — e.g. 201401032382(1108466-M)
+   The company registration number issued by SSM, labelled as ''Registration No.'', ''No. Pendaftaran'', or ''Company No.'' Modern format is a 12-digit number followed by the legacy number in brackets, e.g. 201401032382(1108466-M). Older documents may show only the legacy format (e.g. 1108466-M). Extract the value exactly as printed including brackets and hyphens.
+5. Director NRIC or Passport Number  |  Type: Alphanumeric (multiple occurrences expected) — e.g. 991207-08-6447
+   The identification number of each director, labelled ''ID/PASSPORT/REGISTRATION NO.'' on Form 24 and ''IC/Passport'' on Form 49. Accepts two formats: (a) Malaysian NRIC of 12 digits with hyphens, e.g. 991207-08-6447; (b) an alphanumeric passport number, e.g. A12345678. Extract as printed, keeping hyphens for NRIC. Where both an old and new IC number are shown, extract the new (12-digit) number.
+6. Registered Address  |  Type: Alphanumeric — e.g. LOT 2-4-19
 WISMA RAMPAI
 TAMAN SRI RAMPAI, SETAPAK
 KUALA LUMPUR
 WILAYAH PERSEKUTUAN
    The company''s registered office address, labelled ''Registered Address'' / ''Alamat Berdaftar''. Capture the full multi-line address block including lot/unit, building, street, postcode, city and state. Preserve line breaks as they appear; do not reformat into a single line and do not append the country unless printed.
-5. Business Nature  |  Type: Alphanumeric (multiple occurrences expected) — e.g. GENERAL CLEANING OF BUILDING
-   The stated nature of the company''s business, labelled ''Nature of Business'' / ''Sifat Perniagaan''. Usually a short phrase in capitals. Extract the phrase as printed. If multiple activities are listed as separate line items, extract each as a separate value.
-6. Shareholder Name  |  Type: Alphanumeric (multiple occurrences expected) — e.g. MOHAMMAD FAIZ BN AHMDA NEWAZ
-   The full name of each shareholder / member listed in the shareholders table of Form 24, taken from the ''Name'' column. Extract every row in the table, including corporate shareholders. Preserve spelling exactly as printed, including abbreviations such as ''BIN'' / ''BN'' / ''BINTI''.
-7. Shareholder Address  |  Type: Alphanumeric (multiple occurrences expected) — e.g. NO 29, JALAN AMAN SERENIA 11/7 ANIRA,
+7. Entity Name  |  Type: Alphanumeric — e.g. AJS MAJU SERVICES SDN. BHD.
+   The registered legal name of the company exactly as printed on the form, typically in the header block beside ''Name of Company'' / ''Nama Syarikat''. Retain the full suffix and punctuation as printed (e.g. ''SDN. BHD.'', ''BHD.''). Extract only the subject company, not the names of any other companies mentioned as shareholders or agents.
+8. Shareholders (repeating group — extract one row object per occurrence, with these columns):
+   - Shareholder Name  |  Type: Alphanumeric — e.g. MOHAMMAD FAIZ BN AHMDA NEWAZ
+       The full name of each shareholder / member listed in the shareholders table of Form 24, taken from the ''Name'' column. Extract every row in the table, including corporate shareholders. Preserve spelling exactly as printed, including abbreviations such as ''BIN'' / ''BN'' / ''BINTI''.
+   - Shareholder Percentage  |  Type: Alphanumeric — e.g. 18,000
+       The shareholding held by each shareholder, labelled ''Total Share'' or ''Number of Shares'' in Form 24. In the source forms this is expressed as a share count (e.g. 18,000) rather than a percentage. Extract the value exactly as printed, retaining the thousands separator, and keep it aligned with the corresponding shareholder row.
+   - Shareholder Address  |  Type: Alphanumeric — e.g. NO 29, JALAN AMAN SERENIA 11/7 ANIRA,
 BANDAR SERENIA
 MALAYSIA
 43900, SEPANG
 SELANGGOR
-   The residential or registered address of each shareholder, taken from the address column of the same table row as the shareholder name. Must stay aligned with the corresponding Shareholder Name so the pairing is preserved. Capture the full multi-line block.
-8. Shareholder Percentage  |  Type: Alphanumeric (multiple occurrences expected) — e.g. 18,000
-   The shareholding held by each shareholder, labelled ''Total Share'' or ''Number of Shares'' in Form 24. In the source forms this is expressed as a share count (e.g. 18,000) rather than a percentage. Extract the value exactly as printed, retaining the thousands separator, and keep it aligned with the corresponding shareholder row.
-9. Director NRIC or Passport Number  |  Type: Alphanumeric (multiple occurrences expected) — e.g. 991207-08-6447
-   The identification number of each director, labelled ''ID/PASSPORT/REGISTRATION NO.'' on Form 24 and ''IC/Passport'' on Form 49. Accepts two formats: (a) Malaysian NRIC of 12 digits with hyphens, e.g. 991207-08-6447; (b) an alphanumeric passport number, e.g. A12345678. Extract as printed, keeping hyphens for NRIC. Where both an old and new IC number are shown, extract the new (12-digit) number.
+       The residential or registered address of each shareholder, taken from the address column of the same table row as the shareholder name. Must stay aligned with the corresponding Shareholder Name so the pairing is preserved. Capture the full multi-line block.
 
 For each field above, also populate its entry in _locations with:
   real_page  — the actual sequential page number of the source document/PDF file, counting the
@@ -203,31 +206,34 @@ Document description: SSM Form 49, listing officers of the company. Contains a c
 
 Fields to extract:
 
-1. Entity Name  |  Type: Alphanumeric — e.g. AJS MAJU SERVICES SDN. BHD.
-   The registered legal name of the company exactly as printed on the form, typically in the header block beside ''Name of Company'' / ''Nama Syarikat''. Retain the full suffix and punctuation as printed (e.g. ''SDN. BHD.'', ''BHD.''). Extract only the subject company, not the names of any other companies mentioned as shareholders or agents.
-2. Business Registration Number  |  Type: Alphanumeric — e.g. 201401032382(1108466-M)
-   The company registration number issued by SSM, labelled as ''Registration No.'', ''No. Pendaftaran'', or ''Company No.'' Modern format is a 12-digit number followed by the legacy number in brackets, e.g. 201401032382(1108466-M). Older documents may show only the legacy format (e.g. 1108466-M). Extract the value exactly as printed including brackets and hyphens.
-3. Incorporation Date  |  Type: Datetime — e.g. 10-09-2024
+1. Document Type  |  Type: Alphanumeric — e.g. SSM Form 24
+   Return the document type. Only return what is on this list [Company Act Section 14, SSM Form 24, SSM Form 44, SSM Form 49, SSM Form 9 & 28, Form 32A, Financial Statements (Sdn Bhd), Borang B, Bank Statements, MyKad (Director ID or Passport), Consent Form, Customer Information Form, Application Details, CTOS Report, CCRIS / CBM Report, Other]
+2. Incorporation Date  |  Type: Datetime — e.g. 10-09-2024
    The date the company was incorporated, labelled as ''Date of Incorporation'', ''Tarikh Pemerbadanan'', or written in prose within the certificate (e.g. ''incorporated on the 10th day of September 2014''). Normalise to DD-MM-YYYY. If the document shows the date in long prose form, convert it.
-4. Registered Address  |  Type: Alphanumeric — e.g. LOT 2-4-19
+3. Business Nature  |  Type: Alphanumeric (multiple occurrences expected) — e.g. GENERAL CLEANING OF BUILDING
+   The stated nature of the company''s business, labelled ''Nature of Business'' / ''Sifat Perniagaan''. Usually a short phrase in capitals. Extract the phrase as printed. If multiple activities are listed as separate line items, extract each as a separate value.
+4. Entity Name  |  Type: Alphanumeric — e.g. AJS MAJU SERVICES SDN. BHD.
+   The registered legal name of the company exactly as printed on the form, typically in the header block beside ''Name of Company'' / ''Nama Syarikat''. Retain the full suffix and punctuation as printed (e.g. ''SDN. BHD.'', ''BHD.''). Extract only the subject company, not the names of any other companies mentioned as shareholders or agents.
+5. Business Registration Number  |  Type: Alphanumeric — e.g. 201401032382(1108466-M)
+   The company registration number issued by SSM, labelled as ''Registration No.'', ''No. Pendaftaran'', or ''Company No.'' Modern format is a 12-digit number followed by the legacy number in brackets, e.g. 201401032382(1108466-M). Older documents may show only the legacy format (e.g. 1108466-M). Extract the value exactly as printed including brackets and hyphens.
+6. Registered Address  |  Type: Alphanumeric — e.g. LOT 2-4-19
 WISMA RAMPAI
 TAMAN SRI RAMPAI, SETAPAK
 KUALA LUMPUR
 WILAYAH PERSEKUTUAN
    The company''s registered office address, labelled ''Registered Address'' / ''Alamat Berdaftar''. Capture the full multi-line address block including lot/unit, building, street, postcode, city and state. Preserve line breaks as they appear; do not reformat into a single line and do not append the country unless printed.
-5. Business Address  |  Type: Alphanumeric — e.g. Lot 2-4-19, Wisma Rampai, Taman Sri Rampai, 53300 Setapak, Kuala Lumpur
+7. Business Address  |  Type: Alphanumeric — e.g. Lot 2-4-19, Wisma Rampai, Taman Sri Rampai, 53300 Setapak, Kuala Lumpur
    The address of the principal place of business, labelled ''Business Address'' / ''Alamat Perniagaan''. Capture the full multi-line block. If the form states it is the same as the registered office, extract the phrase as printed (e.g. ''Same as registered address'') rather than copying the registered address.
-6. Business Nature  |  Type: Alphanumeric (multiple occurrences expected) — e.g. GENERAL CLEANING OF BUILDING
-   The stated nature of the company''s business, labelled ''Nature of Business'' / ''Sifat Perniagaan''. Usually a short phrase in capitals. Extract the phrase as printed. If multiple activities are listed as separate line items, extract each as a separate value.
-7. Director Name  |  Type: Alphanumeric (multiple occurrences expected) — e.g. MOHAMMAD FAIZ BIN AHMAD NEWAZ
-   The full name of each director listed in Form 49, taken from the directors table. Extract every director row. Do not include company secretaries, managers, or auditors even where they appear in the same table - use the role/designation column to filter.
-8. Director Address  |  Type: Alphanumeric (multiple occurrences expected) — e.g. NO 29, JALAN AMAN SERENIA 11/7 ANIRA,
+8. Directors (repeating group — extract one row object per occurrence, with these columns):
+   - Director Address  |  Type: Alphanumeric — e.g. NO 29, JALAN AMAN SERENIA 11/7 ANIRA,
 BANDAR SERENIA
 43900, SEPANG
 SELANGGOR
-   The residential address of each director, taken from the address column in the same table row as the director name. Must remain aligned with the corresponding Director Name. Capture the full multi-line block as printed.
-9. Director NRIC or Passport Number  |  Type: Alphanumeric (multiple occurrences expected) — e.g. 991207-08-6447
-   The identification number of each director, labelled ''ID/PASSPORT/REGISTRATION NO.'' on Form 24 and ''IC/Passport'' on Form 49. Accepts two formats: (a) Malaysian NRIC of 12 digits with hyphens, e.g. 991207-08-6447; (b) an alphanumeric passport number, e.g. A12345678. Extract as printed, keeping hyphens for NRIC. Where both an old and new IC number are shown, extract the new (12-digit) number.
+       The residential address of each director, taken from the address column in the same table row as the director name. Must remain aligned with the corresponding Director Name. Capture the full multi-line block as printed.
+   - Director Name  |  Type: Alphanumeric — e.g. MOHAMMAD FAIZ BIN AHMAD NEWAZ
+       The full name of each director listed in Form 49, taken from the directors table. Extract every director row. Do not include company secretaries, managers, or auditors even where they appear in the same table - use the role/designation column to filter.
+   - Director NRIC or Passport Number  |  Type: Alphanumeric — e.g. 991207-08-6447
+       The identification number of each director, labelled ''ID/PASSPORT/REGISTRATION NO.'' on Form 24 and ''IC/Passport'' on Form 49. Accepts two formats: (a) Malaysian NRIC of 12 digits with hyphens, e.g. 991207-08-6447; (b) an alphanumeric passport number, e.g. A12345678. Extract as printed, keeping hyphens for NRIC. Where both an old and new IC number are shown, extract the new (12-digit) number.
 
 For each field above, also populate its entry in _locations with:
   real_page  — the actual sequential page number of the source document/PDF file, counting the
@@ -430,10 +436,13 @@ Fields to extract:
 
 1. Entity Name  |  Type: Alphanumeric — e.g. AJS MAJU SERVICES SDN. BHD.
    The registered legal name of the company exactly as printed on the form, typically in the header block beside ''Name of Company'' / ''Nama Syarikat''. Retain the full suffix and punctuation as printed (e.g. ''SDN. BHD.'', ''BHD.''). Extract only the subject company, not the names of any other companies mentioned as shareholders or agents.
-2. Director Name  |  Type: Alphanumeric (multiple occurrences expected) — e.g. MOHAMMAD FAIZ BIN AHMAD NEWAZ
-   The full name of each director listed in Form 49, taken from the directors table. Extract every director row. Do not include company secretaries, managers, or auditors even where they appear in the same table - use the role/designation column to filter.
-3. Director NRIC or Passport Number  |  Type: Alphanumeric (multiple occurrences expected) — e.g. 991207-08-6447
-   The identification number of each director, labelled ''ID/PASSPORT/REGISTRATION NO.'' on Form 24 and ''IC/Passport'' on Form 49. Accepts two formats: (a) Malaysian NRIC of 12 digits with hyphens, e.g. 991207-08-6447; (b) an alphanumeric passport number, e.g. A12345678. Extract as printed, keeping hyphens for NRIC. Where both an old and new IC number are shown, extract the new (12-digit) number.
+2. Document Type  |  Type: Alphanumeric — e.g. SSM Form 24
+   Return the document type. Only return what is on this list [Company Act Section 14, SSM Form 24, SSM Form 44, SSM Form 49, SSM Form 9 & 28, Form 32A, Financial Statements (Sdn Bhd), Borang B, Bank Statements, MyKad (Director ID or Passport), Consent Form, Customer Information Form, Application Details, CTOS Report, CCRIS / CBM Report, Other]
+3. Directors (repeating group — extract one row object per occurrence, with these columns):
+   - Director NRIC or Passport Number  |  Type: Alphanumeric — e.g. 991207-08-6447
+       The identification number of each director, labelled ''ID/PASSPORT/REGISTRATION NO.'' on Form 24 and ''IC/Passport'' on Form 49. Accepts two formats: (a) Malaysian NRIC of 12 digits with hyphens, e.g. 991207-08-6447; (b) an alphanumeric passport number, e.g. A12345678. Extract as printed, keeping hyphens for NRIC. Where both an old and new IC number are shown, extract the new (12-digit) number.
+   - Director Name  |  Type: Alphanumeric — e.g. MOHAMMAD FAIZ BIN AHMAD NEWAZ
+       The full name of each director listed in Form 49, taken from the directors table. Extract every director row. Do not include company secretaries, managers, or auditors even where they appear in the same table - use the role/designation column to filter.
 
 For each field above, also populate its entry in _locations with:
   real_page  — the actual sequential page number of the source document/PDF file, counting the
@@ -555,16 +564,19 @@ Document description: A CTOS credit report on the applicant company and its dire
 
 Fields to extract:
 
-1. Legal Case Report  |  Type: Alphanumeric (multiple occurrences expected) — e.g. Suit No. WA-B52-123-01/2023, Sessions Court Kuala Lumpur; Plaintiff: XYZ Supplies Sdn Bhd; Defendant: AJS Maju Services Sdn Bhd; Claim: RM45,200 for goods sold and delivered; Filed 12-01-2023; Status: Pending
-   Each legal case disclosed in the litigation section of the CTOS report, covering both the company and its directors. Capture the full case entry as a single text block: case number, court, plaintiff, defendant, nature of the action, amount claimed, filing date, and status. Extract one value per case; a clean report has no cases, in which case return no values rather than a placeholder such as ''Nil'' or ''No records found''. Sections headed ''Bankruptcy'', ''Winding Up'', and ''Legal Suits'' all count as legal cases.
-2. Entity Name  |  Type: Alphanumeric — e.g. AJS MAJU SERVICES SDN. BHD.
+1. Entity Name  |  Type: Alphanumeric — e.g. AJS MAJU SERVICES SDN. BHD.
    The registered legal name of the company exactly as printed on the form, typically in the header block beside ''Name of Company'' / ''Nama Syarikat''. Retain the full suffix and punctuation as printed (e.g. ''SDN. BHD.'', ''BHD.''). Extract only the subject company, not the names of any other companies mentioned as shareholders or agents.
+2. Legal Case Report  |  Type: Alphanumeric (multiple occurrences expected) — e.g. Suit No. WA-B52-123-01/2023, Sessions Court Kuala Lumpur; Plaintiff: XYZ Supplies Sdn Bhd; Defendant: AJS Maju Services Sdn Bhd; Claim: RM45,200 for goods sold and delivered; Filed 12-01-2023; Status: Pending
+   Each legal case disclosed in the litigation section of the CTOS report, covering both the company and its directors. Capture the full case entry as a single text block: case number, court, plaintiff, defendant, nature of the action, amount claimed, filing date, and status. Extract one value per case; a clean report has no cases, in which case return no values rather than a placeholder such as ''Nil'' or ''No records found''. Sections headed ''Bankruptcy'', ''Winding Up'', and ''Legal Suits'' all count as legal cases.
 3. Incorporation Date  |  Type: Datetime — e.g. 10-09-2024
    The date the company was incorporated, labelled as ''Date of Incorporation'', ''Tarikh Pemerbadanan'', or written in prose within the certificate (e.g. ''incorporated on the 10th day of September 2014''). Normalise to DD-MM-YYYY. If the document shows the date in long prose form, convert it.
-4. Director Name  |  Type: Alphanumeric (multiple occurrences expected) — e.g. MOHAMMAD FAIZ BIN AHMAD NEWAZ
-   The full name of each director listed in Form 49, taken from the directors table. Extract every director row. Do not include company secretaries, managers, or auditors even where they appear in the same table - use the role/designation column to filter.
-5. Director NRIC or Passport Number  |  Type: Alphanumeric (multiple occurrences expected) — e.g. 991207-08-6447
-   The identification number of each director, labelled ''ID/PASSPORT/REGISTRATION NO.'' on Form 24 and ''IC/Passport'' on Form 49. Accepts two formats: (a) Malaysian NRIC of 12 digits with hyphens, e.g. 991207-08-6447; (b) an alphanumeric passport number, e.g. A12345678. Extract as printed, keeping hyphens for NRIC. Where both an old and new IC number are shown, extract the new (12-digit) number.
+4. Document Type  |  Type: Alphanumeric — e.g. SSM Form 24
+   Return the document type. Only return what is on this list [Company Act Section 14, SSM Form 24, SSM Form 44, SSM Form 49, SSM Form 9 & 28, Form 32A, Financial Statements (Sdn Bhd), Borang B, Bank Statements, MyKad (Director ID or Passport), Consent Form, Customer Information Form, Application Details, CTOS Report, CCRIS / CBM Report, Other]
+5. Directors (repeating group — extract one row object per occurrence, with these columns):
+   - Director Name  |  Type: Alphanumeric — e.g. MOHAMMAD FAIZ BIN AHMAD NEWAZ
+       The full name of each director listed in Form 49, taken from the directors table. Extract every director row. Do not include company secretaries, managers, or auditors even where they appear in the same table - use the role/designation column to filter.
+   - Director NRIC or Passport Number  |  Type: Alphanumeric — e.g. 991207-08-6447
+       The identification number of each director, labelled ''ID/PASSPORT/REGISTRATION NO.'' on Form 24 and ''IC/Passport'' on Form 49. Accepts two formats: (a) Malaysian NRIC of 12 digits with hyphens, e.g. 991207-08-6447; (b) an alphanumeric passport number, e.g. A12345678. Extract as printed, keeping hyphens for NRIC. Where both an old and new IC number are shown, extract the new (12-digit) number.
 
 For each field above, also populate its entry in _locations with:
   real_page  — the actual sequential page number of the source document/PDF file, counting the
@@ -616,9 +628,9 @@ INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_g
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (156, 2, 5, 'unique', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (157, 2, 6, 'unique', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (158, 2, 8, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (159, 2, 9, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (160, 2, 10, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (161, 2, 11, 'multiple', NULL);
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (159, 2, 9, 'multiple', 'Shareholders');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (160, 2, 10, 'multiple', 'Shareholders');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (161, 2, 11, 'multiple', 'Shareholders');
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (162, 2, 14, 'multiple', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (163, 2, 79, 'unique', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (164, 3, 3, 'unique', NULL);
@@ -630,9 +642,9 @@ INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_g
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (170, 4, 6, 'unique', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (171, 4, 7, 'unique', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (172, 4, 8, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (173, 4, 12, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (174, 4, 13, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (175, 4, 14, 'multiple', NULL);
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (173, 4, 12, 'multiple', 'Directors');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (174, 4, 13, 'multiple', 'Directors');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (175, 4, 14, 'multiple', 'Directors');
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (176, 4, 79, 'unique', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (177, 5, 3, 'unique', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (178, 5, 4, 'unique', NULL);
@@ -681,8 +693,8 @@ INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_g
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (217, 10, 78, 'multiple', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (218, 10, 79, 'unique', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (219, 11, 3, 'unique', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (220, 11, 12, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (221, 11, 14, 'multiple', NULL);
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (220, 11, 12, 'multiple', 'Directors');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (221, 11, 14, 'multiple', 'Directors');
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (222, 11, 79, 'unique', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (223, 12, 12, 'multiple', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (224, 12, 13, 'multiple', NULL);
@@ -721,8 +733,8 @@ INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_g
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (257, 14, 69, 'multiple', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (258, 14, 3, 'unique', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (259, 14, 5, 'unique', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (260, 14, 12, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (261, 14, 14, 'multiple', NULL);
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (260, 14, 12, 'multiple', 'Directors');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (261, 14, 14, 'multiple', 'Directors');
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (262, 14, 79, 'unique', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (263, 15, 70, 'multiple', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (264, 15, 71, 'unique', NULL);
