@@ -40,26 +40,31 @@
   },
 
   "Financial Statements (Sdn Bhd)": {
-    "Financial Statement Date": ["31-12-2025", "31-12-2024"],
     "Balance Sheet Present": true,
     "Profit and Loss Statement Present": true,
     "Cash Flow Statement Present": true,
     "Auditor's Report Present": true,
-    "Revenue or Turnover or Sales": [1820500, 1420300],
-    "Costs or COGS": [720000, 610500],
-    "Gross Profit": [1100500, 809800],
-    "Expenses or Opex or SG&A or Overheads": [416700, 388900],
-    "Operating Profit or EBIT": [683800, 420900],
-    "Financing Cost": [42100, 38700],
-    "Net Profit": [461092, 285600],
-    "Asset Value or Total Current Assets": [2466400, 2011200],
-    "Liability Value": [1405975, 1180400],
-    "Net Worth or Total Equity": [1060425, 830800],
-    "Advances Due to Director": [50000, 40000],
-    "Depreciation & Amortisation": [101500, 95200],
-    "EBITDA": [785300, 516100],
-    "Other Income": [0, 0],
-    "Document Type": "Financial Statements (Sdn Bhd)"
+    "Document Type": "Financial Statements (Sdn Bhd)",
+    "Financials By Year": [
+      {
+        "Financial Statement Date": "31-12-2025",
+        "Revenue or Turnover or Sales": 1820500, "Costs or COGS": 720000, "Gross Profit": 1100500,
+        "Expenses or Opex or SG&A or Overheads": 416700, "Operating Profit or EBIT": 683800,
+        "EBITDA": 785300, "Financing Cost": 42100, "Depreciation & Amortisation": 101500,
+        "Other Income": 0, "Profit Before Tax": 641700, "Net Profit": 461092,
+        "Asset Value or Total Current Assets": 2466400, "Liability Value": 1405975,
+        "Net Worth or Total Equity": 1060425, "Advances Due to Director": 50000
+      },
+      {
+        "Financial Statement Date": "31-12-2024",
+        "Revenue or Turnover or Sales": 1420300, "Costs or COGS": 610500, "Gross Profit": 809800,
+        "Expenses or Opex or SG&A or Overheads": 388900, "Operating Profit or EBIT": 420900,
+        "EBITDA": 516100, "Financing Cost": 38700, "Depreciation & Amortisation": 95200,
+        "Other Income": 0, "Profit Before Tax": 382200, "Net Profit": 285600,
+        "Asset Value or Total Current Assets": 2011200, "Liability Value": 1180400,
+        "Net Worth or Total Equity": 830800, "Advances Due to Director": 40000
+      }
+    ]
   },
 
   "Bank Statements": {

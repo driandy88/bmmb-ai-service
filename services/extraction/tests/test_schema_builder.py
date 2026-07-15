@@ -38,6 +38,23 @@ CUSTOMER_INFORMATION_FORM = _BY_NAME["Customer Information Form"]  # 24 fields, 
 UNKNOWN_TEMPLATE_ID = "00000000-0000-0000-0000-000000000000"
 
 
+def _ta(name, data_type, frequency, row_group=None):
+    """One synthetic template_attribute entry in get_template()'s normalised shape."""
+    return {"frequency": frequency, "row_group": row_group,
+            "attribute": {"name": name, "data_type": data_type, "description": "", "example": ""}}
+
+
+def _schema_from_attrs(monkeypatch, attrs):
+    """Build a Gemini schema from a synthetic in-memory template, so schema-shape
+    behaviour checks don't depend on any live template's current wiring -- templates
+    get migrated (bank/FS Multiple fields moved into row_groups), which would
+    otherwise keep breaking these."""
+    tmpl = {"id": "synthetic", "name": "Synthetic", "description": "",
+            "group_name": None, "llm_prompt": None, "template_attributes": attrs}
+    monkeypatch.setattr("app.schema_builder.get_template", lambda _id: tmpl)
+    return build_gemini_schema("synthetic")
+
+
 class TestConfigLoading:
     def test_all_templates_present(self):
         names = {t["name"] for t in list_templates()}
@@ -79,14 +96,11 @@ class TestSchemaShape:
         with pytest.raises(TemplateNotFoundError):
             build_gemini_schema(UNKNOWN_TEMPLATE_ID)
 
-    def test_multiple_frequency_produces_array(self):
-        # Financial Statements keeps top-level Multiple fields (one value per
-        # comparative year column); Bank Statements' Multiple fields now live
-        # inside the Transactions row_group instead (see test_row_group_*).
-        schema = build_gemini_schema(FINANCIAL_STATEMENTS)
-        props = schema["properties"]
-        assert props["Financial Statement Date"]["type"] == "ARRAY"
-        assert props["Financial Statement Date"]["items"]["type"] == "STRING"
+    def test_multiple_frequency_produces_array(self, monkeypatch):
+        schema = _schema_from_attrs(monkeypatch, [_ta("Some Date", "Datetime", "Multiple")])
+        field = schema["properties"]["Some Date"]
+        assert field["type"] == "ARRAY"
+        assert field["items"]["type"] == "STRING"
 
     def test_unique_frequency_produces_scalar(self):
         schema = build_gemini_schema(BANK_STATEMENTS)
@@ -104,9 +118,9 @@ class TestSchemaShape:
 
 
 class TestFieldTypeMapping:
-    def test_numeric_multiple_maps_to_array_of_number(self):
-        schema = build_gemini_schema(FINANCIAL_STATEMENTS)
-        field = schema["properties"]["Revenue or Turnover or Sales"]
+    def test_numeric_multiple_maps_to_array_of_number(self, monkeypatch):
+        schema = _schema_from_attrs(monkeypatch, [_ta("Some Amount", "Numeric", "Multiple")])
+        field = schema["properties"]["Some Amount"]
         assert field["type"] == "ARRAY"
         assert field["items"]["type"] == "NUMBER"
 
