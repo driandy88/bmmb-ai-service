@@ -338,10 +338,11 @@ def build_financial_statement_docs(
     entity_name: str,
     warnings: Optional[list[AdapterWarning]] = None,
 ) -> list[FinancialStatementDoc]:
-    """One FinancialStatementDoc per year column on the "Financial
-    Statements (Sdn Bhd)" template's "Financial Statement Date" (Multiple --
-    one entry per comparative year). The 4 section-present flags are Unique
-    (one value for the whole document), so every fanned-out year shares them.
+    """One FinancialStatementDoc per row in the "Financial Statements (Sdn
+    Bhd)" template's "Financials By Year" row_group (one row per comparative
+    year, keyed by that row's Financial Statement Date). The 4 section-present
+    flags are Unique (one value for the whole document), so every fanned-out
+    year shares them.
 
     `entity_name` has no source attribute on this template -- thread it in
     from the matching SSM extraction call.
@@ -351,17 +352,18 @@ def build_financial_statement_docs(
     if not extracted:
         return []
 
-    fye_dates = _safe_list(extracted.get("Financial Statement Date"), warnings=warnings,
-                            document_type="financial_statement", document_id="financial_statement",
-                            field="Financial Statement Date")
+    rows = _safe_list(extracted.get("Financials By Year"), warnings=warnings,
+                      document_type="financial_statement", document_id="financial_statement",
+                      field="Financials By Year")
     docs = []
-    for i, fye in enumerate(fye_dates):
+    for i, row in enumerate(rows):
         document_id = f"financial_statement_{i}"
+        fye = (row or {}).get("Financial Statement Date")
         if fye is None:
             warnings.append(AdapterWarning(
                 document_type="financial_statement", document_id=document_id,
-                field=f"Financial Statement Date[{i}]",
-                message="A Financial Statement Date entry was null; this year column is skipped.",
+                field=f"Financials By Year[{i}].Financial Statement Date",
+                message="A Financials By Year row had no Financial Statement Date; this year is skipped.",
                 current_state="null",
                 expected_state="a 'DD-MM-YYYY' date",
             ))
