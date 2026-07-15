@@ -117,8 +117,14 @@ def render_extraction_prompt(tmpl: dict) -> str:
         i += 1
 
     for group_name, members in grouped.items():
-        col_names = [m["attribute"]["name"] for m in members]
-        lines.append(f"{i}. {group_name} (repeating group)  |  Columns: {', '.join(col_names)}")
+        lines.append(f"{i}. {group_name} (repeating group — extract one row object per occurrence, "
+                     f"with these columns):")
+        for m in members:
+            attr = m["attribute"]
+            example_info = f" — e.g. {attr['example']}" if attr["example"] else ""
+            lines.append(f"   - {attr['name']}  |  Type: {attr['data_type']}{example_info}")
+            if attr["description"]:
+                lines.append(f"       {attr['description']}")
         i += 1
 
     lines += [

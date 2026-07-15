@@ -1,0 +1,5 @@
+-r requirements.txt
+pytest==8.4.2
+# httpx powers FastAPI's TestClient (starlette). Unlike services/validation, this
+# service has no google-genai to pull it in transitively, so it's listed explicitly.
+httpx==0.28.1

@@ -54,6 +54,15 @@ INSERT INTO attributes (id, name, description, data_type, example) VALUES (35, '
 INSERT INTO attributes (id, name, description, data_type, example) VALUES (36, 'Monthly Withdrawal', 'Total debits (withdrawals, payments, outflows) for the calendar month, taken from the monthly summary table and labelled ''Jumlah Debit / Total Debits'' (Maybank) or ''Total Debit'' (CIMB, RHB, Public Bank). This is the bank''s own aggregate figure — do not sum the individual transaction rows, which risks double counting reversals. Store as a positive number in RM, aligned to the Bank Statement Month of the same statement.', 'numeric', '340980');
 INSERT INTO attributes (id, name, description, data_type, example) VALUES (37, 'Monthly Deposit', 'Total credits (deposits, receipts, inflows) for the calendar month, taken from the monthly summary table and labelled ''Jumlah Kredit / Total Credits'' (Maybank) or ''Total Credit'' (CIMB, RHB, Public Bank). Use the bank''s aggregate figure, not the sum of transaction rows. Store as a positive number in RM, aligned to the Bank Statement Month of the same statement.', 'numeric', '362700');
 INSERT INTO attributes (id, name, description, data_type, example) VALUES (38, 'Monthly End Balance', 'The account balance on the last day of the calendar month, labelled ''Baki Akhir / Closing Balance'', ''Closing Balance'', or ''Balance c/f''. Should equal the opening balance of the following month, which is a useful continuity check across a six-month bundle. Negative if the account is overdrawn. Expressed in RM and aligned to the Bank Statement Month of the same statement.', 'numeric', '266750');
+-- Bank Statements: daily-transactions shape (superseding attrs 35-38, left orphaned).
+INSERT INTO attributes (id, name, description, data_type, example) VALUES (80, 'Bank Name', 'The issuing bank of this statement, from the statement header or footer (e.g. ''Maybank Berhad'', ''CIMB Bank Berhad'', ''RHB Bank Berhad'', ''Public Bank Berhad'', ''Standard Chartered Bank Malaysia Berhad''). Return the full bank name as printed. One value per statement.', 'alphanumeric', 'Standard Chartered Bank Malaysia Berhad');
+INSERT INTO attributes (id, name, description, data_type, example) VALUES (81, 'Account Number Masked', 'The account number this statement covers, from the header. Keep any masking the bank already applies (e.g. ''****4321''); never unmask or invent digits. One value per statement.', 'alphanumeric', '****4321');
+INSERT INTO attributes (id, name, description, data_type, example) VALUES (82, 'Statement Period', 'The date range the statement covers, from the period header (e.g. ''01 Jan 2026 to 30 Jun 2026''). Return as printed. One value per statement.', 'alphanumeric', '01 Jan 2026 to 30 Jun 2026');
+INSERT INTO attributes (id, name, description, data_type, example) VALUES (83, 'Transaction Date', 'The posting/value date of one transaction row, from the transaction listing. You MUST return it in strict ISO format YYYY-MM-DD and nothing else -- convert any printed form to ISO (e.g. ''23 Jan 2026'' -> ''2026-01-23'', ''23/01/2026'' -> ''2026-01-23''); never return the day-month-name form or a range. One row per printed transaction line, in the order printed.', 'datetime', '2026-01-23');
+INSERT INTO attributes (id, name, description, data_type, example) VALUES (84, 'Transaction Description', 'The narrative/description of one transaction row as printed (payee, reference, or transaction type).', 'alphanumeric', 'IBG TRANSFER TO SUPPLIER');
+INSERT INTO attributes (id, name, description, data_type, example) VALUES (85, 'Transaction Debit', 'The debit (money out / withdrawal / outflow) amount of one transaction row, as a positive number in RM. Null if the row is a credit rather than a debit.', 'numeric', '3500.00');
+INSERT INTO attributes (id, name, description, data_type, example) VALUES (86, 'Transaction Credit', 'The credit (money in / deposit / inflow) amount of one transaction row, as a positive number in RM. Null if the row is a debit rather than a credit.', 'numeric', '12000.00');
+INSERT INTO attributes (id, name, description, data_type, example) VALUES (87, 'Transaction Balance', 'The running account balance printed after one transaction row, in RM. Negative if the account is overdrawn.', 'numeric', '8500.00');
 INSERT INTO attributes (id, name, description, data_type, example) VALUES (39, 'Director Religion', 'The religion declared by a director, labelled ''Agama / Religion''. Typically a single word, and often a tick-box selection rather than free text: Islam, Buddha, Kristian, Hindu, Lain-lain. Extract the selected option as printed, without translating. Leave blank if no option is selected. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.', 'alphanumeric', 'Islam');
 INSERT INTO attributes (id, name, description, data_type, example) VALUES (40, 'Director Higher Education', 'The highest level of education attained by a director, labelled ''Pendidikan / Education'' or ''Taraf Pendidikan''. Usually a tick-box selection: SPM, STPM, Diploma, Ijazah / Degree, Sarjana / Master, PhD, Lain-lain. Where the form provides a free-text field for the institution or field of study, extract the qualification level only. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.', 'alphanumeric', 'Ijazah Sarjana Muda');
 INSERT INTO attributes (id, name, description, data_type, example) VALUES (41, 'Director Marital Status', 'The marital status of a director, labelled ''Status Perkahwinan / Marital Status''. A tick-box selection: Bujang / Single, Berkahwin / Married, and sometimes Duda / Janda (widowed or divorced). Normalise to the English term: Single, Married, Widowed, Divorced. Where the status is Married, the spouse fields should also be populated. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.', 'alphanumeric', 'Married');
@@ -353,7 +362,42 @@ For each field above, also populate its entry in _locations with:
   document   — the source document name the value came from, if more than one was provided (null if unknown)
 
 Return null for any field not found or unclear in the document.');
-INSERT INTO templates (id, name, description, group_name, llm_prompt) VALUES (9, 'Bank Statements', 'A bundle of the latest six months of current or savings account statements, usually one PDF per month concatenated into a single upload, and sometimes spanning more than one bank. Each statement carries a period header, a long transaction listing, and a monthly summary block. All four attributes are extracted from the monthly summary block only, never by summing transaction rows. Every attribute is Multiple: one value per statement month, keyed by Bank Statement Month. Summary labels differ by bank — Maybank prints bilingual labels, CIMB and RHB print English only. Treat the file as a multi-document upload. Document type: Monthly Bank Account Statements. This file may contain more than one document; treat it as a multi-document upload.', 'Financial Application', 'You are extracting structured data from a "Bank Statements" document.
+INSERT INTO templates (id, name, description, group_name, llm_prompt) VALUES (9, 'Bank Statements', 'One or more months of a current or savings account statement, one bank per file. Real statements are a chronological listing of DAILY transactions and frequently have NO monthly summary block, so figures are taken by transcribing every transaction row (date, description, debit, credit, running balance). Monthly and yearly totals are computed downstream by the aggregation service, NOT summed here by the model. Header fields (bank name, account number, statement period) are Unique; each transaction is one row of the Transactions group. Malay labels may appear: Debit, Kredit, Baki (balance). Document type: Monthly Bank Account Statements.', 'Financial Application', 'You are extracting structured data from a "Bank Statements" document.
+Document description: One or more months of a current or savings account statement, one bank per file. Real statements are a chronological listing of DAILY transactions and frequently have NO monthly summary block, so figures are taken by transcribing every transaction row (date, description, debit, credit, running balance). Monthly and yearly totals are computed downstream by the aggregation service, NOT summed here by the model. Header fields (bank name, account number, statement period) are Unique; each transaction is one row of the Transactions group. Malay labels may appear: Debit, Kredit, Baki (balance). Document type: Monthly Bank Account Statements.
+
+Fields to extract:
+
+1. Bank Name  |  Type: Alphanumeric — e.g. Standard Chartered Bank Malaysia Berhad
+   The issuing bank of this statement, from the statement header or footer (e.g. ''Maybank Berhad'', ''CIMB Bank Berhad'', ''RHB Bank Berhad'', ''Public Bank Berhad'', ''Standard Chartered Bank Malaysia Berhad''). Return the full bank name as printed. One value per statement.
+2. Document Type  |  Type: Alphanumeric — e.g. SSM Form 24
+   Return the document type. Only return what is on this list [Company Act Section 14, SSM Form 24, SSM Form 44, SSM Form 49, SSM Form 9 & 28, Form 32A, Financial Statements (Sdn Bhd), Borang B, Bank Statements, MyKad (Director ID or Passport), Consent Form, Customer Information Form, Application Details, CTOS Report, CCRIS / CBM Report, Other]
+3. Statement Period  |  Type: Alphanumeric — e.g. 01 Jan 2026 to 30 Jun 2026
+   The date range the statement covers, from the period header (e.g. ''01 Jan 2026 to 30 Jun 2026''). Return as printed. One value per statement.
+4. Account Number Masked  |  Type: Alphanumeric — e.g. ****4321
+   The account number this statement covers, from the header. Keep any masking the bank already applies (e.g. ''****4321''); never unmask or invent digits. One value per statement.
+5. Transactions (repeating group — extract one row object per occurrence, with these columns):
+   - Transaction Date  |  Type: Datetime — e.g. 2026-01-23
+       The posting/value date of one transaction row, from the transaction listing. You MUST return it in strict ISO format YYYY-MM-DD and nothing else -- convert any printed form to ISO (e.g. ''23 Jan 2026'' -> ''2026-01-23'', ''23/01/2026'' -> ''2026-01-23''); never return the day-month-name form or a range. One row per printed transaction line, in the order printed.
+   - Transaction Debit  |  Type: Numeric — e.g. 3500.00
+       The debit (money out / withdrawal / outflow) amount of one transaction row, as a positive number in RM. Null if the row is a credit rather than a debit.
+   - Transaction Credit  |  Type: Numeric — e.g. 12000.00
+       The credit (money in / deposit / inflow) amount of one transaction row, as a positive number in RM. Null if the row is a debit rather than a credit.
+   - Transaction Description  |  Type: Alphanumeric — e.g. IBG TRANSFER TO SUPPLIER
+       The narrative/description of one transaction row as printed (payee, reference, or transaction type).
+   - Transaction Balance  |  Type: Numeric — e.g. 8500.00
+       The running account balance printed after one transaction row, in RM. Negative if the account is overdrawn.
+
+For each field above, also populate its entry in _locations with:
+  real_page  — the actual sequential page number of the source document/PDF file, counting the
+               first page as 1 regardless of any printed page numbers or cover/title pages
+               (null if unknown). This is used to jump to the right page in the file.
+  shown_page — the page number or label as it is printed/displayed on the page itself (e.g. a
+               footer or header page number, which may be a roman numeral or differ from
+               real_page due to unnumbered front matter) (null if no visible label).
+  section    — nearest heading or section title on that page (null if unknown)
+  document   — the source document name the value came from, if more than one was provided (null if unknown)
+
+Return null for any field not found or unclear in the document.');
 Document description: A bundle of the latest six months of current or savings account statements, usually one PDF per month concatenated into a single upload, and sometimes spanning more than one bank. Each statement carries a period header, a long transaction listing, and a monthly summary block. All four attributes are extracted from the monthly summary block only, never by summing transaction rows. Every attribute is Multiple: one value per statement month, keyed by Bank Statement Month. Summary labels differ by bank — Maybank prints bilingual labels, CIMB and RHB print English only. Treat the file as a multi-document upload. Document type: Monthly Bank Account Statements. This file may contain more than one document; treat it as a multi-document upload.
 
 Fields to extract:
@@ -641,11 +685,15 @@ INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_g
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (205, 7, 79, 'unique', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (206, 8, 27, 'multiple', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (207, 8, 79, 'unique', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (208, 9, 35, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (209, 9, 36, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (210, 9, 37, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (211, 9, 38, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (212, 9, 79, 'unique', NULL);
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (270, 9, 80, 'unique', NULL);
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (271, 9, 81, 'unique', NULL);
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (272, 9, 82, 'unique', NULL);
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (273, 9, 79, 'unique', NULL);
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (274, 9, 83, 'multiple', 'Transactions');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (275, 9, 84, 'multiple', 'Transactions');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (276, 9, 85, 'multiple', 'Transactions');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (277, 9, 86, 'multiple', 'Transactions');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (278, 9, 87, 'multiple', 'Transactions');
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (213, 10, 12, 'multiple', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (214, 10, 14, 'multiple', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (215, 10, 76, 'multiple', NULL);

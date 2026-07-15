@@ -18,3 +18,6 @@ venv/
 # Only this folder's placeholder README stays tracked.
 sample_docs/private/*
 !sample_docs/private/README.md
+# The extraction service moved under services/extraction/ (see README restructuring
+# note), so its private test docs must be ignored under the nested path too.
+services/extraction/sample_docs/private/

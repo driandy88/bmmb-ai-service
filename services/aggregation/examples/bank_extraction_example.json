@@ -1,0 +1,17 @@
+{
+  "documents": [
+    {
+      "source_document": "acme_scb_jan_jun_2026.pdf",
+      "bank_name": "STANDARD CHARTERED BANK MALAYSIA BERHAD",
+      "account_number_masked": "****4321",
+      "statement_period": "01 Jan 2026 to 28 Feb 2026",
+      "transactions": [
+        {"date": "2026-01-10", "description": "SALARY CREDIT", "credit": 12000.00, "balance": 12000.00, "real_page": 1},
+        {"date": "2026-01-20", "description": "SUPPLIER PAYMENT", "debit": 3500.00, "balance": 8500.00, "real_page": 1},
+        {"date": "2026-01-28", "description": "RENTAL", "debit": 2000.00, "balance": 6500.00, "real_page": 1},
+        {"date": "2026-02-05", "description": "CUSTOMER RECEIPT", "credit": 9000.00, "balance": 15500.00, "real_page": 2},
+        {"date": "2026-02-25", "description": "PAYROLL", "debit": 6000.00, "balance": 9500.00, "real_page": 2}
+      ]
+    }
+  ]
+}

@@ -58,7 +58,7 @@ class TestHealthAndTemplates:
         body = r.json()
         assert body["name"] == "Bank Statements"
         names = {ta["attribute"]["name"] for ta in body["template_attributes"]}
-        assert "Bank Statement Month" in names
+        assert "Bank Name" in names
 
     def test_get_unknown_template_404(self):
         r = client.get(f"/templates/{UNKNOWN_TEMPLATE_ID}")
