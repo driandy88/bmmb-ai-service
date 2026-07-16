@@ -117,29 +117,30 @@ class TestBuildIdentityDocuments:
         docs = build_identity_documents(extracted_by_template)
         assert all(d.data.expiry_date is None for d in docs)
 
-    def test_mismatched_array_lengths_degrade_gracefully_with_a_warning(self):
-        # Does NOT raise: truncates to the shortest array so the bundle
-        # still builds, and records exactly what was found (current_state)
-        # vs what was expected (expected_state) for the AI review step.
+    def test_fields_stay_correlated_within_each_director_row(self):
+        # Each director is one object in the "Directors" row_group, so name,
+        # NRIC and the IC-present flags can't drift apart across parallel
+        # arrays -- even when one director is missing a field, only that
+        # director's row is affected.
         warnings = []
         docs = build_identity_documents(
             {
                 "MyKad (Director ID or Passport)": {
-                    "Director Name": ["A", "B"],
-                    "Director NRIC or Passport Number": ["1"],
-                    "Front Side IC Present": [True, True],
-                    "Back Side IC Present": [True, True],
+                    "Directors": [
+                        {"Director Name": "A", "Director NRIC or Passport Number": "1",
+                         "Front Side IC Present": True, "Back Side IC Present": True},
+                        {"Director Name": "B", "Director NRIC or Passport Number": None,
+                         "Front Side IC Present": True, "Back Side IC Present": False},
+                    ],
                 }
             },
             warnings=warnings,
         )
-        assert len(docs) == 1  # truncated to the shortest (NRIC) array
-        assert docs[0].data.individual_name == "A"
-
-        mismatch = next(w for w in warnings if "Director Name" in w.field)
-        assert "Director Name=2" in mismatch.current_state
-        assert "Director NRIC or Passport Number=1" in mismatch.current_state
-        assert "same length" in mismatch.expected_state
+        assert [d.data.individual_name for d in docs] == ["A", "B"]
+        assert docs[0].data.nric_passport == "1"
+        assert docs[1].data.nric_passport == ""  # null flagged, doesn't crash or shift
+        assert docs[1].data.back_image_present is False
+        assert any(w.document_id == "identity_document_1" and "NRIC" in w.field for w in warnings)
 
 
 class TestBuildConsentFormDocs:
