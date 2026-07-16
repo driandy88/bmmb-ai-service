@@ -413,10 +413,19 @@ Document description: Photocopies or scans of the Malaysian MyKad, or of the pas
 
 Fields to extract:
 
-1. Director Name  |  Type: Alphanumeric (multiple occurrences expected) — e.g. MOHAMMAD FAIZ BIN AHMAD NEWAZ
-   The full name of each director listed in Form 49, taken from the directors table. Extract every director row. Do not include company secretaries, managers, or auditors even where they appear in the same table - use the role/designation column to filter.
-2. Director NRIC or Passport Number  |  Type: Alphanumeric (multiple occurrences expected) — e.g. 991207-08-6447
-   The identification number of each director, labelled ''ID/PASSPORT/REGISTRATION NO.'' on Form 24 and ''IC/Passport'' on Form 49. Accepts two formats: (a) Malaysian NRIC of 12 digits with hyphens, e.g. 991207-08-6447; (b) an alphanumeric passport number, e.g. A12345678. Extract as printed, keeping hyphens for NRIC. Where both an old and new IC number are shown, extract the new (12-digit) number.
+1. Document Type  |  Type: Alphanumeric — e.g. SSM Form 24
+   Return the document type. Only return what is on this list [Company Act Section 14, SSM Form 24, SSM Form 44, SSM Form 49, SSM Form 9 & 28, Form 32A, Financial Statements (Sdn Bhd), Borang B, Bank Statements, MyKad (Director ID or Passport), Consent Form, Customer Information Form, Application Details, CTOS Report, CCRIS / CBM Report, Other]
+2. Directors (repeating group — extract one row object per occurrence, with these columns):
+   - Director Name  |  Type: Alphanumeric — e.g. MOHAMMAD FAIZ BIN AHMAD NEWAZ
+       The full name of each director listed in Form 49, taken from the directors table. Extract every director row. Do not include company secretaries, managers, or auditors even where they appear in the same table - use the role/designation column to filter.
+   - Front Side IC Present  |  Type: Boolean — e.g. True
+       Whether the document contains a front side of the IC/MyKad.  Return TRUE if such the front side of the IC is in the document, FALSE otherwise. If what they upload is Passport then just return TRUE
+   - Back Side IC Present  |  Type: Boolean — e.g. False
+       Whether the document contains a Back side of the IC/MyKad.  Return TRUE if such the back side of the IC is in the document, FALSE otherwise. If what they upload is Passport then just return TRUE
+   - ID Type  |  Type: Alphanumeric — e.g. MyKad
+       Read the document and check what type of ID are provided. Return MyKad if its MyKad, Return Passport if its Passport. If none of two return Other
+   - Director NRIC or Passport Number  |  Type: Alphanumeric — e.g. 991207-08-6447
+       The identification number of each director, labelled ''ID/PASSPORT/REGISTRATION NO.'' on Form 24 and ''IC/Passport'' on Form 49. Accepts two formats: (a) Malaysian NRIC of 12 digits with hyphens, e.g. 991207-08-6447; (b) an alphanumeric passport number, e.g. A12345678. Extract as printed, keeping hyphens for NRIC. Where both an old and new IC number are shown, extract the new (12-digit) number.
 
 For each field above, also populate its entry in _locations with:
   real_page  — the actual sequential page number of the source document/PDF file, counting the
@@ -686,11 +695,11 @@ INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_g
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (276, 9, 85, 'multiple', 'Transactions');
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (277, 9, 86, 'multiple', 'Transactions');
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (278, 9, 87, 'multiple', 'Transactions');
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (213, 10, 12, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (214, 10, 14, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (215, 10, 76, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (216, 10, 77, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (217, 10, 78, 'multiple', NULL);
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (213, 10, 12, 'multiple', 'Directors');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (214, 10, 14, 'multiple', 'Directors');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (215, 10, 76, 'multiple', 'Directors');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (216, 10, 77, 'multiple', 'Directors');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (217, 10, 78, 'multiple', 'Directors');
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (218, 10, 79, 'unique', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (219, 11, 3, 'unique', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (220, 11, 12, 'multiple', 'Directors');

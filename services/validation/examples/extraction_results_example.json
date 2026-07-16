@@ -97,11 +97,22 @@
   },
 
   "MyKad (Director ID or Passport)": {
-    "Director Name": ["MOHD AIMAN BIN ZULKIFLI", "NURUL AIN BINTI ZULKIFLI"],
-    "Director NRIC or Passport Number": ["880214-14-5123", "900101-10-1234"],
-    "Front Side IC Present": [true, true],
-    "Back Side IC Present": [true, true],
-    "ID Type": ["MyKad", "MyKad"],
+    "Directors": [
+      {
+        "Director Name": "MOHD AIMAN BIN ZULKIFLI",
+        "Director NRIC or Passport Number": "880214-14-5123",
+        "Front Side IC Present": true,
+        "Back Side IC Present": true,
+        "ID Type": "MyKad"
+      },
+      {
+        "Director Name": "NURUL AIN BINTI ZULKIFLI",
+        "Director NRIC or Passport Number": "900101-10-1234",
+        "Front Side IC Present": true,
+        "Back Side IC Present": true,
+        "ID Type": "MyKad"
+      }
+    ],
     "Document Type": "MyKad (Director ID or Passport)"
   },
 

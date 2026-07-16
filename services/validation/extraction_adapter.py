@@ -34,16 +34,13 @@ Two categories of "the data isn't what we need," handled differently:
    exception, and the reviewer doesn't have to reverse-engineer the anomaly
    from the raw JSON, it's already stated as "expected X, current Y."
 
-Correlation via row_group: SSM Form 24 (Shareholders), SSM Form 49
-(Directors) and Consent Form (Directors) now carry their per-person fields
-in a row_group, so extraction returns one correlated object per person and
-build_ssm_corporate_docs()/build_consent_form_docs() read those directly --
-no more index-zipping, so a name can no longer drift onto another person's
-NRIC. The one remaining index-zip is in build_identity_documents(): MyKad's
-"Director" row_group covers Director Name/NRIC/Back Side IC Present/ID Type
-but NOT Front Side IC Present, so that single field is still zipped in
-positionally as a best effort. Any length mismatch there shows up as an
-AdapterWarning instead of a crash or a silently-wrong pairing.
+Correlation via row_group: every template whose per-person fields used to
+come back as parallel arrays now carries them in a row_group, so extraction
+returns one correlated object per person and the builders read those
+directly -- SSM Form 24 (Shareholders), SSM Form 49 (Directors), Consent
+Form (Directors) and MyKad (Directors: Name/NRIC/Front & Back Side IC
+Present/ID Type). No field is index-zipped anymore, so a name can no longer
+drift onto another person's NRIC or IC-present flags.
 """
 from datetime import date
 from typing import Any, Optional
@@ -172,40 +169,6 @@ def _parse_ddmmyyyy(value: str) -> date:
     cosmetic -- Pydantic will reject 'DD-MM-YYYY' outright."""
     day, month, year = value.split("-")
     return date(int(year), int(month), int(day))
-
-
-def _zip_positional(
-    extracted: dict,
-    *field_names: str,
-    warnings: list[AdapterWarning],
-    document_type: str,
-    document_id: str,
-) -> list[tuple]:
-    """Zip several Multiple-valued fields by array index. On a length
-    mismatch, truncates to the shortest array (rather than crashing) and
-    records an AdapterWarning stating each field's actual length against
-    the expectation that they all match -- the bundle still builds, and the
-    mismatch is explicit for the AI review step to look closely at, instead
-    of a silently-wrong positional pairing or an unhandled exception."""
-    lists = [_safe_list(extracted.get(name), warnings=warnings, document_type=document_type,
-                         document_id=document_id, field=name) for name in field_names]
-    lengths = {len(l) for l in lists}
-    if len(lengths) > 1:
-        actual = ", ".join(f"{name}={len(l)}" for name, l in zip(field_names, lists))
-        warnings.append(AdapterWarning(
-            document_type=document_type, document_id=document_id,
-            field="/".join(field_names),
-            message=(
-                f"Array length mismatch across correlated fields {field_names} -- "
-                f"truncated to the shortest so the bundle can still be built; "
-                f"verify these are actually aligned row-by-row."
-            ),
-            current_state=actual,
-            expected_state=f"all {len(field_names)} arrays the same length (one entry per correlated row)",
-        ))
-    min_len = min(lengths) if lengths else 0
-    truncated = [l[:min_len] for l in lists]
-    return list(zip(*truncated))
 
 
 # ── SSM corporate forms ──────────────────────────────────────────────────────
@@ -508,11 +471,10 @@ def build_identity_documents(
     *,
     warnings: Optional[list[AdapterWarning]] = None,
 ) -> list[IdentityDoc]:
-    """One IdentityDoc per director, fanned out from the MyKad template's
-    per-director Multiple fields. Director Name/NRIC/Back Side IC Present/
-    ID Type share row_group="Director" in the current schema (reliable
-    correlation); Front Side IC Present is not in that group and is
-    index-zipped in as a best effort (see module docstring).
+    """One IdentityDoc per director, read from the MyKad template's "Directors"
+    row_group -- one correlated object per director carrying Director Name/NRIC/
+    Front Side IC Present/Back Side IC Present/ID Type, so a name can't drift onto
+    another director's NRIC or IC-present flags.
 
     GAP: no "expiry_date" attribute exists on the MyKad template --
     IdentityDocumentData.expiry_date is always None until one is added.
@@ -523,31 +485,27 @@ def build_identity_documents(
         return []
     document_id = "identity_document"
 
-    rows = _zip_positional(
-        extracted,
-        "Director Name", "Director NRIC or Passport Number",
-        "Front Side IC Present", "Back Side IC Present",
-        warnings=warnings, document_type="identity_document", document_id=document_id,
-    )
+    rows = _safe_list(extracted.get("Directors"), warnings=warnings,
+                      document_type="identity_document", document_id=document_id, field="Directors")
     return [
         IdentityDoc(
             document_id=f"identity_document_{i}",
             document_type="identity_document",
             data=IdentityDocumentData(
-                individual_name=_safe_str(name, warnings=warnings, document_type="identity_document",
-                                           document_id=f"identity_document_{i}", field="Director Name"),
-                nric_passport=_safe_str(nric, warnings=warnings, document_type="identity_document",
-                                         document_id=f"identity_document_{i}", field="Director NRIC or Passport Number"),
-                front_image_present=_safe_bool(front, warnings=warnings, document_type="identity_document",
-                                                document_id=f"identity_document_{i}", field="Front Side IC Present",
+                individual_name=_safe_str((row or {}).get("Director Name"), warnings=warnings, document_type="identity_document",
+                                           document_id=f"identity_document_{i}", field=f"Directors[{i}].Director Name"),
+                nric_passport=_safe_str((row or {}).get("Director NRIC or Passport Number"), warnings=warnings, document_type="identity_document",
+                                         document_id=f"identity_document_{i}", field=f"Directors[{i}].Director NRIC or Passport Number"),
+                front_image_present=_safe_bool((row or {}).get("Front Side IC Present"), warnings=warnings, document_type="identity_document",
+                                                document_id=f"identity_document_{i}", field=f"Directors[{i}].Front Side IC Present",
                                                 default=None),
-                back_image_present=_safe_bool(back, warnings=warnings, document_type="identity_document",
-                                               document_id=f"identity_document_{i}", field="Back Side IC Present",
+                back_image_present=_safe_bool((row or {}).get("Back Side IC Present"), warnings=warnings, document_type="identity_document",
+                                               document_id=f"identity_document_{i}", field=f"Directors[{i}].Back Side IC Present",
                                                default=None),
                 expiry_date=None,
             ),
         )
-        for i, (name, nric, front, back) in enumerate(rows)
+        for i, row in enumerate(rows)
     ]
 
 
