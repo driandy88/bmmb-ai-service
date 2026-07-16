@@ -165,6 +165,15 @@ class TestPrompt:
         for ta in tmpl["template_attributes"]:
             assert ta["attribute"]["name"] in prompt
 
+    def test_prompt_includes_global_malay_guidance(self):
+        # Appended to every template's prompt (stored or rendered) so Malay/
+        # bilingual documents still populate the English-keyed schema.
+        for template_id in (COMPANY_ACT_SECTION_14, BANK_STATEMENTS):
+            prompt = generate_extraction_prompt(template_id)
+            assert "Bahasa Malaysia" in prompt
+            assert "Nama Syarikat" in prompt
+            assert "keep every output key exactly as named above, in English" in prompt
+
     def test_unknown_template_raises(self):
         with pytest.raises(TemplateNotFoundError):
             generate_extraction_prompt(UNKNOWN_TEMPLATE_ID)
