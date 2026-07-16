@@ -61,8 +61,17 @@ def _partition(template_attributes: list[dict]):
 def build_gemini_schema(template_id: str) -> dict:
     """Returns a dict suitable for GenerateContentConfig(response_schema=...).
 
-    Every top-level field/group also carries a sibling `_locations` entry so
-    a document viewer can jump straight to where a value was read from.
+    Every declared data field/group is marked `required` (while staying
+    `nullable`), so the model must emit the key for each one -- a genuinely
+    absent value comes back as an explicit `null` (or empty array) rather than
+    a dropped key, keeping the output shape uniform for anything that reads the
+    raw JSON row-by-row and field-by-field. Row_group row-objects require every
+    column for the same reason.
+
+    Every top-level field/group also carries a sibling `_locations` entry so a
+    document viewer can jump straight to where a value was read from. That
+    metadata is left optional (not required) so a required key never nudges the
+    model to invent a page number where it genuinely couldn't find one.
     """
     tmpl = get_template(template_id)
     ungrouped, grouped = _partition(tmpl["template_attributes"])
@@ -80,9 +89,12 @@ def build_gemini_schema(template_id: str) -> dict:
         properties[group_name] = {
             "type": "ARRAY",
             "nullable": True,
-            "items": {"type": "OBJECT", "properties": row_props},
+            "items": {"type": "OBJECT", "properties": row_props, "required": list(row_props)},
         }
         location_props[group_name] = _location_schema()
+
+    # Captured before adding _locations so the metadata block stays optional.
+    data_fields = list(properties)
 
     if location_props:
         properties["_locations"] = {
@@ -91,7 +103,7 @@ def build_gemini_schema(template_id: str) -> dict:
             "properties": location_props,
         }
 
-    return {"type": "OBJECT", "properties": properties}
+    return {"type": "OBJECT", "properties": properties, "required": data_fields}
 
 
 def render_extraction_prompt(tmpl: dict) -> str:
