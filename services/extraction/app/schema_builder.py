@@ -144,11 +144,29 @@ def render_extraction_prompt(tmpl: dict) -> str:
     return "\n".join(lines)
 
 
+# Cross-cutting extraction guidance that applies identically to every template.
+# It's appended once here, at prompt-generation time, rather than duplicated into
+# each template's stored llm_prompt -- these BMMB documents are routinely in Malay
+# (Bahasa Malaysia) or bilingual, so the field labels on the page often differ from
+# the English attribute names. This tells the model to match on meaning (and common
+# Malay labels) while keeping the output keys in English, so a Malay-only SSM form or
+# bank statement still populates the same schema.
+_GLOBAL_LANGUAGE_GUIDANCE = (
+    "\n\nLanguage note: the document may be wholly or partly in Malay (Bahasa Malaysia), "
+    "or bilingual. Identify each field by its meaning, matching Malay labels as well as "
+    "English -- for example Nama Syarikat = company name, No. Pendaftaran = registration "
+    "number, Alamat (Berdaftar) = (registered) address, Sifat Perniagaan = nature of "
+    "business, Pengarah = director, Pemegang Saham = shareholder, Tarikh = date, "
+    "Baki = balance, Debit / Kredit = debit / credit. Extract the value regardless of the "
+    "label's language, but keep every output key exactly as named above, in English."
+)
+
+
 def generate_extraction_prompt(template_id: str) -> str:
     """Returns the template's stored llm_prompt if present (the normal case
     -- templates are seeded/authored with a precomputed prompt), otherwise
-    builds an equivalent one from its attributes."""
+    builds an equivalent one from its attributes. The global language guidance
+    is appended in either case so it applies uniformly across every template."""
     tmpl = get_template(template_id)
-    if tmpl["llm_prompt"]:
-        return tmpl["llm_prompt"]
-    return render_extraction_prompt(tmpl)
+    base = tmpl["llm_prompt"] if tmpl["llm_prompt"] else render_extraction_prompt(tmpl)
+    return base + _GLOBAL_LANGUAGE_GUIDANCE
