@@ -127,9 +127,9 @@
   },
 
   "Application Details": {
-    "Main Contact Name": ["MOHD AIMAN BIN ZULKIFLI"],
-    "Main Contact Email": ["aiman@alphatech.my"],
-    "Main Contact Phone Number": ["+60123456789"],
+    "Main Contacts": [
+      {"Main Contact Name": "MOHD AIMAN BIN ZULKIFLI", "Main Contact Email": "aiman@alphatech.my", "Main Contact Phone Number": "+60123456789"}
+    ],
     "Business Entity Type": "Sdn Bhd",
     "Proposed Program": "SME Term Financing",
     "Proposed Financing Amount": 500000.00,

@@ -469,58 +469,61 @@ Document description: The institution''s own customer information form, complete
 
 Fields to extract:
 
-1. Director Name  |  Type: Alphanumeric (multiple occurrences expected) — e.g. MOHAMMAD FAIZ BIN AHMAD NEWAZ
-   The full name of each director listed in Form 49, taken from the directors table. Extract every director row. Do not include company secretaries, managers, or auditors even where they appear in the same table - use the role/designation column to filter.
-2. Director Address  |  Type: Alphanumeric (multiple occurrences expected) — e.g. NO 29, JALAN AMAN SERENIA 11/7 ANIRA,
-BANDAR SERENIA
-43900, SEPANG
-SELANGGOR
-   The residential address of each director, taken from the address column in the same table row as the director name. Must remain aligned with the corresponding Director Name. Capture the full multi-line block as printed.
-3. Director Religion  |  Type: Alphanumeric (multiple occurrences expected) — e.g. Islam
-   The religion declared by a director, labelled ''Agama / Religion''. Typically a single word, and often a tick-box selection rather than free text: Islam, Buddha, Kristian, Hindu, Lain-lain. Extract the selected option as printed, without translating. Leave blank if no option is selected. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
-4. Director Higher Education  |  Type: Alphanumeric (multiple occurrences expected) — e.g. Ijazah Sarjana Muda
-   The highest level of education attained by a director, labelled ''Pendidikan / Education'' or ''Taraf Pendidikan''. Usually a tick-box selection: SPM, STPM, Diploma, Ijazah / Degree, Sarjana / Master, PhD, Lain-lain. Where the form provides a free-text field for the institution or field of study, extract the qualification level only. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
-5. Director Marital Status  |  Type: Alphanumeric (multiple occurrences expected) — e.g. Married
-   The marital status of a director, labelled ''Status Perkahwinan / Marital Status''. A tick-box selection: Bujang / Single, Berkahwin / Married, and sometimes Duda / Janda (widowed or divorced). Normalise to the English term: Single, Married, Widowed, Divorced. Where the status is Married, the spouse fields should also be populated. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
-6. Director Spouse Name  |  Type: Alphanumeric (multiple occurrences expected) — e.g. Nurul Aina binti Abdullah
-   The full name of a director''s spouse, labelled ''Nama Pasangan / Spouse Name''. Only present where the director''s marital status is Married. Leave blank for unmarried directors rather than repeating the director''s own name. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
-7. Director Spouse Contact Number  |  Type: Alphanumeric (multiple occurrences expected) — e.g. 012-345 6789
-   The contact telephone number of a director''s spouse, labelled ''No. Tel Pasangan''. Malaysian mobile format is 01X-XXX XXXX; landline is 0X-XXXX XXXX. Store exactly as written on the form, retaining spacing and hyphens. Do not prepend the +60 country code unless it is printed. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
-8. Director Emergency Contact Name  |  Type: Alphanumeric (multiple occurrences expected) — e.g. Zainab binti Hassan
-   The full name of the person a director nominates to be contacted in an emergency, labelled ''Nama Waris'' or ''Emergency Contact''. This is distinct from the spouse field, though the same person may be named in both. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
-9. Director Emergency Contact Number  |  Type: Alphanumeric (multiple occurrences expected) — e.g. 019-876 5432
-   The telephone number of a director''s nominated emergency contact, labelled ''No. Tel Waris''. Store exactly as written, retaining spacing and hyphens. Keep aligned with the Emergency Contact Name in the same block. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
-10. Director Emergency Contact Relationship  |  Type: Alphanumeric (multiple occurrences expected) — e.g. Ibu
-   The relationship between a director and the nominated emergency contact, labelled ''Hubungan / Relationship''. Free text or a tick box; common values are Isteri / Wife, Suami / Husband, Ibu / Mother, Bapa / Father, Adik-beradik / Sibling, Anak / Child. Extract as printed without translating. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
-11. Director Estimated Monthly Income  |  Type: Numeric (multiple occurrences expected) — e.g. 8500
-   The director''s self-declared personal monthly income, labelled ''Anggaran Pendapatan Bulanan / Estimated Monthly Income''. Strip the RM prefix and any thousands separators and store as a number. This is personal income, not company revenue or the director''s drawings from the company. Where the form provides an income band rather than a figure, extract the lower bound and flag it. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
-12. Director Email Address  |  Type: Alphanumeric (multiple occurrences expected) — e.g. faizal@gmail.com
-   The personal email address of a director, labelled ''E-mel / Email'' within the director information block. Store exactly as written; do not normalise to lower case. Distinct from the company email address, though a director may supply the same value for both. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
-13. Director Experience in Current Business  |  Type: Numeric (multiple occurrences expected) — e.g. 12
-   The number of years a director has worked in the same line of business as the applicant company, labelled ''Pengalaman dalam bidang / Years of Experience''. Extract the numeric count of years only, discarding the word ''years'' or ''tahun''. Where a range is given, extract the lower bound. Where the form asks for months, convert to years and round down. Note this counts experience in the industry, which may exceed the age of the company itself. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
-14. Company Current Office Address  |  Type: Alphanumeric — e.g. Lot 2-4-19, Wisma Rampai
+1. Company Number of Staff  |  Type: Numeric — e.g. 25
+   The headcount of the company, labelled ''Bilangan Pekerja / Number of Employees''. Extract the total as an integer. Where the form splits headcount into permanent and contract or into full-time and part-time, sum the categories into a single total. Where a range is given, extract the lower bound.
+2. Company Current Office Address  |  Type: Alphanumeric — e.g. Lot 2-4-19, Wisma Rampai
 Taman Sri Rampai
 53300 Setapak
 Kuala Lumpur
    The address of the company''s current operating premises, labelled ''Alamat Perniagaan / Business Address'' or ''Alamat Operasi''. Capture the full multi-line block. This may differ from the registered office address on SSM Form 44; where the form states the two are the same, extract the phrase as printed rather than copying the registered address across.
-15. Company Office Status  |  Type: Alphanumeric — e.g. Rented
-   Whether the company owns or rents its current office premises, labelled ''Status Premis''. A tick-box selection: Milik Sendiri / Owned, Sewa / Rented. Normalise to ''Owned'' or ''Rented''. Where the premises are rented, the monthly rent field should also be populated; where owned, the rent field is expected to be blank.
-16. Company Office Monthly Rent  |  Type: Numeric — e.g. 3500
-   The monthly rent paid on the company''s office premises, labelled ''Sewa Bulanan / Monthly Rent''. Strip the RM prefix and thousands separators and store as a number. Expected to be blank where Company Office Status is Owned; do not substitute zero, as a blank and a genuine zero carry different meanings for the credit assessment.
-17. Company Age  |  Type: Numeric — e.g. 10
-   The age of the company in years, labelled ''Umur Syarikat'' or ''Years in Operation''. Extract the numeric count of years only. Where the form leaves this blank, leave it blank rather than calculating it from the incorporation date; the downstream model can derive it. Where the form gives a range, extract the lower bound.
-18. Company Number of Staff  |  Type: Numeric — e.g. 25
-   The headcount of the company, labelled ''Bilangan Pekerja / Number of Employees''. Extract the total as an integer. Where the form splits headcount into permanent and contract or into full-time and part-time, sum the categories into a single total. Where a range is given, extract the lower bound.
-19. Company Email Address  |  Type: Alphanumeric — e.g. admin@ajsmaju.com.my
-   The company''s official contact email address, labelled ''E-mel Syarikat''. Store exactly as written; do not normalise to lower case. Where the form carries several email addresses, take the one in the company details section, not one from a director''s personal block.
-20. Company Office Telephone  |  Type: Alphanumeric — e.g. 03-4142 5678
+3. Company Office Telephone  |  Type: Alphanumeric — e.g. 03-4142 5678
    The company''s office telephone number, labelled ''No. Tel Pejabat''. Malaysian landline format is 0X-XXXX XXXX; a mobile number may be given instead, in the format 01X-XXX XXXX. Store exactly as written on the form, retaining spacing and hyphens. Do not prepend the +60 country code unless it is printed.
-21. Company Auditor Firm Name  |  Type: Alphanumeric — e.g. Tan & Associates PLT
-   The registered name of the audit firm engaged by the company, labelled ''Nama Firma Juruaudit / Auditor''. Typically ends in ''PLT'', ''& Co.'', or ''Chartered Accountants''. Extract the firm name only, excluding the firm''s address or AF registration number where those appear on the same line.
-22. Company Auditor Contact Person  |  Type: Alphanumeric — e.g. Tan Wei Ming
-   The name of the individual contact at the audit firm, labelled ''Pegawai Bertanggungjawab'' or ''Contact Person''. This is a person''s name, not the firm name. Leave blank where the form names only the firm.
-23. Company Auditor Contact Number  |  Type: Alphanumeric — e.g. 03-7728 1234
+4. Company Age  |  Type: Numeric — e.g. 10
+   The age of the company in years, labelled ''Umur Syarikat'' or ''Years in Operation''. Extract the numeric count of years only. Where the form leaves this blank, leave it blank rather than calculating it from the incorporation date; the downstream model can derive it. Where the form gives a range, extract the lower bound.
+5. Document Type  |  Type: Alphanumeric — e.g. SSM Form 24
+   Return the document type. Only return what is on this list [Company Act Section 14, SSM Form 24, SSM Form 44, SSM Form 49, SSM Form 9 & 28, Form 32A, Financial Statements (Sdn Bhd), Borang B, Bank Statements, MyKad (Director ID or Passport), Consent Form, Customer Information Form, Application Details, CTOS Report, CCRIS / CBM Report, Other]
+6. Company Auditor Contact Number  |  Type: Alphanumeric — e.g. 03-7728 1234
    The telephone number of the audit firm or its named contact person, labelled ''No. Tel Juruaudit''. Store exactly as written, retaining spacing and hyphens. Where both a firm line and a mobile number are given, extract the number printed against the auditor contact fields.
+7. Company Auditor Contact Person  |  Type: Alphanumeric — e.g. Tan Wei Ming
+   The name of the individual contact at the audit firm, labelled ''Pegawai Bertanggungjawab'' or ''Contact Person''. This is a person''s name, not the firm name. Leave blank where the form names only the firm.
+8. Company Office Status  |  Type: Alphanumeric — e.g. Rented
+   Whether the company owns or rents its current office premises, labelled ''Status Premis''. A tick-box selection: Milik Sendiri / Owned, Sewa / Rented. Normalise to ''Owned'' or ''Rented''. Where the premises are rented, the monthly rent field should also be populated; where owned, the rent field is expected to be blank.
+9. Company Office Monthly Rent  |  Type: Numeric — e.g. 3500
+   The monthly rent paid on the company''s office premises, labelled ''Sewa Bulanan / Monthly Rent''. Strip the RM prefix and thousands separators and store as a number. Expected to be blank where Company Office Status is Owned; do not substitute zero, as a blank and a genuine zero carry different meanings for the credit assessment.
+10. Company Auditor Firm Name  |  Type: Alphanumeric — e.g. Tan & Associates PLT
+   The registered name of the audit firm engaged by the company, labelled ''Nama Firma Juruaudit / Auditor''. Typically ends in ''PLT'', ''& Co.'', or ''Chartered Accountants''. Extract the firm name only, excluding the firm''s address or AF registration number where those appear on the same line.
+11. Company Email Address  |  Type: Alphanumeric — e.g. admin@ajsmaju.com.my
+   The company''s official contact email address, labelled ''E-mel Syarikat''. Store exactly as written; do not normalise to lower case. Where the form carries several email addresses, take the one in the company details section, not one from a director''s personal block.
+12. Directors (repeating group — extract one row object per occurrence, with these columns):
+   - Director Emergency Contact Number  |  Type: Alphanumeric — e.g. 019-876 5432
+       The telephone number of a director''s nominated emergency contact, labelled ''No. Tel Waris''. Store exactly as written, retaining spacing and hyphens. Keep aligned with the Emergency Contact Name in the same block. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
+   - Director Email Address  |  Type: Alphanumeric — e.g. faizal@gmail.com
+       The personal email address of a director, labelled ''E-mel / Email'' within the director information block. Store exactly as written; do not normalise to lower case. Distinct from the company email address, though a director may supply the same value for both. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
+   - Director Emergency Contact Name  |  Type: Alphanumeric — e.g. Zainab binti Hassan
+       The full name of the person a director nominates to be contacted in an emergency, labelled ''Nama Waris'' or ''Emergency Contact''. This is distinct from the spouse field, though the same person may be named in both. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
+   - Director Religion  |  Type: Alphanumeric — e.g. Islam
+       The religion declared by a director, labelled ''Agama / Religion''. Typically a single word, and often a tick-box selection rather than free text: Islam, Buddha, Kristian, Hindu, Lain-lain. Extract the selected option as printed, without translating. Leave blank if no option is selected. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
+   - Director Higher Education  |  Type: Alphanumeric — e.g. Ijazah Sarjana Muda
+       The highest level of education attained by a director, labelled ''Pendidikan / Education'' or ''Taraf Pendidikan''. Usually a tick-box selection: SPM, STPM, Diploma, Ijazah / Degree, Sarjana / Master, PhD, Lain-lain. Where the form provides a free-text field for the institution or field of study, extract the qualification level only. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
+   - Director Name  |  Type: Alphanumeric — e.g. MOHAMMAD FAIZ BIN AHMAD NEWAZ
+       The full name of each director listed in Form 49, taken from the directors table. Extract every director row. Do not include company secretaries, managers, or auditors even where they appear in the same table - use the role/designation column to filter.
+   - Director Emergency Contact Relationship  |  Type: Alphanumeric — e.g. Ibu
+       The relationship between a director and the nominated emergency contact, labelled ''Hubungan / Relationship''. Free text or a tick box; common values are Isteri / Wife, Suami / Husband, Ibu / Mother, Bapa / Father, Adik-beradik / Sibling, Anak / Child. Extract as printed without translating. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
+   - Director Address  |  Type: Alphanumeric — e.g. NO 29, JALAN AMAN SERENIA 11/7 ANIRA,
+BANDAR SERENIA
+43900, SEPANG
+SELANGGOR
+       The residential address of each director, taken from the address column in the same table row as the director name. Must remain aligned with the corresponding Director Name. Capture the full multi-line block as printed.
+   - Director Estimated Monthly Income  |  Type: Numeric — e.g. 8500
+       The director''s self-declared personal monthly income, labelled ''Anggaran Pendapatan Bulanan / Estimated Monthly Income''. Strip the RM prefix and any thousands separators and store as a number. This is personal income, not company revenue or the director''s drawings from the company. Where the form provides an income band rather than a figure, extract the lower bound and flag it. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
+   - Director Experience in Current Business  |  Type: Numeric — e.g. 12
+       The number of years a director has worked in the same line of business as the applicant company, labelled ''Pengalaman dalam bidang / Years of Experience''. Extract the numeric count of years only, discarding the word ''years'' or ''tahun''. Where a range is given, extract the lower bound. Where the form asks for months, convert to years and round down. Note this counts experience in the industry, which may exceed the age of the company itself. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
+   - Director Marital Status  |  Type: Alphanumeric — e.g. Married
+       The marital status of a director, labelled ''Status Perkahwinan / Marital Status''. A tick-box selection: Bujang / Single, Berkahwin / Married, and sometimes Duda / Janda (widowed or divorced). Normalise to the English term: Single, Married, Widowed, Divorced. Where the status is Married, the spouse fields should also be populated. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
+   - Director Spouse Contact Number  |  Type: Alphanumeric — e.g. 012-345 6789
+       The contact telephone number of a director''s spouse, labelled ''No. Tel Pasangan''. Malaysian mobile format is 01X-XXX XXXX; landline is 0X-XXXX XXXX. Store exactly as written on the form, retaining spacing and hyphens. Do not prepend the +60 country code unless it is printed. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
+   - Director Spouse Name  |  Type: Alphanumeric — e.g. Nurul Aina binti Abdullah
+       The full name of a director''s spouse, labelled ''Nama Pasangan / Spouse Name''. Only present where the director''s marital status is Married. Leave blank for unmarried directors rather than repeating the director''s own name. The form carries one block per director; extract one value per director and keep it aligned with the Director Name in the same block.
 
 For each field above, also populate its entry in _locations with:
   real_page  — the actual sequential page number of the source document/PDF file, counting the
@@ -538,24 +541,27 @@ Document description: The financing application cover form. Captures how the app
 
 Fields to extract:
 
-1. Referrer  |  Type: Alphanumeric — e.g. Branch
+1. Proposed Financing Amount  |  Type: Numeric — e.g. 1200000
+   The gross financing amount requested by the applicant, labelled ''Jumlah Pembiayaan Dipohon / Financing Amount Requested''. Strip the RM prefix and thousands separators and store as a number. This is the facility amount applied for, not the net disbursement after fees, and not any amount subsequently approved.
+2. Document Type  |  Type: Alphanumeric — e.g. SSM Form 24
+   Return the document type. Only return what is on this list [Company Act Section 14, SSM Form 24, SSM Form 44, SSM Form 49, SSM Form 9 & 28, Form 32A, Financial Statements (Sdn Bhd), Borang B, Bank Statements, MyKad (Director ID or Passport), Consent Form, Customer Information Form, Application Details, CTOS Report, CCRIS / CBM Report, Other]
+3. Referrer  |  Type: Alphanumeric — e.g. Branch
    How the application reached the institution, captured as a closed set of exactly four values: Branch, Event, Personal, Other. This is a tick box or dropdown on the application form. Return one of the four values verbatim and nothing else. Where the selected option is Other, the Referrer Detail field carries the free text explanation. Do not infer the value from Referrer Detail if no option is selected.
-2. Referrer Detail  |  Type: Alphanumeric — e.g. Kota Bharu Branch
+4. Referrer Detail  |  Type: Alphanumeric — e.g. Kota Bharu Branch
    Free text elaborating on the Referrer selection: the branch name where Referrer is Branch, the event name and date where Referrer is Event, the introducing person''s name where Referrer is Personal, or an explanation where Referrer is Other. Extract the text exactly as written. Leave blank where the form provides no elaboration.
-3. Main Contact Name  |  Type: Alphanumeric (multiple occurrences expected) — e.g. Mohammad Faiz bin Ahmad Newaz
-   The full name of each person nominated as a point of contact for this application. Usually one or two people, and usually but not always directors. Extract every name listed in the contact section. Keep aligned with the corresponding Main Contact Email and Main Contact Phone Number in the same row or block.
-4. Main Contact Email  |  Type: Alphanumeric (multiple occurrences expected) — e.g. faiz@ajsmaju.com.my
-   The email address of each nominated contact person, aligned to the Main Contact Name in the same row. Store exactly as written; do not normalise to lower case. Where a contact has no email listed, leave that entry blank rather than shifting the remaining emails up, which would break the alignment with the names.
-5. Main Contact Phone Number  |  Type: Alphanumeric (multiple occurrences expected) — e.g. 013-222 8899
-   The telephone number of each nominated contact person, aligned to the Main Contact Name in the same row. Store exactly as written, retaining spacing and hyphens. Where a contact has no number listed, leave that entry blank rather than shifting the remaining numbers up.
+5. Additional Notes  |  Type: Alphanumeric — e.g. Applicant requests expedited processing ahead of a Q4 contract award.
+   Any free text the applicant or the receiving officer has written in the remarks, comments, or additional information section of the application form. Capture the full text verbatim, preserving line breaks. Do not summarise. Leave blank where the section is empty; do not fill it with text drawn from elsewhere on the form.
 6. Business Entity Type  |  Type: Alphanumeric — e.g. Sdn Bhd
    The legal form of the applicant business, captured as a closed set of exactly three values: Sdn Bhd, Sole Prop, Partnership. This is a tick box or dropdown on the application form. Return one of the three values verbatim. Note the form may label this field ''Business Address'', which is a labelling error on the form itself; match on the available options rather than on the label.
 7. Proposed Program  |  Type: Alphanumeric — e.g. SME Working Capital Financing-i (Tawarruq)
    The financing programme or product the applicant is applying for, labelled ''Program / Skim Pembiayaan''. Extract the programme name exactly as printed, including any scheme code or Islamic contract name in brackets. Leave blank where the applicant has not nominated a programme.
-8. Proposed Financing Amount  |  Type: Numeric — e.g. 1200000
-   The gross financing amount requested by the applicant, labelled ''Jumlah Pembiayaan Dipohon / Financing Amount Requested''. Strip the RM prefix and thousands separators and store as a number. This is the facility amount applied for, not the net disbursement after fees, and not any amount subsequently approved.
-9. Additional Notes  |  Type: Alphanumeric — e.g. Applicant requests expedited processing ahead of a Q4 contract award.
-   Any free text the applicant or the receiving officer has written in the remarks, comments, or additional information section of the application form. Capture the full text verbatim, preserving line breaks. Do not summarise. Leave blank where the section is empty; do not fill it with text drawn from elsewhere on the form.
+8. Main Contacts (repeating group — extract one row object per occurrence, with these columns):
+   - Main Contact Name  |  Type: Alphanumeric — e.g. Mohammad Faiz bin Ahmad Newaz
+       The full name of each person nominated as a point of contact for this application. Usually one or two people, and usually but not always directors. Extract every name listed in the contact section. Keep aligned with the corresponding Main Contact Email and Main Contact Phone Number in the same row or block.
+   - Main Contact Email  |  Type: Alphanumeric — e.g. faiz@ajsmaju.com.my
+       The email address of each nominated contact person, aligned to the Main Contact Name in the same row. Store exactly as written; do not normalise to lower case. Where a contact has no email listed, leave that entry blank rather than shifting the remaining emails up, which would break the alignment with the names.
+   - Main Contact Phone Number  |  Type: Alphanumeric — e.g. 013-222 8899
+       The telephone number of each nominated contact person, aligned to the Main Contact Name in the same row. Store exactly as written, retaining spacing and hyphens. Where a contact has no number listed, leave that entry blank rather than shifting the remaining numbers up.
 
 For each field above, also populate its entry in _locations with:
   real_page  — the actual sequential page number of the source document/PDF file, counting the
@@ -705,19 +711,19 @@ INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_g
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (220, 11, 12, 'multiple', 'Directors');
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (221, 11, 14, 'multiple', 'Directors');
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (222, 11, 79, 'unique', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (223, 12, 12, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (224, 12, 13, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (225, 12, 39, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (226, 12, 40, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (227, 12, 41, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (228, 12, 42, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (229, 12, 43, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (230, 12, 44, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (231, 12, 45, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (232, 12, 46, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (233, 12, 47, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (234, 12, 48, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (235, 12, 49, 'multiple', NULL);
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (223, 12, 12, 'multiple', 'Directors');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (224, 12, 13, 'multiple', 'Directors');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (225, 12, 39, 'multiple', 'Directors');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (226, 12, 40, 'multiple', 'Directors');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (227, 12, 41, 'multiple', 'Directors');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (228, 12, 42, 'multiple', 'Directors');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (229, 12, 43, 'multiple', 'Directors');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (230, 12, 44, 'multiple', 'Directors');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (231, 12, 45, 'multiple', 'Directors');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (232, 12, 46, 'multiple', 'Directors');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (233, 12, 47, 'multiple', 'Directors');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (234, 12, 48, 'multiple', 'Directors');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (235, 12, 49, 'multiple', 'Directors');
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (236, 12, 50, 'unique', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (237, 12, 51, 'unique', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (238, 12, 52, 'unique', NULL);
@@ -731,9 +737,9 @@ INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_g
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (246, 12, 79, 'unique', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (247, 13, 60, 'unique', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (248, 13, 61, 'unique', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (249, 13, 62, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (250, 13, 63, 'multiple', NULL);
-INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (251, 13, 64, 'multiple', NULL);
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (249, 13, 62, 'multiple', 'Main Contacts');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (250, 13, 63, 'multiple', 'Main Contacts');
+INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (251, 13, 64, 'multiple', 'Main Contacts');
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (252, 13, 65, 'unique', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (253, 13, 66, 'unique', NULL);
 INSERT INTO template_attributes (id, template_id, attribute_id, frequency, row_group) VALUES (254, 13, 67, 'unique', NULL);
