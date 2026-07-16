@@ -206,7 +206,7 @@ class TestNullValuesCrossTheAdapterSafely:
         assert any(w.field == "Auditor's Report Present" for w in warnings)
 
     def test_null_element_within_an_array_is_flagged_per_row(self, extracted_by_template):
-        extracted_by_template["Consent Form"]["Director NRIC or Passport Number"][0] = None
+        extracted_by_template["Consent Form"]["Directors"][0]["Director NRIC or Passport Number"] = None
         warnings = []
         docs = build_consent_form_docs(extracted_by_template, signature_present=True, warnings=warnings)
         assert docs[0].data.nric_passport == ""  # doesn't crash
@@ -250,7 +250,7 @@ class TestBuildValidationBundle:
             signature_present=True,
         )
         fields = {w.field for w in result.warnings}
-        assert fields == {"Shareholder Name", "Business Registration Number"}
+        assert fields == {"Shareholders", "Business Registration Number"}
 
     def test_document_types_present_matches_actual_documents(self, extracted_by_template):
         result = build_validation_bundle(

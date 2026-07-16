@@ -34,16 +34,16 @@ Two categories of "the data isn't what we need," handled differently:
    exception, and the reviewer doesn't have to reverse-engineer the anomaly
    from the raw JSON, it's already stated as "expected X, current Y."
 
-Known correlation risk: SSM Form 24 (Shareholder Name/Address/Percentage)
-and SSM Form 49 (Director Name/Address/NRIC) are NOT row_group-correlated in
-the current seed data, so build_ssm_corporate_docs() zips them by array
-index -- correct only if Gemini happened to return them in matching order.
-MyKad's "Director" row_group covers Director Name/NRIC/Back Side IC
-Present/ID Type but NOT Front Side IC Present, so that one field is also
-index-zipped in as a best effort. Retrofitting row_group onto the ungrouped
-fields (already possible via the CRUD API) removes this risk for real --
-until then, any length mismatch shows up as an AdapterWarning instead of a
-crash or a silently-wrong pairing.
+Correlation via row_group: SSM Form 24 (Shareholders), SSM Form 49
+(Directors) and Consent Form (Directors) now carry their per-person fields
+in a row_group, so extraction returns one correlated object per person and
+build_ssm_corporate_docs()/build_consent_form_docs() read those directly --
+no more index-zipping, so a name can no longer drift onto another person's
+NRIC. The one remaining index-zip is in build_identity_documents(): MyKad's
+"Director" row_group covers Director Name/NRIC/Back Side IC Present/ID Type
+but NOT Front Side IC Present, so that single field is still zipped in
+positionally as a best effort. Any length mismatch there shows up as an
+AdapterWarning instead of a crash or a silently-wrong pairing.
 """
 from datetime import date
 from typing import Any, Optional
@@ -242,8 +242,8 @@ def build_ssm_corporate_docs(
     "form_b"/"form_d" until those templates are added.
 
     `warnings`, if passed, collects AdapterWarnings for null fields (e.g. a
-    null Entity Name) and array-length mismatches between Director
-    Name/NRIC -- see module docstring.
+    null Entity Name) or a null Directors/Shareholders row_group -- see
+    module docstring.
     """
     warnings = warnings if warnings is not None else []
 
@@ -268,18 +268,19 @@ def build_ssm_corporate_docs(
         document_id = f"ssm_{subtype}"
 
         directors = None
-        if "Director Name" in extracted:
+        if "Directors" in extracted:
+            director_rows = _safe_list(extracted.get("Directors"), warnings=warnings,
+                                       document_type="ssm_corporate_form", document_id=document_id, field="Directors")
             directors = [
                 PersonInfo(
-                    name=_safe_str(name, warnings=warnings, document_type="ssm_corporate_form",
-                                    document_id=document_id, field=f"Director Name[{i}]"),
-                    nric_passport=_safe_str(nric, warnings=warnings, document_type="ssm_corporate_form",
-                                             document_id=document_id, field=f"Director NRIC or Passport Number[{i}]"),
+                    name=_safe_str((row or {}).get("Director Name"), warnings=warnings,
+                                    document_type="ssm_corporate_form", document_id=document_id,
+                                    field=f"Directors[{i}].Director Name"),
+                    nric_passport=_safe_str((row or {}).get("Director NRIC or Passport Number"), warnings=warnings,
+                                             document_type="ssm_corporate_form", document_id=document_id,
+                                             field=f"Directors[{i}].Director NRIC or Passport Number"),
                 )
-                for i, (name, nric) in enumerate(_zip_positional(
-                    extracted, "Director Name", "Director NRIC or Passport Number",
-                    warnings=warnings, document_type="ssm_corporate_form", document_id=document_id,
-                ))
+                for i, row in enumerate(director_rows)
             ]
 
         # GAP: SSM Form 24 has "Shareholder Name"/"Address"/"Percentage" but
@@ -293,13 +294,15 @@ def build_ssm_corporate_docs(
         # Add a "Shareholder NRIC or Passport Number" attribute to close
         # this gap for real.
         shareholders = None
-        if "Shareholder Name" in extracted:
+        if "Shareholders" in extracted:
+            shareholder_rows = _safe_list(extracted.get("Shareholders"), warnings=warnings,
+                                          document_type="ssm_corporate_form", document_id=document_id, field="Shareholders")
             warnings.append(AdapterWarning(
                 document_type="ssm_corporate_form", document_id=document_id,
-                field="Shareholder Name",
-                message="Shareholder Name present but no Shareholder NRIC or Passport "
+                field="Shareholders",
+                message="Shareholders present but no Shareholder NRIC or Passport "
                         "Number attribute exists to match them against IC/consent documents.",
-                current_state=f"{len(extracted.get('Shareholder Name') or [])} shareholder name(s), 0 shareholder NRIC(s)",
+                current_state=f"{len(shareholder_rows)} shareholder name(s), 0 shareholder NRIC(s)",
                 expected_state="a Shareholder NRIC or Passport Number value per shareholder",
             ))
 
@@ -576,10 +579,8 @@ def build_consent_form_docs(
 
     entity_name = _safe_str(extracted.get("Entity Name"), warnings=warnings, document_type="consent_form",
                              document_id=document_id, field="Entity Name")
-    rows = _zip_positional(
-        extracted, "Director Name", "Director NRIC or Passport Number",
-        warnings=warnings, document_type="consent_form", document_id=document_id,
-    )
+    rows = _safe_list(extracted.get("Directors"), warnings=warnings,
+                      document_type="consent_form", document_id=document_id, field="Directors")
 
     if signature_present is None:
         warnings.append(AdapterWarning(
@@ -597,15 +598,15 @@ def build_consent_form_docs(
             document_type="consent_form",
             data=ConsentFormData(
                 entity_name=entity_name,
-                individual_name=_safe_str(name, warnings=warnings, document_type="consent_form",
-                                           document_id=f"consent_form_{i}", field="Director Name"),
-                nric_passport=_safe_str(nric, warnings=warnings, document_type="consent_form",
-                                         document_id=f"consent_form_{i}", field="Director NRIC or Passport Number"),
+                individual_name=_safe_str((row or {}).get("Director Name"), warnings=warnings, document_type="consent_form",
+                                           document_id=f"consent_form_{i}", field=f"Directors[{i}].Director Name"),
+                nric_passport=_safe_str((row or {}).get("Director NRIC or Passport Number"), warnings=warnings, document_type="consent_form",
+                                         document_id=f"consent_form_{i}", field=f"Directors[{i}].Director NRIC or Passport Number"),
                 position=None,
                 signature_present=signature_present,  # stays None if not confirmed either way
             ),
         )
-        for i, (name, nric) in enumerate(rows)
+        for i, row in enumerate(rows)
     ]
 
 
