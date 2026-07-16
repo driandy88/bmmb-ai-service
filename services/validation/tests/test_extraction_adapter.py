@@ -168,6 +168,21 @@ class TestBuildCustomerInformationDoc:
         assert doc.data.financing_amount == 500000.00
         assert doc.data.product_type == "SME Term Financing"
 
+    def test_multiple_main_contacts_stay_row_aligned(self, extracted_by_template):
+        # Contacts come from the "Main Contacts" row_group -- name/email/phone are
+        # fanned out into the three parallel lists CustomerInfoData keeps, index for
+        # index, so contact 2's email can't land against contact 1's name.
+        extracted_by_template["Application Details"]["Main Contacts"] = [
+            {"Main Contact Name": "AIMAN", "Main Contact Email": "aiman@x.my", "Main Contact Phone Number": "011"},
+            {"Main Contact Name": "NURUL", "Main Contact Email": "nurul@x.my", "Main Contact Phone Number": "012"},
+        ]
+        doc = build_customer_information_doc(
+            extracted_by_template, tenure_months=60, repayment_frequency="Monthly",
+        )
+        assert doc.data.main_contact_names == ["AIMAN", "NURUL"]
+        assert doc.data.main_contact_emails == ["aiman@x.my", "nurul@x.my"]
+        assert doc.data.main_contact_phone_numbers == ["011", "012"]
+
     def test_missing_tenure_or_frequency_defaults_and_warns(self, extracted_by_template):
         warnings = []
         doc = build_customer_information_doc(extracted_by_template, warnings=warnings)

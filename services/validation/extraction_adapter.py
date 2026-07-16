@@ -617,19 +617,28 @@ def build_customer_information_doc(
         ))
         repayment_frequency = "Unknown"
 
+    # Main contacts are one correlated object per contact ("Main Contacts"
+    # row_group), so name/email/phone stay aligned; fan them back out into the
+    # three parallel lists CustomerInfoData expects.
+    contact_rows = _safe_list(extracted.get("Main Contacts"), warnings=warnings,
+                              document_type="customer_information", document_id=document_id, field="Main Contacts")
+
     return CustomerInfoDoc(
         document_id=document_id,
         document_type="customer_information",
         data=CustomerInfoData(
-            main_contact_names=_safe_list(extracted.get("Main Contact Name"), warnings=warnings,
+            main_contact_names=[_safe_str((r or {}).get("Main Contact Name"), warnings=warnings,
+                                          document_type="customer_information", document_id=document_id,
+                                          field=f"Main Contacts[{i}].Main Contact Name")
+                                for i, r in enumerate(contact_rows)],
+            main_contact_emails=[_safe_str((r or {}).get("Main Contact Email"), warnings=warnings,
                                            document_type="customer_information", document_id=document_id,
-                                           field="Main Contact Name"),
-            main_contact_emails=_safe_list(extracted.get("Main Contact Email"), warnings=warnings,
-                                            document_type="customer_information", document_id=document_id,
-                                            field="Main Contact Email"),
-            main_contact_phone_numbers=_safe_list(extracted.get("Main Contact Phone Number"), warnings=warnings,
-                                                   document_type="customer_information", document_id=document_id,
-                                                   field="Main Contact Phone Number"),
+                                           field=f"Main Contacts[{i}].Main Contact Email")
+                                 for i, r in enumerate(contact_rows)],
+            main_contact_phone_numbers=[_safe_str((r or {}).get("Main Contact Phone Number"), warnings=warnings,
+                                                  document_type="customer_information", document_id=document_id,
+                                                  field=f"Main Contacts[{i}].Main Contact Phone Number")
+                                        for i, r in enumerate(contact_rows)],
             financing_amount=_safe_float(extracted.get("Proposed Financing Amount"), warnings=warnings,
                                           document_type="customer_information", document_id=document_id,
                                           field="Proposed Financing Amount"),
