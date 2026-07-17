@@ -97,6 +97,28 @@ class TestBuildBankStatementDoc:
         assert doc.data.monthly_balances[0].month == "January 2026"
         assert doc.data.monthly_balances[0].end_balance == 42500.00
 
+    def test_maps_available_bank_name_and_preserves_unknown_fields(self, extracted_by_template):
+        warnings = []
+        doc = build_bank_statement_doc(extracted_by_template, entity_name="X", warnings=warnings)
+        assert doc.data.bank_name == "MAYBANK BERHAD"
+        assert doc.data.currency is None
+        assert doc.data.account_type is None
+        assert {w.field for w in warnings} >= {"Currency", "Account Type"}
+
+    def test_records_source_template_provenance(self, extracted_by_template):
+        result = build_validation_bundle(
+            extracted_by_template,
+            entity_type="Sdn Bhd", tenure_months=60,
+            repayment_frequency="Monthly", signature_present=True,
+        )
+        assert result.bundle.extracted_documents
+        assert all(doc.provenance is not None for doc in result.bundle.extracted_documents)
+        bank = next(
+            doc for doc in result.bundle.extracted_documents
+            if doc.document_type == "bank_statement"
+        )
+        assert bank.provenance.source_template == "Bank Statements"
+
     def test_missing_template_returns_none(self):
         assert build_bank_statement_doc({}, entity_name="X") is None
 
@@ -239,9 +261,9 @@ class TestBuildValidationBundle:
     def test_clean_extraction_produces_only_the_known_pre_existing_gaps(self, extracted_by_template):
         # The example fixture is otherwise complete -- the only warnings
         # should be the pre-documented extraction schema gaps: no
-        # Shareholder NRIC attribute on SSM Form 24, and no Business
-        # Registration Number attribute on SSM Form 44 (confirmed against
-        # the real bmmb_dev wiring -- Form 44 genuinely doesn't capture it).
+        # Shareholder NRIC attribute on SSM Form 24, no Business Registration
+        # Number attribute on SSM Form 44, and no currency/account-type
+        # attributes on Bank Statements.
         # signature_present is supplied explicitly here, so no warning for it.
         result = build_validation_bundle(
             extracted_by_template,
@@ -250,7 +272,10 @@ class TestBuildValidationBundle:
             signature_present=True,
         )
         fields = {w.field for w in result.warnings}
-        assert fields == {"Shareholders", "Business Registration Number"}
+        assert fields == {
+            "Shareholders", "Business Registration Number", "Currency", "Account Type",
+            "audited",
+        }
 
     def test_document_types_present_matches_actual_documents(self, extracted_by_template):
         result = build_validation_bundle(

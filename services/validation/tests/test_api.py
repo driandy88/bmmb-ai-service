@@ -38,6 +38,13 @@ class TestHealth:
         assert r.status_code == 200
         assert r.json() == {"status": "ok"}
 
+    def test_rules_catalog(self):
+        r = client.get("/rules")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["policy_id"] == "bmmb-sme-2026-01"
+        assert any(rule["rule_id"] == "bank_statement.duration" for rule in body["rules"])
+
 
 class TestValidateDeterministicOnly:
     """enable_ai_review=False needs no GCP credentials — the common case for CI."""

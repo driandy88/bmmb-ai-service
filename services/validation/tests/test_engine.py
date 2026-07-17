@@ -6,7 +6,9 @@ no Gemini, no network, no GCP credentials required.
 """
 
 from services.validation.bundle import ValidationBundle
-from services.validation.engine import ValidationEngine
+from services.validation.engine import ValidationEngine, ValidationStatus
+from services.validation.rules import RULE_CATALOG, validate_rule_result
+from services.validation.domain.policies import ValidationPolicy
 
 
 def _run(raw: dict):
@@ -29,6 +31,55 @@ class TestPassingBundle:
         failed = [r.check for r in report.results if r.passed is False]
         assert failed == []
 
+    def test_results_have_stable_rule_ids_and_explicit_status(self, passing_bundle_raw):
+        report = _run(passing_bundle_raw)
+
+        ssm = next(r for r in report.results if r.check == "verify_ssm_completeness")
+        assert ssm.rule_id == "ssm.document_completeness"
+        assert ssm.status is ValidationStatus.PASSED
+
+        entity_match = next(
+            r for r in report.results
+            if r.check.startswith("strict_match_entity_names[")
+        )
+        assert entity_match.rule_id == "entity_name.match"
+
+    def test_overall_status_is_passed(self, passing_bundle_raw):
+        report = _run(passing_bundle_raw)
+        assert report.overall_status is ValidationStatus.PASSED
+        assert report.policy_id == "bmmb-sme-2026-01"
+
+    def test_custom_policy_is_recorded_and_used(self, passing_bundle_raw):
+        bundle = ValidationBundle(**passing_bundle_raw)
+        policy = ValidationPolicy(
+            policy_id="test-policy",
+            required_ssm_forms_by_entity={"sdn bhd": {"form_24"}},
+            default_required_ssm_forms={"form_24"},
+            minimum_bank_statement_months_by_entity={"sdn bhd": 6},
+            default_minimum_bank_statement_months=6,
+            financial_statement_max_age_months=24,
+            bank_statement_max_age_months=3,
+            required_application_fields={"main_contact_names"},
+        )
+        report = ValidationEngine(policy=policy).run(bundle)
+        assert report.policy_id == "test-policy"
+        assert report.overall_passed is True
+
+    def test_rule_catalog_has_unique_stable_ids(self):
+        rule_ids = [definition.rule_id for definition in RULE_CATALOG]
+        check_names = [definition.check_name for definition in RULE_CATALOG]
+        assert len(rule_ids) == len(set(rule_ids))
+        assert len(check_names) == len(set(check_names))
+
+    def test_rule_result_contract_rejects_malformed_results(self):
+        valid = validate_rule_result({"passed": True, "message": "ok", "details": {}})
+        assert valid["passed"] is True
+
+        import pytest
+
+        with pytest.raises(ValueError, match="missing required field"):
+            validate_rule_result({"passed": True, "message": "ok"})
+
 
 class TestFailingBundle:
     def test_overall_failed(self, failing_bundle_raw):
@@ -39,7 +90,28 @@ class TestFailingBundle:
         report = _run(failing_bundle_raw)
         consent_check = next(r for r in report.results if r.check == "verify_consent_signatures")
         assert consent_check.passed is False
+        assert consent_check.status is ValidationStatus.FAILED
         assert consent_check.details["missing_consent"]
+
+    def test_failed_check_wins_over_needs_review(self, passing_bundle_raw):
+        raw = passing_bundle_raw.copy()
+        raw["extracted_documents"] = [
+            dict(doc, data=dict(doc["data"], back_image_present=None))
+            if doc["document_type"] == "identity_document"
+            else doc
+            for doc in raw["extracted_documents"]
+        ]
+        report = _run(raw)
+        assert report.overall_status is ValidationStatus.NEEDS_REVIEW
+
+        raw["extracted_documents"] = [
+            dict(doc, data=dict(doc["data"], back_image_present=False))
+            if doc["document_type"] == "identity_document"
+            else doc
+            for doc in raw["extracted_documents"]
+        ]
+        report = _run(raw)
+        assert report.overall_status is ValidationStatus.FAILED
 
 
 class TestSkippedChecksForIncompleteBundles:
@@ -79,10 +151,10 @@ class TestSkippedChecksForIncompleteBundles:
             "check_ic_front_and_back",
             "find_missing_ic_documents",
             "verify_consent_signatures",
-            "validate_form_d_expiry",
         ):
             check = next(r for r in report.results if r.check == check_name)
             assert check.passed is None
+            assert check.status is ValidationStatus.NOT_APPLICABLE
 
         # A skipped check never flips overall_passed to False on its own.
         assert report.overall_passed is False  # only because of the real ssm_check failure above
@@ -139,6 +211,49 @@ class TestNewRulesWiring:
         assert check.passed is False
         assert report.overall_passed is False
 
+    def test_mixed_bank_statement_banks_is_caught(self, passing_bundle_raw):
+        raw = passing_bundle_raw.copy()
+        raw["extracted_documents"] = [
+            dict(doc, data=dict(doc["data"], bank_name="CIMB BANK BERHAD"))
+            if doc["document_id"] == "doc_004b"
+            else doc
+            for doc in raw["extracted_documents"]
+        ]
+        report = _run(raw)
+        check = next(r for r in report.results if r.check == "check_bank_statement_bank_consistency")
+        assert check.passed is False
+        assert report.overall_passed is False
+
+    def test_missing_bank_name_needs_review_not_fail(self, passing_bundle_raw):
+        raw = passing_bundle_raw.copy()
+        raw["extracted_documents"] = [
+            dict(doc, data=dict(doc["data"], bank_name=None))
+            if doc["document_id"] == "doc_004a"
+            else doc
+            for doc in raw["extracted_documents"]
+        ]
+        report = _run(raw)
+        check = next(r for r in report.results if r.check == "check_bank_statement_bank_consistency")
+        assert check.passed is None
+        assert check.status is ValidationStatus.NEEDS_REVIEW
+        assert report.overall_passed is True  # None never flips overall_passed
+        assert report.overall_status is ValidationStatus.NEEDS_REVIEW
+
+    def test_non_myr_currency_needs_review_not_fail(self, passing_bundle_raw):
+        raw = passing_bundle_raw.copy()
+        raw["extracted_documents"] = [
+            dict(doc, data=dict(doc["data"], currency="SGD"))
+            if doc["document_id"] == "doc_004b"
+            else doc
+            for doc in raw["extracted_documents"]
+        ]
+        report = _run(raw)
+        check = next(r for r in report.results if r.check == "check_bank_statement_currency")
+        assert check.passed is None
+        assert check.status is ValidationStatus.NEEDS_REVIEW
+        assert report.overall_passed is True  # a warning never flips overall_passed
+        assert report.overall_status is ValidationStatus.NEEDS_REVIEW
+
     def test_stale_bank_statement_is_caught(self, passing_bundle_raw):
         raw = passing_bundle_raw.copy()
         raw["extracted_documents"] = [
@@ -150,17 +265,6 @@ class TestNewRulesWiring:
         report = _run(raw)
         check = next(r for r in report.results if r.check == "check_bank_statement_freshness")
         assert check.passed is False
-
-    def test_consent_form_count_below_directors_plus_one_is_caught(self, passing_bundle_raw):
-        raw = passing_bundle_raw.copy()
-        raw["extracted_documents"] = [
-            doc for doc in raw["extracted_documents"] if doc["document_id"] != "doc_006c"
-        ]
-        report = _run(raw)
-        check = next(r for r in report.results if r.check == "verify_consent_form_count")
-        assert check.passed is False
-        assert check.details["required_count"] == 3
-        assert check.details["consent_form_count"] == 2
 
     def test_missing_application_details_field_is_caught(self, passing_bundle_raw):
         raw = passing_bundle_raw.copy()

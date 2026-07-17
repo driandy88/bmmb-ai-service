@@ -21,11 +21,12 @@ schema field.
 """
 
 from datetime import timedelta
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from dateutil.relativedelta import relativedelta
 
 from ._utils import to_date
+from ..domain.policies import BMMB_SME_POLICY_V1, ValidationPolicy
 
 # NOTE: date parameters are typed as `str` (ISO 'YYYY-MM-DD'), not
 # `datetime.date`, and nested objects as `Dict[str, object]`, not TypedDict
@@ -41,16 +42,11 @@ from ._utils import to_date
 # value type. `Dict[str, object]` is the only combination that survives
 # both schema generation and execution, at the cost of a looser schema.
 
-# Minimum bank statement coverage, in months, by entity type.
-_MIN_STATEMENT_MONTHS_BY_ENTITY = {
-    "sole prop": 12,
-    "sole proprietor": 12,
-    "sole proprietorship": 12,
-}
-_DEFAULT_MIN_STATEMENT_MONTHS = 6  # Sdn Bhd / partnership / anything else
-
-
-def calculate_financial_18_month_rule(latest_fye_date: str, system_date: str) -> Dict:
+def calculate_financial_18_month_rule(
+    latest_fye_date: str,
+    system_date: str,
+    max_age_months: int = BMMB_SME_POLICY_V1.financial_statement_max_age_months,
+) -> Dict:
     """Check the BMMB rule that the latest financial statement must not be older than 18 months.
 
     Use this when a financial_statement document has been extracted and you
@@ -83,14 +79,14 @@ def calculate_financial_18_month_rule(latest_fye_date: str, system_date: str) ->
         # count conservatively (round up against the applicant).
         months_elapsed += 1
 
-    deadline = fye + relativedelta(months=18)
-    passed = months_elapsed <= 18
+    deadline = fye + relativedelta(months=max_age_months)
+    passed = months_elapsed <= max_age_months
 
     return {
         "passed": passed,
         "message": (
             f"Latest financial statement is {months_elapsed} month(s) old "
-            f"({'within' if passed else 'exceeds'} the 18-month limit)."
+            f"({'within' if passed else 'exceeds'} the {max_age_months}-month limit)."
         ),
         "details": {
             "latest_fye_date": fye.isoformat(),
@@ -213,7 +209,11 @@ def check_bank_statement_continuity(statements: List[Dict[str, object]]) -> Dict
     }
 
 
-def verify_bank_statement_duration(statements: List[Dict[str, object]], entity_type: str) -> Dict:
+def verify_bank_statement_duration(
+    statements: List[Dict[str, object]],
+    entity_type: str,
+    policy: ValidationPolicy = BMMB_SME_POLICY_V1,
+) -> Dict:
     """Check total consecutive months of bank statements against the BMMB minimum for the entity type.
 
     BMMB requires 6 months of statements for a Sdn Bhd (or other company) and
@@ -245,8 +245,8 @@ def verify_bank_statement_duration(statements: List[Dict[str, object]], entity_t
         # A partial trailing month still counts as a covered month.
         months_covered += 1
 
-    min_required = _MIN_STATEMENT_MONTHS_BY_ENTITY.get(
-        entity_type.strip().lower(), _DEFAULT_MIN_STATEMENT_MONTHS
+    min_required = policy.minimum_bank_statement_months_by_entity.get(
+        entity_type.strip().lower(), policy.default_minimum_bank_statement_months
     )
     passed = months_covered >= min_required
 
@@ -266,10 +266,11 @@ def verify_bank_statement_duration(statements: List[Dict[str, object]], entity_t
     }
 
 
-_BANK_STATEMENT_MAX_AGE_MONTHS = 2  # how stale the latest statement can be before it's "outdated"
-
-
-def check_bank_statement_freshness(latest_end_date: str, system_date: str) -> Dict:
+def check_bank_statement_freshness(
+    latest_end_date: str,
+    system_date: str,
+    max_age_months: int = BMMB_SME_POLICY_V1.bank_statement_max_age_months,
+) -> Dict:
     """Check that the most recent bank statement is recent enough to be accepted (not outdated).
 
     Use this once you know the latest statement_end_date across every
@@ -287,22 +288,22 @@ def check_bank_statement_freshness(latest_end_date: str, system_date: str) -> Di
     latest = to_date(latest_end_date)
     today = to_date(system_date)
 
-    deadline = latest + relativedelta(months=_BANK_STATEMENT_MAX_AGE_MONTHS)
+    deadline = latest + relativedelta(months=max_age_months)
     passed = today <= deadline
 
     return {
         "passed": passed,
         "message": (
             f"Latest bank statement (ending {latest.isoformat()}) is within the "
-            f"{_BANK_STATEMENT_MAX_AGE_MONTHS}-month freshness window."
+            f"{max_age_months}-month freshness window."
             if passed
             else f"Latest bank statement (ending {latest.isoformat()}) is older than the "
-                 f"{_BANK_STATEMENT_MAX_AGE_MONTHS}-month freshness window."
+            f"{max_age_months}-month freshness window."
         ),
         "details": {
             "latest_statement_end_date": latest.isoformat(),
             "system_date": today.isoformat(),
-            "max_age_months": _BANK_STATEMENT_MAX_AGE_MONTHS,
+            "max_age_months": max_age_months,
             "freshness_deadline": deadline.isoformat(),
         },
     }
@@ -342,44 +343,100 @@ def check_bank_statement_overdraft(monthly_balances: List[Dict[str, object]]) ->
     }
 
 
-def validate_form_d_expiry(expiry_date: str, tenure_months: int, system_date: str) -> Dict:
-    """Check that the SSM Form D validity period covers the requested financing tenure.
+def check_bank_statement_bank_consistency(bank_names: List[Optional[str]]) -> Dict:
+    """Check that every bank statement in the set is from the same bank.
 
-    Use this when the bundle includes an ssm_corporate_form with
-    document_subtype "form_d", together with the tenure_months from the
-    customer_information document.
+    Use this for the bank_name of every bank_statement document in the
+    bundle. A null bank_name (extraction had no reliable source for it on
+    that document) can't confirm consistency one way or the other, so it
+    needs_review rather than fails; two or more distinct non-null bank
+    names is a confirmed fail.
 
     Args:
-        expiry_date: Expiry date printed on Form D, as an ISO 'YYYY-MM-DD'
-            date.
-        tenure_months: The requested financing tenure, in months, from the
-            customer_information document.
-        system_date: The current system/application date, as an ISO
-            'YYYY-MM-DD' date.
+        bank_names: One entry per bank_statement document -- its bank_name,
+            or null if not available for that document.
     """
-    expiry = to_date(expiry_date)
-    today = to_date(system_date)
+    known_names = [name for name in bank_names if name is not None]
+    distinct_known = sorted(set(known_names))
+    unknown_count = len(bank_names) - len(known_names)
 
-    required_coverage_end = today + relativedelta(months=tenure_months)
-    passed = expiry >= required_coverage_end
-    shortfall_days = 0 if passed else (required_coverage_end - expiry).days
+    if len(distinct_known) > 1:
+        passed = False
+        message = f"Bank statements come from {len(distinct_known)} different banks: {', '.join(distinct_known)}."
+    elif unknown_count > 0:
+        passed = None
+        message = (
+            "At least one bank statement has no confirmed bank name -- cannot "
+            "confirm all statements are from the same bank."
+        )
+    elif distinct_known:
+        passed = True
+        message = f"All bank statements are from {distinct_known[0]}."
+    else:
+        passed = None
+        message = "No bank name data available on any bank statement."
 
     return {
         "passed": passed,
-        "message": (
-            f"Form D expiry ({expiry.isoformat()}) covers the {tenure_months}-month tenure."
-            if passed
-            else (
-                f"Form D expiry ({expiry.isoformat()}) is short of the required "
-                f"coverage end date ({required_coverage_end.isoformat()}) by {shortfall_days} day(s)."
-            )
-        ),
+        "message": message,
         "details": {
-            "expiry_date": expiry.isoformat(),
-            "system_date": today.isoformat(),
-            "tenure_months": tenure_months,
-            "required_coverage_end": required_coverage_end.isoformat(),
-            "shortfall_days": shortfall_days,
+            "documents_checked": len(bank_names),
+            "distinct_banks": distinct_known,
+            "documents_with_unknown_bank": unknown_count,
+        },
+    }
+
+
+def check_bank_statement_currency(
+    currencies: List[Optional[str]],
+    accepted_currency: str = BMMB_SME_POLICY_V1.accepted_bank_currency,
+) -> Dict:
+    """Check that every bank statement's currency matches the accepted currency.
+
+    Use this for the currency of every bank_statement document in the
+    bundle. A statement in a different currency isn't a confirmed
+    compliance failure on its own -- it needs manual conversion (e.g. at the
+    current Google rate) before its balances can be compared like-for-like,
+    so a mismatch is a warning (needs_review), not a fail. A null currency
+    (extraction had no reliable source for it on that document) is treated
+    the same way: it can't be confirmed as the accepted currency either, so
+    it needs review too.
+
+    Args:
+        currencies: One entry per bank_statement document -- its currency
+            code (e.g. "MYR"), or null if not available for that document.
+        accepted_currency: The currency code statements are expected to be
+            in, e.g. "MYR".
+    """
+    normalized_accepted = accepted_currency.strip().upper()
+    unknown_count = sum(1 for c in currencies if c is None)
+    mismatched = sorted({c for c in currencies if c is not None and c.strip().upper() != normalized_accepted})
+
+    if mismatched:
+        passed = None
+        message = (
+            f"{len(mismatched)} bank statement currency/currencies ({', '.join(mismatched)}) "
+            f"do not match the accepted currency ({normalized_accepted}) -- needs conversion "
+            "and manual review."
+        )
+    elif unknown_count > 0:
+        passed = None
+        message = (
+            "At least one bank statement has no confirmed currency -- cannot "
+            f"confirm it matches the accepted currency ({normalized_accepted})."
+        )
+    else:
+        passed = True
+        message = f"All bank statements are in the accepted currency ({normalized_accepted})."
+
+    return {
+        "passed": passed,
+        "message": message,
+        "details": {
+            "documents_checked": len(currencies),
+            "accepted_currency": normalized_accepted,
+            "mismatched_currencies": mismatched,
+            "documents_with_unknown_currency": unknown_count,
         },
     }
 

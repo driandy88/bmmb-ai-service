@@ -107,6 +107,8 @@
       "document_type": "bank_statement",
       "data": {
         "entity_name": "ALPHA TECH SOLUTIONS SDN BHD",
+        "bank_name": "MAYBANK BERHAD",
+        "currency": "MYR",
         "statement_start_date": "2026-01-01",
         "statement_end_date": "2026-03-31",
         "monthly_balances": [
@@ -121,6 +123,8 @@
       "document_type": "bank_statement",
       "data": {
         "entity_name": "ALPHA TECH SOLUTIONS SDN BHD",
+        "bank_name": "MAYBANK BERHAD",
+        "currency": "MYR",
         "statement_start_date": "2026-04-01",
         "statement_end_date": "2026-06-30",
         "monthly_balances": [

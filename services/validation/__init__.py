@@ -47,15 +47,17 @@ Submodules:
 """
 
 from .agent import run_agentic_validation, run_agentic_validation_from_extraction
-from .bundle import ValidationBundle
-from .engine import CheckResult, ValidationEngine, ValidationReport
+from .bundle import DocumentProvenance, ValidationBundle
+from .engine import CheckResult, ValidationEngine, ValidationReport, ValidationStatus
 from .schemas import AgenticValidationReport, AIFinding
 
 __all__ = [
     "ValidationBundle",
+    "DocumentProvenance",
     "ValidationEngine",
     "ValidationReport",
     "CheckResult",
+    "ValidationStatus",
     "AgenticValidationReport",
     "AIFinding",
     "run_agentic_validation",
