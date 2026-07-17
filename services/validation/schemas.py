@@ -1,10 +1,10 @@
 """Output schemas for the agentic validation pipeline (agent.py)."""
 
-from typing import List
+from typing import Dict, List
 
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
-from .engine import ValidationReport
+from .engine import CheckResult, ValidationReport
 from .extraction_adapter import AdapterWarning
 
 
@@ -48,3 +48,11 @@ class AgenticValidationReport(BaseModel):
     deterministic: ValidationReport
     ai_findings: List[AIFinding]
     narrative: str
+
+    @computed_field
+    @property
+    def results_by_document(self) -> Dict[str, List[CheckResult]]:
+        """Same grouping as deterministic.results_by_document, surfaced at
+        the top level so callers don't have to reach into `deterministic`
+        for it."""
+        return self.deterministic.results_by_document

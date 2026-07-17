@@ -26,7 +26,7 @@ from .matching import (
     strict_match_ic_numbers,
 )
 from .contracts import RuleResult, validate_rule_result
-from .catalog import RULE_CATALOG, RuleDefinition, rule_id_for_check
+from .catalog import RULE_CATALOG, RuleDefinition, document_group_for_rule_id, rule_id_for_check
 from .registry import RuleOutcome, run_all_rules
 
 __all__ = [
@@ -56,6 +56,7 @@ __all__ = [
     "RULE_CATALOG",
     "RuleDefinition",
     "rule_id_for_check",
+    "document_group_for_rule_id",
     "RuleOutcome",
     "run_all_rules",
 ]

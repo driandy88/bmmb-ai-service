@@ -81,6 +81,46 @@ class TestPassingBundle:
             validate_rule_result({"passed": True, "message": "ok"})
 
 
+class TestResultsByDocument:
+    def test_every_result_is_grouped_exactly_once(self, passing_bundle_raw):
+        report = _run(passing_bundle_raw)
+        grouped = report.results_by_document
+        regrouped_total = sum(len(results) for results in grouped.values())
+        assert regrouped_total == len(report.results)
+
+    def test_ssm_completeness_and_cross_document_matching_share_ssm_group(self, passing_bundle_raw):
+        report = _run(passing_bundle_raw)
+        ssm_group_checks = {r.check for r in report.results_by_document["SSM_CORPORATE_FORM"]}
+        assert "verify_ssm_completeness" in ssm_group_checks
+        assert any(check.startswith("strict_match_entity_names[") for check in ssm_group_checks)
+        assert any(check.startswith("strict_match_ic_numbers[") for check in ssm_group_checks)
+
+    def test_bank_statement_rules_are_grouped_together(self, passing_bundle_raw):
+        report = _run(passing_bundle_raw)
+        bank_group_checks = {r.check for r in report.results_by_document["BANK_STATEMENT"]}
+        assert bank_group_checks == {
+            "check_bank_statement_continuity",
+            "verify_bank_statement_duration",
+            "check_bank_statement_freshness",
+            "check_bank_statement_overdraft",
+            "check_bank_statement_bank_consistency",
+            "check_bank_statement_currency",
+        }
+
+    def test_grouping_is_included_in_json_output(self, passing_bundle_raw):
+        report = _run(passing_bundle_raw)
+        dumped = report.model_dump(mode="json")
+        assert "results_by_document" in dumped
+        assert set(dumped["results_by_document"]) == {
+            "SSM_CORPORATE_FORM", "FINANCIAL_STATEMENT", "BANK_STATEMENT",
+            "IDENTITY_DOCUMENT", "CONSENT_FORM", "APPLICATION",
+        }
+
+    def test_every_catalog_rule_has_a_document_group(self):
+        for definition in RULE_CATALOG:
+            assert definition.document_group
+
+
 class TestFailingBundle:
     def test_overall_failed(self, failing_bundle_raw):
         report = _run(failing_bundle_raw)

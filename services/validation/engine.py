@@ -16,12 +16,12 @@ to cover; see examples/test_conflict_example.py for a concrete demonstration.
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from .bundle import ValidationBundle
 from .domain.context import BundleContext
 from .domain.policies import BMMB_SME_POLICY_V1, ValidationPolicy
-from .rules import run_all_rules, validate_rule_result
+from .rules import document_group_for_rule_id, run_all_rules, validate_rule_result
 
 
 class ValidationStatus(str, Enum):
@@ -78,6 +78,22 @@ class ValidationReport(BaseModel):
         if any(r.status is ValidationStatus.NEEDS_REVIEW for r in self.results):
             return ValidationStatus.NEEDS_REVIEW
         return ValidationStatus.PASSED
+
+    @computed_field
+    @property
+    def results_by_document(self) -> Dict[str, List[CheckResult]]:
+        """`results`, the same CheckResult objects, grouped by document type.
+
+        A rule that compares two document types (entity_name.match,
+        identity_document.number_match) is grouped under the document
+        holding the source-of-truth value being checked against -- see
+        RuleDefinition.document_group in rules/catalog.py -- not under every
+        document type it happens to touch.
+        """
+        grouped: Dict[str, List[CheckResult]] = {}
+        for result in self.results:
+            grouped.setdefault(document_group_for_rule_id(result.rule_id), []).append(result)
+        return grouped
 
 
 class ValidationEngine:

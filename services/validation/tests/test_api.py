@@ -60,6 +60,20 @@ class TestValidateDeterministicOnly:
         assert all(res["passed"] is not False for res in body["deterministic"]["results"])
         assert body["ai_findings"] == []
 
+    def test_results_by_document_is_surfaced_at_top_level(self, passing_bundle_raw):
+        r = client.post(
+            "/validate",
+            json={"bundle": passing_bundle_raw, "enable_ai_review": False},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert "results_by_document" in body
+        assert body["results_by_document"] == body["deterministic"]["results_by_document"]
+        assert set(body["results_by_document"]) == {
+            "SSM_CORPORATE_FORM", "FINANCIAL_STATEMENT", "BANK_STATEMENT",
+            "IDENTITY_DOCUMENT", "CONSENT_FORM", "APPLICATION",
+        }
+
     def test_failing_bundle_reports_deterministic_failure(self, failing_bundle_raw):
         r = client.post(
             "/validate",

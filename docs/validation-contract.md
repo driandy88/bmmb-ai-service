@@ -34,6 +34,47 @@ a document id, while `rule_id` identifies the underlying rule consistently.
 AI review must not change deterministic `passed`, `status`, or overall results.
 It may only add findings and explanatory narrative.
 
+## Results grouped by document
+
+`ValidationReport.results_by_document` is a computed field (present in
+`.model_dump()` / JSON output, not just Python) that groups the same
+`CheckResult` objects from `results` by document type:
+`SSM_CORPORATE_FORM`, `FINANCIAL_STATEMENT`, `BANK_STATEMENT`,
+`IDENTITY_DOCUMENT`, `CONSENT_FORM`, `APPLICATION`. It's additive — `results`
+is unchanged and remains the source of truth; `results_by_document` is a
+convenience view derived from it via each rule's
+`RuleDefinition.document_group` (`rules/catalog.py`).
+
+A rule that only reads one document type is grouped under that type. A rule
+that compares two document types against each other
+(`entity_name.match`, `identity_document.number_match`) is grouped under the
+document holding the source-of-truth value being checked against — currently
+always the SSM corporate form, since that's the record every other
+document's entity name / NRIC is checked against — not under every document
+type it happens to touch.
+
+`AgenticValidationReport` (the `/validate` and `/validate/from-extraction`
+response body) re-exposes the same grouping as a top-level
+`results_by_document` key — identical to `deterministic.results_by_document`
+— so a caller doesn't have to reach into `deterministic` to get it:
+
+```json
+{
+  "adapter_warnings": [...],
+  "deterministic": { "...": "...", "results_by_document": {"...": "..."} },
+  "ai_findings": [...],
+  "narrative": "...",
+  "results_by_document": {
+    "SSM_CORPORATE_FORM": [ {"check": "verify_ssm_completeness", "...": "..."} ],
+    "FINANCIAL_STATEMENT": [ ... ],
+    "BANK_STATEMENT": [ ... ],
+    "IDENTITY_DOCUMENT": [ ... ],
+    "CONSENT_FORM": [ ... ],
+    "APPLICATION": [ ... ]
+  }
+}
+```
+
 ## Policy
 
 Every report includes `policy_id`. The default policy is
