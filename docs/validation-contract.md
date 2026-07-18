@@ -37,13 +37,18 @@ It may only add findings and explanatory narrative.
 ## Results grouped by document
 
 `ValidationReport.results_by_document` is a computed field (present in
-`.model_dump()` / JSON output, not just Python) that groups the same
-`CheckResult` objects from `results` by document type:
-`SSM_CORPORATE_FORM`, `FINANCIAL_STATEMENT`, `BANK_STATEMENT`,
-`IDENTITY_DOCUMENT`, `CONSENT_FORM`, `APPLICATION`. It's additive — `results`
-is unchanged and remains the source of truth; `results_by_document` is a
-convenience view derived from it via each rule's
-`RuleDefinition.document_group` (`rules/catalog.py`).
+`.model_dump()` / JSON output, not just Python) that groups the
+`CheckResult` objects by document type: `SSM_CORPORATE_FORM`,
+`FINANCIAL_STATEMENT`, `BANK_STATEMENT`, `IDENTITY_DOCUMENT`,
+`CONSENT_FORM`, `APPLICATION`. It is derived from the flat `results` list
+via each rule's `RuleDefinition.document_group` (`rules/catalog.py`).
+
+`results` still exists on the model — it's the source `results_by_document`
+is computed from, and `overall_passed` / `overall_status` read it — and the
+AI reviewer still receives it in full. But it is **excluded from the HTTP
+response** (`response_model_exclude` in `api.py`): the grouped view is the
+one API consumers map from, so the flat per-rule list would be redundant in
+the response body.
 
 A rule that only reads one document type is grouped under that type. A rule
 that compares two document types against each other
@@ -53,25 +58,29 @@ always the SSM corporate form, since that's the record every other
 document's entity name / NRIC is checked against — not under every document
 type it happens to touch.
 
-`AgenticValidationReport` (the `/validate` and `/validate/from-extraction`
-response body) re-exposes the same grouping as a top-level
-`results_by_document` key — identical to `deterministic.results_by_document`
-— so a caller doesn't have to reach into `deterministic` to get it:
+The `/validate` and `/validate/from-extraction` response body
+(`AgenticValidationReport`) exposes the grouped view under `deterministic`,
+alongside that report's metadata. The flat `deterministic.results` list is
+omitted:
 
 ```json
 {
   "adapter_warnings": [...],
-  "deterministic": { "...": "...", "results_by_document": {"...": "..."} },
+  "deterministic": {
+    "entity_name": "...",
+    "entity_type": "...",
+    "policy_id": "bmmb-sme-2026-01",
+    "results_by_document": {
+      "SSM_CORPORATE_FORM": [ {"check": "verify_ssm_completeness", "...": "..."} ],
+      "FINANCIAL_STATEMENT": [ ... ],
+      "BANK_STATEMENT": [ ... ],
+      "IDENTITY_DOCUMENT": [ ... ],
+      "CONSENT_FORM": [ ... ],
+      "APPLICATION": [ ... ]
+    }
+  },
   "ai_findings": [...],
-  "narrative": "...",
-  "results_by_document": {
-    "SSM_CORPORATE_FORM": [ {"check": "verify_ssm_completeness", "...": "..."} ],
-    "FINANCIAL_STATEMENT": [ ... ],
-    "BANK_STATEMENT": [ ... ],
-    "IDENTITY_DOCUMENT": [ ... ],
-    "CONSENT_FORM": [ ... ],
-    "APPLICATION": [ ... ]
-  }
+  "narrative": "..."
 }
 ```
 
