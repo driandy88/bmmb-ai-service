@@ -36,9 +36,15 @@ def test_extraction_application_service_returns_adapter_result():
             },
             "Application Details": {
                 "Business Entity Type": "Sdn Bhd",
-                "Main Contact Name": ["A"],
-                "Main Contact Email": ["a@example.com"],
-                "Main Contact Phone Number": ["0123456789"],
+                # Contacts come from the "Main Contacts" row_group -- one
+                # correlated object per contact (name/email/phone stay aligned).
+                "Main Contacts": [
+                    {
+                        "Main Contact Name": "A",
+                        "Main Contact Email": "a@example.com",
+                        "Main Contact Phone Number": "0123456789",
+                    },
+                ],
                 "Proposed Financing Amount": 1000,
                 "Proposed Program": "SME Term Financing",
             },
