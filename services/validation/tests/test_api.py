@@ -16,6 +16,20 @@ from services.validation.schemas import AIFinding, AIReview
 client = TestClient(app)
 
 
+def _all_checks(body: dict) -> list:
+    """Flatten the grouped deterministic checks.
+
+    The flat `deterministic.results` list is excluded from the HTTP response
+    (see api.py); the grouped `deterministic.results_by_document` is the shape
+    the frontend consumes, so tests read checks through it too.
+    """
+    return [
+        check
+        for checks in body["deterministic"]["results_by_document"].values()
+        for check in checks
+    ]
+
+
 class FakeGenaiClient:
     """Stands in for google.genai.Client(...).models.generate_content(...)."""
 
@@ -57,19 +71,22 @@ class TestValidateDeterministicOnly:
         assert r.status_code == 200
         body = r.json()
         assert body["deterministic"]["entity_name"] == "ALPHA TECH SOLUTIONS SDN BHD"
-        assert all(res["passed"] is not False for res in body["deterministic"]["results"])
+        assert all(res["passed"] is not False for res in _all_checks(body))
         assert body["ai_findings"] == []
 
-    def test_results_by_document_is_surfaced_at_top_level(self, passing_bundle_raw):
+    def test_results_are_grouped_by_document_and_flat_list_is_omitted(self, passing_bundle_raw):
         r = client.post(
             "/validate",
             json={"bundle": passing_bundle_raw, "enable_ai_review": False},
         )
         assert r.status_code == 200
         body = r.json()
-        assert "results_by_document" in body
-        assert body["results_by_document"] == body["deterministic"]["results_by_document"]
-        assert set(body["results_by_document"]) == {
+        # Grouped view lives under `deterministic`; the flat per-rule `results`
+        # list and the old top-level duplicate are both gone from the response.
+        assert "results" not in body["deterministic"]
+        assert "results_by_document" not in body
+        grouped = body["deterministic"]["results_by_document"]
+        assert set(grouped) == {
             "SSM_CORPORATE_FORM", "FINANCIAL_STATEMENT", "BANK_STATEMENT",
             "IDENTITY_DOCUMENT", "CONSENT_FORM", "APPLICATION",
         }
@@ -81,7 +98,7 @@ class TestValidateDeterministicOnly:
         )
         assert r.status_code == 200
         body = r.json()
-        assert any(res["passed"] is False for res in body["deterministic"]["results"])
+        assert any(res["passed"] is False for res in _all_checks(body))
 
     def test_malformed_bundle_returns_422(self):
         r = client.post(
@@ -165,7 +182,7 @@ class TestConflictExampleEndToEnd:
         assert r.status_code == 200
         body = r.json()
         consent_check = next(
-            res for res in body["deterministic"]["results"] if res["check"] == "verify_consent_signatures"
+            res for res in _all_checks(body) if res["check"] == "verify_consent_signatures"
         )
         assert consent_check["passed"] is False
 

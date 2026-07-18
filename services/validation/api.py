@@ -48,7 +48,15 @@ def rules_catalog():
     }
 
 
-@router.post("/validate", response_model=AgenticValidationReport)
+# The flat per-rule `deterministic.results` list is redundant with the grouped
+# `deterministic.results_by_document` view (the one the frontend maps from), so
+# it's dropped from the HTTP response. It stays on the model for internal use
+# (the AI reviewer's prompt, overall_passed/overall_status) -- see schemas.py.
+_RESPONSE_EXCLUDE = {"deterministic": {"results"}}
+
+
+@router.post("/validate", response_model=AgenticValidationReport,
+             response_model_exclude=_RESPONSE_EXCLUDE)
 def validate(request: ValidateRequest):
     try:
         return run_agentic_validation(
@@ -62,7 +70,8 @@ def validate(request: ValidateRequest):
         raise HTTPException(status_code=503, detail=str(e))
 
 
-@router.post("/validate/from-extraction", response_model=AgenticValidationReport)
+@router.post("/validate/from-extraction", response_model=AgenticValidationReport,
+             response_model_exclude=_RESPONSE_EXCLUDE)
 def validate_from_extraction(
     extracted_by_template: dict = Body(
         ...,
