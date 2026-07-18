@@ -117,6 +117,29 @@ class TestSchemaShape:
         assert "Transaction Date" in cols and "Transaction Balance" in cols
 
 
+class TestRequiredKeys:
+    def test_top_level_data_fields_required_locations_optional(self):
+        # Every data field/group is required (so its key is always emitted),
+        # but the advisory _locations metadata block is left optional.
+        schema = build_gemini_schema(BANK_STATEMENTS)
+        required = set(schema["required"])
+        data_fields = set(schema["properties"]) - {"_locations"}
+        assert required == data_fields
+        assert "_locations" not in required
+
+    def test_row_group_columns_all_required(self):
+        schema = build_gemini_schema(BANK_STATEMENTS)
+        txns = schema["properties"]["Transactions"]
+        assert set(txns["items"]["required"]) == set(txns["items"]["properties"])
+
+    def test_required_fields_are_still_nullable(self):
+        # required + nullable together mean "the key must be present, value may
+        # be null" -- so a missing value is an explicit null, never a dropped key.
+        schema = build_gemini_schema(BANK_STATEMENTS)
+        for name in schema["required"]:
+            assert schema["properties"][name].get("nullable") is True, name
+
+
 class TestFieldTypeMapping:
     def test_numeric_multiple_maps_to_array_of_number(self, monkeypatch):
         schema = _schema_from_attrs(monkeypatch, [_ta("Some Amount", "Numeric", "Multiple")])
@@ -164,6 +187,15 @@ class TestPrompt:
         prompt = generate_extraction_prompt(COMPANY_ACT_SECTION_14)
         for ta in tmpl["template_attributes"]:
             assert ta["attribute"]["name"] in prompt
+
+    def test_prompt_includes_global_malay_guidance(self):
+        # Appended to every template's prompt (stored or rendered) so Malay/
+        # bilingual documents still populate the English-keyed schema.
+        for template_id in (COMPANY_ACT_SECTION_14, BANK_STATEMENTS):
+            prompt = generate_extraction_prompt(template_id)
+            assert "Bahasa Malaysia" in prompt
+            assert "Nama Syarikat" in prompt
+            assert "keep every output key exactly as named above, in English" in prompt
 
     def test_unknown_template_raises(self):
         with pytest.raises(TemplateNotFoundError):

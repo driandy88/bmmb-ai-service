@@ -7,6 +7,7 @@ rows (name-prefixed to avoid collisions) and cleans them up, rather than
 touching the 15 seeded templates.
 """
 import os
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,24 +19,25 @@ client = TestClient(app)
 ADMIN_KEY = os.environ["ADMIN_API_KEY"]
 AUTH_HEADERS = {"X-Admin-Key": ADMIN_KEY}
 
+# Unique per-session suffix for every throwaway row. These tests write to the
+# shared bmmb_dev database, so a fixed name collides when two CI jobs run at
+# once (the second 400s with "name already exists"), and a run that crashes
+# mid-test leaves a fixed-named row that blocks every later run -- worse, once
+# a __test_tmpl__ template wires the attribute, the attribute can't be deleted
+# (409 in use) so the cleanup can't recover. A fresh suffix per session
+# sidesteps both: names never clash across runs, and any crash orphan is
+# harmlessly ignored rather than blocking.
+_RUN = uuid4().hex[:8]
+
 
 @pytest.fixture
 def new_attribute():
-    """Creates a throwaway attribute, yields its JSON body, deletes it after.
-
-    Best-effort cleanup of a same-named leftover first -- a prior run that
-    got killed mid-test (or crashed before its own teardown ran) leaves this
-    name behind in the real bmmb_dev database, which would otherwise 400
-    every subsequent run with "name already exists" instead of just this one.
-    """
-    name = "__test_attr__ Invoice Number"
-    leftover = next((a for a in client.get("/attributes/").json() if a["name"] == name), None)
-    if leftover:
-        client.delete(f"/attributes/{leftover['id']}", headers=AUTH_HEADERS)
-
+    """Creates a throwaway attribute (uniquely named per run), yields its JSON
+    body, deletes it after."""
     r = client.post(
         "/attributes/",
-        json={"name": name, "description": "desc", "data_type": "Alphanumeric", "example": "INV-1"},
+        json={"name": f"__test_attr__ Invoice Number {_RUN}", "description": "desc",
+              "data_type": "Alphanumeric", "example": "INV-1"},
         headers=AUTH_HEADERS,
     )
     assert r.status_code == 201, r.text
@@ -75,7 +77,7 @@ class TestAttributeCRUD:
     def test_create_and_get(self, new_attribute):
         r = client.get(f"/attributes/{new_attribute['id']}")
         assert r.status_code == 200
-        assert r.json()["name"] == "__test_attr__ Invoice Number"
+        assert r.json()["name"] == new_attribute["name"]
         assert r.json()["data_type"] == "Alphanumeric"
 
     def test_duplicate_name_400(self, new_attribute):
@@ -99,7 +101,7 @@ class TestAttributeCRUD:
     def test_delete(self):
         r = client.post(
             "/attributes/",
-            json={"name": "__test_attr__ to delete", "data_type": "Numeric"},
+            json={"name": f"__test_attr__ to delete {_RUN}", "data_type": "Numeric"},
             headers=AUTH_HEADERS,
         )
         attr_id = r.json()["id"]
@@ -125,7 +127,7 @@ class TestTemplateCRUD:
         r = client.post(
             "/templates/",
             json={
-                "name": "__test_tmpl__ Invoice",
+                "name": f"__test_tmpl__ Invoice {_RUN}",
                 "description": "A test invoice template",
                 "group_name": "Test Group",
                 "llm_prompt": "custom prompt text",
@@ -141,10 +143,11 @@ class TestTemplateCRUD:
         client.delete(f"/templates/{body['id']}", headers=AUTH_HEADERS)
 
     def test_create_auto_generates_prompt_when_omitted(self, new_attribute):
+        tmpl_name = f"__test_tmpl__ Auto Prompt {_RUN}"
         r = client.post(
             "/templates/",
             json={
-                "name": "__test_tmpl__ Auto Prompt",
+                "name": tmpl_name,
                 "attributes": [{"attribute_id": new_attribute["id"], "frequency": "Unique"}],
             },
             headers=AUTH_HEADERS,
@@ -153,7 +156,7 @@ class TestTemplateCRUD:
         body = r.json()
         assert body["llm_prompt"]
         assert new_attribute["name"] in body["llm_prompt"]
-        assert "__test_tmpl__ Auto Prompt" in body["llm_prompt"]
+        assert tmpl_name in body["llm_prompt"]
         client.delete(f"/templates/{body['id']}", headers=AUTH_HEADERS)
 
     def test_create_without_key_401(self):
@@ -164,7 +167,7 @@ class TestTemplateCRUD:
         r = client.post(
             "/templates/",
             json={
-                "name": "__test_tmpl__ bad ref",
+                "name": f"__test_tmpl__ bad ref {_RUN}",
                 "attributes": [{"attribute_id": "00000000-0000-0000-0000-000000000000", "frequency": "Unique"}],
             },
             headers=AUTH_HEADERS,
@@ -174,7 +177,7 @@ class TestTemplateCRUD:
     def test_update_replaces_attributes(self, new_attribute):
         r = client.post(
             "/templates/",
-            json={"name": "__test_tmpl__ Update Me", "attributes": []},
+            json={"name": f"__test_tmpl__ Update Me {_RUN}", "attributes": []},
             headers=AUTH_HEADERS,
         )
         template_id = r.json()["id"]
@@ -193,7 +196,7 @@ class TestTemplateCRUD:
     def test_update_partial_leaves_attributes_untouched(self, new_attribute):
         r = client.post(
             "/templates/",
-            json={"name": "__test_tmpl__ Partial", "attributes": [{"attribute_id": new_attribute["id"]}]},
+            json={"name": f"__test_tmpl__ Partial {_RUN}", "attributes": [{"attribute_id": new_attribute["id"]}]},
             headers=AUTH_HEADERS,
         )
         template_id = r.json()["id"]
@@ -210,7 +213,7 @@ class TestTemplateCRUD:
         client.delete(f"/templates/{template_id}", headers=AUTH_HEADERS)
 
     def test_delete(self):
-        r = client.post("/templates/", json={"name": "__test_tmpl__ to delete", "attributes": []}, headers=AUTH_HEADERS)
+        r = client.post("/templates/", json={"name": f"__test_tmpl__ to delete {_RUN}", "attributes": []}, headers=AUTH_HEADERS)
         template_id = r.json()["id"]
         r = client.delete(f"/templates/{template_id}", headers=AUTH_HEADERS)
         assert r.status_code == 204
