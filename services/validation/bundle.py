@@ -16,6 +16,17 @@ class PersonInfo(BaseModel):
     nric_passport: str
     position: Optional[str] = None
 
+
+class DocumentProvenance(BaseModel):
+    """Where a canonical document came from.
+
+    Raw hand-built bundles may omit provenance. Bundles produced by the
+    extraction adapter should populate ``source_template`` so a rule or
+    reviewer can trace a canonical value back to the extraction template.
+    """
+
+    source_template: Optional[str] = None
+
 # ---------------------------------------------------------
 # 2. Document Data Payloads
 # ---------------------------------------------------------
@@ -46,6 +57,10 @@ class FinancialStatementData(BaseModel):
     profit_and_loss_present: Optional[bool] = None
     cash_flow_present: Optional[bool] = None
     auditors_report_present: Optional[bool] = None
+    # A visible auditor's-report section is not the same as an explicit
+    # confirmation that the statements are audited. Keep that distinction
+    # until the extraction template provides an audited-status field.
+    audited: Optional[bool] = None
 
 # Rule 2's alternate path to audited financial statements: a Sole
 # Prop/Partnership may submit 2 years of LHDN tax declarations (Borang B)
@@ -63,6 +78,12 @@ class MonthlyBankBalance(BaseModel):
 
 class BankStatementData(BaseModel):
     entity_name: str
+    # These are optional because the current extraction template only exposes
+    # Bank Name. Currency and account type remain unknown until their source
+    # attributes are added to extraction.
+    bank_name: Optional[str] = None
+    currency: Optional[str] = None
+    account_type: Optional[str] = None
     statement_start_date: date
     statement_end_date: date
     # One entry per month covered by this statement -- used for the
@@ -95,11 +116,13 @@ class ConsentFormData(BaseModel):
 class CustomerInfoDoc(BaseModel):
     document_id: str
     document_type: Literal["customer_information"]
+    provenance: Optional[DocumentProvenance] = None
     data: CustomerInfoData
 
 class SsmCorporateDoc(BaseModel):
     document_id: str
     document_type: Literal["ssm_corporate_form"]
+    provenance: Optional[DocumentProvenance] = None
     # form_24/44/49 (Sdn Bhd) or form_b/form_d (Sole Prop/Partnership) are the
     # required set (Rule 1); form_9/form_15/form_58/annual_return are
     # optional extras a Sdn Bhd may additionally submit -- accepted here but
@@ -113,26 +136,31 @@ class SsmCorporateDoc(BaseModel):
 class TaxDeclarationDoc(BaseModel):
     document_id: str
     document_type: Literal["tax_declaration"]
+    provenance: Optional[DocumentProvenance] = None
     data: TaxDeclarationData
 
 class FinancialStatementDoc(BaseModel):
     document_id: str
     document_type: Literal["financial_statement"]
+    provenance: Optional[DocumentProvenance] = None
     data: FinancialStatementData
 
 class BankStatementDoc(BaseModel):
     document_id: str
     document_type: Literal["bank_statement"]
+    provenance: Optional[DocumentProvenance] = None
     data: BankStatementData
 
 class IdentityDoc(BaseModel):
     document_id: str
     document_type: Literal["identity_document"]
+    provenance: Optional[DocumentProvenance] = None
     data: IdentityDocumentData
 
 class ConsentFormDoc(BaseModel):
     document_id: str
     document_type: Literal["consent_form"]
+    provenance: Optional[DocumentProvenance] = None
     data: ConsentFormData
 
 # Combine all document types into a discriminated Union

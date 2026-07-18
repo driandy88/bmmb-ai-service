@@ -6,7 +6,9 @@ module docstrings). No pydantic bundle, no FastAPI, no network.
 
 from services.validation.rules import (
     calculate_financial_18_month_rule,
+    check_bank_statement_bank_consistency,
     check_bank_statement_continuity,
+    check_bank_statement_currency,
     check_bank_statement_freshness,
     check_bank_statement_overdraft,
     check_financial_consecutive_years,
@@ -19,10 +21,8 @@ from services.validation.rules import (
     person_similarity,
     strict_match_entity_names,
     strict_match_ic_numbers,
-    validate_form_d_expiry,
     verify_application_details_completeness,
     verify_bank_statement_duration,
-    verify_consent_form_count,
     verify_consent_signatures,
     verify_financial_sections_present,
     verify_ssm_completeness,
@@ -269,17 +269,6 @@ class TestVerifyBankStatementDuration:
         assert "not continuous" in result["message"]
 
 
-class TestValidateFormDExpiry:
-    def test_expiry_covers_tenure(self):
-        result = validate_form_d_expiry("2028-01-01", 12, "2026-01-01")
-        assert result["passed"] is True
-
-    def test_expiry_short_of_tenure_fails(self):
-        result = validate_form_d_expiry("2026-06-01", 12, "2026-01-01")
-        assert result["passed"] is False
-        assert result["details"]["shortfall_days"] > 0
-
-
 class TestMonthsBetween:
     def test_computes_whole_months_and_extra_days(self):
         result = months_between("2026-01-01", "2026-03-15")
@@ -362,24 +351,44 @@ class TestCheckBankStatementOverdraft:
         assert result["passed"] is True
 
 
-class TestVerifyConsentFormCount:
-    def test_exact_required_count_passes(self):
-        result = verify_consent_form_count(director_count=2, consent_form_count=3)
+class TestCheckBankStatementBankConsistency:
+    def test_all_same_bank_passes(self):
+        result = check_bank_statement_bank_consistency(["MAYBANK BERHAD", "MAYBANK BERHAD"])
         assert result["passed"] is True
 
-    def test_more_than_required_still_passes(self):
-        result = verify_consent_form_count(director_count=2, consent_form_count=4)
+    def test_mixed_banks_fails(self):
+        result = check_bank_statement_bank_consistency(["MAYBANK BERHAD", "CIMB BANK BERHAD"])
+        assert result["passed"] is False
+        assert result["details"]["distinct_banks"] == ["CIMB BANK BERHAD", "MAYBANK BERHAD"]
+
+    def test_any_unknown_bank_name_needs_review(self):
+        result = check_bank_statement_bank_consistency(["MAYBANK BERHAD", None])
+        assert result["passed"] is None
+        assert result["details"]["documents_with_unknown_bank"] == 1
+
+    def test_all_unknown_needs_review(self):
+        result = check_bank_statement_bank_consistency([None, None])
+        assert result["passed"] is None
+
+
+class TestCheckBankStatementCurrency:
+    def test_all_myr_passes(self):
+        result = check_bank_statement_currency(["MYR", "MYR"], accepted_currency="MYR")
         assert result["passed"] is True
 
-    def test_below_required_count_fails(self):
-        result = verify_consent_form_count(director_count=2, consent_form_count=2)
-        assert result["passed"] is False
-        assert result["details"]["required_count"] == 3
+    def test_mismatched_currency_is_a_warning_not_a_fail(self):
+        result = check_bank_statement_currency(["MYR", "SGD"], accepted_currency="MYR")
+        assert result["passed"] is None
+        assert result["details"]["mismatched_currencies"] == ["SGD"]
 
-    def test_zero_directors_still_requires_one(self):
-        result = verify_consent_form_count(director_count=0, consent_form_count=0)
-        assert result["passed"] is False
-        assert result["details"]["required_count"] == 1
+    def test_currency_comparison_is_case_and_whitespace_insensitive(self):
+        result = check_bank_statement_currency([" myr ", "MYR"], accepted_currency="MYR")
+        assert result["passed"] is True
+
+    def test_unknown_currency_needs_review(self):
+        result = check_bank_statement_currency(["MYR", None], accepted_currency="MYR")
+        assert result["passed"] is None
+        assert result["details"]["documents_with_unknown_currency"] == 1
 
 
 class TestVerifyApplicationDetailsCompleteness:

@@ -63,28 +63,26 @@ from datetime import date
 from typing import Optional
 
 import httpx
-from dotenv import load_dotenv
 from google import genai
 from google.auth import exceptions as google_auth_errors
 from google.genai import errors as genai_errors
-from google.genai import types as genai_types
 from pydantic import ValidationError
 
 from .bundle import ValidationBundle
-from .engine import ValidationEngine, ValidationReport
-from .extraction_adapter import build_validation_bundle
+from .application.validate_bundle import ValidationApplicationService
+from .application.validate_extraction import ExtractionValidationApplicationService
+from .ai.client import VertexAIClientFactory
+from .ai.reviewer import clamp_severity, review_deterministic_report as _review_deterministic_report
+from .engine import ValidationReport
+from .infrastructure.settings import ValidationSettings
 from .schemas import AgenticValidationReport, AIReview
 
 logger = logging.getLogger(__name__)
-
-load_dotenv()  # Load GCP_PROJECT_ID/VERTEX_LOCATION from .env if present
 
 MODEL_NAME = "gemini-2.5-flash"
 
 _DEFAULT_VERTEX_LOCATION = "asia-southeast1"  # matches the Cloud Run region
 
-# Transient Gemini failures worth a retry: 429 (rate limit) and any 5xx.
-_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 _MAX_RETRIES = 2
 _RETRY_BACKOFF_SECONDS = 1.0
 
@@ -154,95 +152,15 @@ def load_raw_extraction(path: Optional[str]) -> Optional[dict]:
         return json.load(f)
 
 
-def review_deterministic_report(
-    client,
-    bundle: ValidationBundle,
-    deterministic: ValidationReport,
-    raw_extraction: Optional[dict],
-    adapter_warnings: Optional[list] = None,
-) -> AIReview:
-    """The single Gemini call: review the deterministic report for likely data-mapping artifacts.
-
-    `adapter_warnings`, when the bundle came from
-    run_agentic_validation_from_extraction(), is the list of
-    AdapterWarnings the adapter itself already flagged (null values,
-    array-length mismatches) while building the bundle -- handed to the
-    model explicitly rather than making it re-derive the same anomalies by
-    comparing the bundle against raw_extraction from scratch.
-    """
-    warnings_block = (
-        "\n".join(
-            f"- [{w.document_type}/{w.document_id}] {w.field}: {w.message} "
-            f"(current: {w.current_state}; expected: {w.expected_state})"
-            for w in adapter_warnings
-        )
-        if adapter_warnings
-        else "None."
-    )
-    prompt = (
-        "Deterministic validation report:\n"
-        f"```json\n{deterministic.model_dump_json(indent=2)}\n```\n\n"
-        "Canonical document bundle:\n"
-        f"```json\n{bundle.model_dump_json(indent=2)}\n```\n\n"
-        "Raw pre-adapter extraction:\n"
-        f"```json\n{json.dumps(raw_extraction, indent=2) if raw_extraction else 'Not available.'}\n```\n\n"
-        "Adapter warnings (data anomalies the extraction->bundle adapter already "
-        "detected while building this bundle -- each states what it found vs what "
-        "was expected; treat every one of these as worth a finding, not just the "
-        "checks that failed):\n"
-        f"{warnings_block}"
-    )
-
-    last_error: Optional[Exception] = None
-    for attempt in range(_MAX_RETRIES + 1):
-        try:
-            response = client.models.generate_content(
-                model=MODEL_NAME,
-                contents=prompt,
-                config=genai_types.GenerateContentConfig(
-                    system_instruction=SYSTEM_INSTRUCTION,
-                    response_mime_type="application/json",
-                    # response_json_schema (raw JSON Schema), not response_schema
-                    # (the OpenAPI-style Schema object): the deterministic report
-                    # embedded in the prompt has Dict[str, Any] detail fields
-                    # elsewhere in this codebase, and response_schema's stricter
-                    # conversion path rejects `additionalProperties`; keeping this
-                    # consistent even though AIReview itself doesn't need it.
-                    response_json_schema=AIReview.model_json_schema(),
-                ),
-            )
-            return AIReview.model_validate_json(response.text)
-        except google_auth_errors.GoogleAuthError:
-            # Missing/invalid credentials (e.g. no `gcloud auth application-
-            # default login` locally) won't fix itself on retry.
-            raise
-        except (genai_errors.APIError, httpx.HTTPError) as e:
-            last_error = e
-            # httpx.HTTPError (raw network errors like timeouts/connection
-            # drops that never made it into an HTTP response) has no status
-            # code; treat those as retryable transient failures too.
-            status_code = getattr(e, "code", None)
-            retryable = status_code in _RETRYABLE_STATUS_CODES or isinstance(e, httpx.HTTPError)
-            if retryable and attempt < _MAX_RETRIES:
-                delay = _RETRY_BACKOFF_SECONDS * (2**attempt)
-                logger.warning(
-                    "Gemini call failed (status=%s, attempt=%d/%d), retrying in %.1fs: %s",
-                    status_code, attempt + 1, _MAX_RETRIES, delay, e,
-                )
-                time.sleep(delay)
-                continue
-            raise
-
-    # Unreachable in practice: the loop above always either returns or raises.
-    raise last_error  # pragma: no cover
+def review_deterministic_report(*args, **kwargs) -> AIReview:
+    """Backward-compatible wrapper around the extracted AI reviewer."""
+    kwargs.setdefault("system_instruction", SYSTEM_INSTRUCTION)
+    return _review_deterministic_report(*args, **kwargs)
 
 
 def _clamp_severity(review: AIReview) -> AIReview:
-    """Guardrail: ai_findings severity can only ever be warning/needs_review, never a pass/fail verdict."""
-    for finding in review.ai_findings:
-        if finding.severity not in ("warning", "needs_review"):
-            finding.severity = "needs_review"
-    return review
+    """Backward-compatible wrapper around the AI reviewer guardrail."""
+    return clamp_severity(review)
 
 
 def run_agentic_validation(
@@ -262,7 +180,7 @@ def run_agentic_validation(
     generate them from); passed through so the caller always gets the same
     AgenticValidationReport shape either way.
     """
-    deterministic = ValidationEngine().run(bundle)
+    deterministic = ValidationApplicationService().validate(bundle)
     adapter_warnings = adapter_warnings or []
 
     if not enable_ai_review:
@@ -273,9 +191,8 @@ def run_agentic_validation(
             adapter_warnings=adapter_warnings,
         )
 
-    project = os.environ.get("GCP_PROJECT_ID")
-    location = os.environ.get("VERTEX_LOCATION", _DEFAULT_VERTEX_LOCATION)
-    if not project:
+    settings = ValidationSettings.from_env()
+    if not settings.gcp_project_id:
         raise SystemExit(
             "GCP_PROJECT_ID must be set to call Gemini via Vertex AI. Put it "
             "in a .env file or:\n"
@@ -284,10 +201,16 @@ def run_agentic_validation(
             "(`gcloud auth application-default login`).\n"
             "Alternatively, pass enable_ai_review=False to skip the AI review step."
         )
-    client = genai.Client(vertexai=True, project=project, location=location)
+    client = VertexAIClientFactory.create(settings, client_constructor=genai.Client)
 
     try:
-        review = review_deterministic_report(client, bundle, deterministic, raw_extraction, adapter_warnings)
+        review = review_deterministic_report(
+            client, bundle, deterministic, raw_extraction,
+            adapter_warnings=adapter_warnings,
+            model_name=settings.model_name,
+            max_retries=settings.max_ai_retries,
+            retry_backoff_seconds=settings.ai_retry_backoff_seconds,
+        )
     except (ValidationError, ValueError) as e:
         logger.warning("AI review response failed to parse: %s", e)
         review = AIReview(
@@ -362,7 +285,7 @@ def run_agentic_validation_from_extraction(
     even when every deterministic check passes, since a warning means a
     value was defaulted rather than genuinely present.
     """
-    result = build_validation_bundle(
+    result = ExtractionValidationApplicationService().build_bundle(
         extracted_by_template,
         bundle_id=bundle_id,
         system_date=system_date,

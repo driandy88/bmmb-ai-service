@@ -22,6 +22,7 @@ schema field.
 from typing import Dict, List
 
 from ._utils import normalize_id
+from ..domain.policies import BMMB_SME_POLICY_V1, ValidationPolicy
 
 # NOTE: nested-object parameters are typed as `List[Dict[str, object]]`, not
 # `List[SomeTypedDict]` or `List[Dict[str, Any]]`. Gemini's automatic
@@ -35,17 +36,11 @@ from ._utils import normalize_id
 # `Dict[str, object]` is the only combination that survives both schema
 # generation and execution, at the cost of a looser schema.
 
-# Required SSM form subtypes by entity type.
-_REQUIRED_SSM_FORMS_BY_ENTITY = {
-    "sole prop": {"form_b", "form_d"},
-    "sole proprietor": {"form_b", "form_d"},
-    "sole proprietorship": {"form_b", "form_d"},
-    "partnership": {"form_b", "form_d"},
-}
-_DEFAULT_REQUIRED_SSM_FORMS = {"form_24", "form_44", "form_49"}  # Sdn Bhd
-
-
-def verify_ssm_completeness(entity_type: str, ssm_document_subtypes: List[str]) -> Dict:
+def verify_ssm_completeness(
+    entity_type: str,
+    ssm_document_subtypes: List[str],
+    policy: ValidationPolicy = BMMB_SME_POLICY_V1,
+) -> Dict:
     """Check that the correct combination of SSM forms is present for the entity type.
 
     BMMB requires Form 24 + Form 44 + Form 49 for a Sdn Bhd, and Form B +
@@ -60,8 +55,8 @@ def verify_ssm_completeness(entity_type: str, ssm_document_subtypes: List[str]) 
             ssm_corporate_form document present in the bundle, e.g.
             ["form_24", "form_49"].
     """
-    required = _REQUIRED_SSM_FORMS_BY_ENTITY.get(
-        entity_type.strip().lower(), _DEFAULT_REQUIRED_SSM_FORMS
+    required = policy.required_ssm_forms_by_entity.get(
+        entity_type.strip().lower(), policy.default_required_ssm_forms
     )
     provided = {s.strip().lower() for s in ssm_document_subtypes}
     missing = sorted(required - provided)
@@ -223,40 +218,10 @@ def check_ic_front_and_back(ic_documents: List[Dict[str, object]]) -> Dict:
     }
 
 
-def verify_consent_form_count(director_count: int, consent_form_count: int) -> Dict:
-    """Check that the total number of Consent Forms equals the number of directors plus one.
-
-    BMMB requires one signed Consent Form per director/owner/partner, plus
-    one additional form for the entity itself. Use this once you know how
-    many unique directors are listed across the SSM corporate form(s) and
-    how many consent_form documents are in the bundle.
-
-    Args:
-        director_count: The number of unique directors listed on the SSM
-            corporate form(s) (deduplicated by NRIC/passport).
-        consent_form_count: The number of consent_form documents present in
-            the bundle.
-    """
-    required = director_count + 1
-    passed = consent_form_count >= required
-
-    return {
-        "passed": passed,
-        "message": (
-            f"{consent_form_count} Consent Form(s) provided, meeting the required {required}."
-            if passed
-            else f"Only {consent_form_count} Consent Form(s) provided; {required} required "
-                 f"({director_count} director(s) + 1)."
-        ),
-        "details": {
-            "director_count": director_count,
-            "consent_form_count": consent_form_count,
-            "required_count": required,
-        },
-    }
-
-
-def verify_application_details_completeness(customer_information: Dict[str, object]) -> Dict:
+def verify_application_details_completeness(
+    customer_information: Dict[str, object],
+    policy: ValidationPolicy | None = None,
+) -> Dict:
     """Check that the mandatory Application Details fields are all present.
 
     Use this once the customer_information document has been extracted, to
@@ -271,12 +236,25 @@ def verify_application_details_completeness(customer_information: Dict[str, obje
         "main_contact_names": "Main Contact Name(s)",
         "main_contact_emails": "Main Contact Email(s)",
         "main_contact_phone_numbers": "Main Contact Phone Number(s)",
+        "financing_amount": "Financing Amount",
+        "product_type": "Product Type",
+        "tenure_months": "Tenure (months)",
+        "repayment_frequency": "Repayment Frequency",
     }
 
+    required_fields = (
+        policy.required_application_fields
+        if policy is not None
+        else {
+            "main_contact_names",
+            "main_contact_emails",
+            "main_contact_phone_numbers",
+        }
+    )
     missing_fields = [
         label
         for field, label in field_labels.items()
-        if not customer_information.get(field)
+        if field in required_fields and not customer_information.get(field)
     ]
     passed = len(missing_fields) == 0
 

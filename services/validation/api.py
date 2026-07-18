@@ -13,6 +13,7 @@ To run this service standalone, straight from this module:
 """
 
 from datetime import date
+from dataclasses import asdict
 from typing import Optional
 
 from fastapi import APIRouter, Body, FastAPI, HTTPException, Query
@@ -20,6 +21,8 @@ from pydantic import BaseModel
 
 from .agent import run_agentic_validation, run_agentic_validation_from_extraction
 from .bundle import ValidationBundle
+from .domain.policies import BMMB_SME_POLICY_V1
+from .rules import RULE_CATALOG
 from .schemas import AgenticValidationReport
 
 router = APIRouter(tags=["validation"])
@@ -34,6 +37,15 @@ class ValidateRequest(BaseModel):
 @router.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@router.get("/rules")
+def rules_catalog():
+    """Return the active policy and deterministic rule catalog."""
+    return {
+        "policy_id": BMMB_SME_POLICY_V1.policy_id,
+        "rules": [asdict(rule) for rule in RULE_CATALOG],
+    }
 
 
 @router.post("/validate", response_model=AgenticValidationReport)

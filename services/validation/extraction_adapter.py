@@ -46,7 +46,7 @@ from datetime import date
 from typing import Any, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .bundle import (
     BankStatementData,
@@ -56,6 +56,7 @@ from .bundle import (
     ConsentFormDoc,
     CustomerInfoData,
     CustomerInfoDoc,
+    DocumentProvenance,
     FinancialStatementData,
     FinancialStatementDoc,
     IdentityDoc,
@@ -94,7 +95,7 @@ class AdapterWarning(BaseModel):
 
 class AdapterResult(BaseModel):
     bundle: ValidationBundle
-    warnings: list[AdapterWarning] = []
+    warnings: list[AdapterWarning] = Field(default_factory=list)
 
 
 # ── Null-safe field helpers ──────────────────────────────────────────────────
@@ -112,6 +113,27 @@ def _safe_str(value: Any, *, warnings: list[AdapterWarning], document_type: str,
             expected_state="a non-empty string value",
         ))
         return ""
+    return str(value)
+
+
+def _optional_str(
+    value: Any, *, warnings: list[AdapterWarning], document_type: str,
+    document_id: str, field: str,
+) -> Optional[str]:
+    """Return ``None`` for an unavailable optional string field.
+
+    Required legacy fields use ``_safe_str`` and its empty-string placeholder.
+    New optional canonical fields must retain the difference between an empty
+    value and no source signal, so they use this helper instead.
+    """
+    if value is None:
+        warnings.append(AdapterWarning(
+            document_type=document_type, document_id=document_id, field=field,
+            message=f"{field} was null or unavailable in the extraction result.",
+            current_state="null / no signal available",
+            expected_state="a non-empty string value when present",
+        ))
+        return None
     return str(value)
 
 
@@ -273,6 +295,7 @@ def build_ssm_corporate_docs(
             document_id=document_id,
             document_type="ssm_corporate_form",
             document_subtype=subtype,
+            provenance=DocumentProvenance(source_template=template_name),
             data=SsmCorporateFormData(
                 entity_name=_safe_str(extracted.get("Entity Name"), warnings=warnings,
                                        document_type="ssm_corporate_form", document_id=document_id, field="Entity Name"),
@@ -318,6 +341,15 @@ def build_financial_statement_docs(
     if not extracted:
         return []
 
+    if "Audited" not in extracted:
+        warnings.append(AdapterWarning(
+            document_type="financial_statement", document_id="financial_statement",
+            field="audited",
+            message="No explicit audited-status attribute exists in the current financial-statement template.",
+            current_state="no signal available (left as null)",
+            expected_state="true or false confirming whether the statements are audited",
+        ))
+
     rows = _safe_list(extracted.get("Financials By Year"), warnings=warnings,
                       document_type="financial_statement", document_id="financial_statement",
                       field="Financials By Year")
@@ -340,12 +372,14 @@ def build_financial_statement_docs(
             data=FinancialStatementData(
                 entity_name=entity_name,
                 financial_year_end=_parse_ddmmyyyy(fye),
+                audited=None,
                 **{
                     field: _safe_bool(extracted.get(attr), warnings=warnings, document_type="financial_statement",
                                        document_id=document_id, field=attr, default=None)
                     for field, attr in _FS_SECTION_FLAGS.items()
                 },
             ),
+            provenance=DocumentProvenance(source_template="Financial Statements (Sdn Bhd)"),
         ))
     return docs
 
@@ -381,6 +415,7 @@ def build_tax_declaration_docs(
         TaxDeclarationDoc(
             document_id=f"tax_declaration_{i}",
             document_type="tax_declaration",
+            provenance=DocumentProvenance(source_template="Borang B"),
             data=TaxDeclarationData(entity_name=entity_name, financial_year_end=_parse_ddmmyyyy(fye)),
         )
         for i, fye in enumerate(financial_year_ends)
@@ -437,6 +472,26 @@ def build_bank_statement_doc(
     if not by_month:
         return None
 
+    bank_name = _optional_str(
+        extracted.get("Bank Name"), warnings=warnings,
+        document_type="bank_statement", document_id=document_id, field="Bank Name",
+    )
+
+    # These fields are required by the target validation rules, but the
+    # current Bank Statements extraction template has no source attributes
+    # for them. Keep them explicitly unknown and surface the integration gap.
+    for field, expected in (
+        ("Currency", "a currency code, e.g. MYR"),
+        ("Account Type", "an account type, e.g. current or savings"),
+    ):
+        warnings.append(AdapterWarning(
+            document_type="bank_statement", document_id=document_id,
+            field=field,
+            message=f"{field} has no source attribute in the current Bank Statements template.",
+            current_state="no signal available (left as null)",
+            expected_state=expected,
+        ))
+
     monthly_balances = []
     all_dates: list[date] = []
     for (year, month) in sorted(by_month):
@@ -457,10 +512,14 @@ def build_bank_statement_doc(
         document_type="bank_statement",
         data=BankStatementData(
             entity_name=entity_name,
+            bank_name=bank_name,
+            currency=None,
+            account_type=None,
             statement_start_date=min(all_dates),
             statement_end_date=max(all_dates),
             monthly_balances=monthly_balances,
         ),
+        provenance=DocumentProvenance(source_template="Bank Statements"),
     )
 
 
@@ -491,6 +550,7 @@ def build_identity_documents(
         IdentityDoc(
             document_id=f"identity_document_{i}",
             document_type="identity_document",
+            provenance=DocumentProvenance(source_template="MyKad (Director ID or Passport)"),
             data=IdentityDocumentData(
                 individual_name=_safe_str((row or {}).get("Director Name"), warnings=warnings, document_type="identity_document",
                                            document_id=f"identity_document_{i}", field=f"Directors[{i}].Director Name"),
@@ -554,6 +614,7 @@ def build_consent_form_docs(
         ConsentFormDoc(
             document_id=f"consent_form_{i}",
             document_type="consent_form",
+            provenance=DocumentProvenance(source_template="Consent Form"),
             data=ConsentFormData(
                 entity_name=entity_name,
                 individual_name=_safe_str((row or {}).get("Director Name"), warnings=warnings, document_type="consent_form",
@@ -585,10 +646,7 @@ def build_customer_information_doc(
     GAP: no "tenure_months" or "repayment_frequency" attribute exists on
     Application Details -- both are required (non-Optional) fields on
     CustomerInfoData. If not supplied, defaults to 0 / "Unknown" and
-    records an AdapterWarning rather than blocking bundle construction --
-    note this does mean validate_form_d_expiry's tenure-coverage math is
-    meaningless until a real value is supplied (that check is also
-    currently always skipped for an unrelated reason -- see engine.py).
+    records an AdapterWarning rather than blocking bundle construction.
     """
     warnings = warnings if warnings is not None else []
     extracted = extracted_by_template.get("Application Details")
@@ -626,6 +684,7 @@ def build_customer_information_doc(
     return CustomerInfoDoc(
         document_id=document_id,
         document_type="customer_information",
+        provenance=DocumentProvenance(source_template="Application Details"),
         data=CustomerInfoData(
             main_contact_names=[_safe_str((r or {}).get("Main Contact Name"), warnings=warnings,
                                           document_type="customer_information", document_id=document_id,
