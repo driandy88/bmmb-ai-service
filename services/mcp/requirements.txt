@@ -1,0 +1,12 @@
+# NB: fastapi/uvicorn are newer than the other services here on purpose --
+# fastmcp 3.x requires the new starlette (1.x), which older FastAPI rejects.
+# This set is the resolved, compatible combination.
+fastapi==0.139.2
+uvicorn==0.51.0
+pydantic==2.13.4
+python-dotenv==1.2.1
+langchain==1.3.14
+langchain-core==1.4.9
+langchain-google-genai==4.2.7
+langchain-mcp-adapters==0.3.0
+fastmcp==3.4.4
