@@ -88,7 +88,7 @@ class TestValidateDeterministicOnly:
         grouped = body["deterministic"]["results_by_document"]
         assert set(grouped) == {
             "SSM_CORPORATE_FORM", "FINANCIAL_STATEMENT", "BANK_STATEMENT",
-            "IDENTITY_DOCUMENT", "CONSENT_FORM", "APPLICATION",
+            "IDENTITY_DOCUMENT",
         }
 
     def test_failing_bundle_reports_deterministic_failure(self, failing_bundle_raw):
@@ -163,28 +163,6 @@ class TestValidateAgenticPath:
         body = r.json()
         assert body["ai_findings"] == []
         assert "failed to parse" in body["narrative"].lower()
-
-
-class TestConflictExampleEndToEnd:
-    """The scenario buggy_adapter_demo.py/examples/test_conflict_example.py
-    document: deterministic engine alone sees a real-looking consent-form
-    failure that the raw extraction shows is actually an adapter mapping
-    artifact."""
-
-    def test_adapter_bug_produces_a_deterministic_failure(self, raw_extraction_conflict):
-        from services.validation.examples.buggy_adapter_demo import adapt_raw_extraction
-
-        bundle = adapt_raw_extraction(raw_extraction_conflict)
-        r = client.post(
-            "/validate",
-            json={"bundle": bundle.model_dump(mode="json"), "enable_ai_review": False},
-        )
-        assert r.status_code == 200
-        body = r.json()
-        consent_check = next(
-            res for res in _all_checks(body) if res["check"] == "verify_consent_signatures"
-        )
-        assert consent_check["passed"] is False
 
 
 class TestValidateFromExtraction:

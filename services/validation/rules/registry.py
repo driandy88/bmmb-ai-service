@@ -28,8 +28,6 @@ from .catalog import RULE_CATALOG
 from .completeness import (
     check_ic_front_and_back,
     find_missing_ic_documents,
-    verify_application_details_completeness,
-    verify_consent_signatures,
     verify_financial_sections_present,
     verify_ssm_completeness,
 )
@@ -227,28 +225,6 @@ def _run_ic_coverage(ctx: RuleRunContext) -> list[RuleOutcome]:
     return [RuleOutcome("find_missing_ic_documents", result=result)]
 
 
-def _run_consent_signature(ctx: RuleRunContext) -> list[RuleOutcome]:
-    bc = ctx.bundle_context
-    if not bc.consent_form_docs:
-        return [RuleOutcome("verify_consent_signatures", skip_reason="No consent_form document in bundle.")]
-    consent_forms = [d.data.model_dump(mode="json") for d in bc.consent_form_docs]
-    result = verify_consent_signatures(bc.ssm_people, consent_forms)
-    return [RuleOutcome("verify_consent_signatures", result=result)]
-
-
-def _run_application_completeness(ctx: RuleRunContext) -> list[RuleOutcome]:
-    bc = ctx.bundle_context
-    if not bc.customer_info_doc:
-        return [RuleOutcome(
-            "verify_application_details_completeness",
-            skip_reason="No customer_information document in bundle.",
-        )]
-    result = verify_application_details_completeness(
-        bc.customer_info_doc.data.model_dump(mode="json"), policy=ctx.policy,
-    )
-    return [RuleOutcome("verify_application_details_completeness", result=result)]
-
-
 def _run_entity_name_match(ctx: RuleRunContext) -> list[RuleOutcome]:
     bc = ctx.bundle_context
     docs = bc.bank_statement_docs + bc.financial_statement_docs + bc.tax_declaration_docs + bc.consent_form_docs
@@ -289,8 +265,6 @@ RULE_RUNNERS: dict[str, RuleRunner] = {
     "bank_statement.currency": _run_bank_statement_currency,
     "identity_document.front_and_back": _run_ic_front_and_back,
     "identity_document.coverage": _run_ic_coverage,
-    "consent.signature": _run_consent_signature,
-    "application.completeness": _run_application_completeness,
     "entity_name.match": _run_entity_name_match,
     "identity_document.number_match": _run_ic_number_match,
 }

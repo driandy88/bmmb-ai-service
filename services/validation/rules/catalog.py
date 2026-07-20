@@ -31,8 +31,6 @@ RULE_CATALOG = (
     RuleDefinition("bank_statement.currency", "check_bank_statement_currency", "bank_statement", "Bank statement currency matches the accepted currency.", "BANK_STATEMENT"),
     RuleDefinition("identity_document.front_and_back", "check_ic_front_and_back", "identity", "Each IC has front and back images.", "IDENTITY_DOCUMENT"),
     RuleDefinition("identity_document.coverage", "find_missing_ic_documents", "identity", "Required parties have corresponding IC documents.", "IDENTITY_DOCUMENT"),
-    RuleDefinition("consent.signature", "verify_consent_signatures", "consent", "Required parties have signed consent forms.", "CONSENT_FORM"),
-    RuleDefinition("application.completeness", "verify_application_details_completeness", "application", "Mandatory application fields are completed.", "APPLICATION"),
     RuleDefinition("entity_name.match", "strict_match_entity_names", "matching", "Entity names match across documents.", "SSM_CORPORATE_FORM"),
     RuleDefinition("identity_document.number_match", "strict_match_ic_numbers", "matching", "Identity numbers match across documents.", "SSM_CORPORATE_FORM"),
 )
