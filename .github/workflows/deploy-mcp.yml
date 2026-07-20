@@ -1,0 +1,88 @@
+name: Test, Build & Deploy — MCP
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ["services/mcp/**"]
+  push:
+    branches: [main]
+    paths: ["services/mcp/**"]
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: asia-southeast1
+  SERVICE_NAME: mcp-service
+  REPO_NAME: bmmb-ai-service             # shared Artifact Registry repo across all services in this monorepo
+  WORKDIR: services/mcp
+  DOCKERFILE: services/mcp/Dockerfile
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: ${{ env.WORKDIR }}
+        run: pip install -r requirements-dev.txt
+
+      # Tests are hermetic -- no Gmail, no Gemini, no network (the send path is
+      # only checked for its missing-config guard). No credentials needed.
+      - name: Run tests
+        working-directory: ${{ env.WORKDIR }}
+        run: pytest tests/ -v
+
+  # Only after tests pass, and only on pushes to main (not on PRs)
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      # Build context is the repo root ("."), not $WORKDIR -- see
+      # services/mcp/Dockerfile's header comment for why.
+      - name: Build image
+        run: |
+          docker build -f ${{ env.DOCKERFILE }} \
+            -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} \
+            .
+
+      - name: Push image
+        run: |
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+
+      # Runtime credentials come from Secret Manager, mapped to the env vars the
+      # service reads (SENDER_EMAIL / APP_PASSWORD / GOOGLE_API_KEY). Provision the
+      # secrets + grant mcp-service-sa secretAccessor once -- see services/mcp/README.md.
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} \
+            --region=${{ env.REGION }} \
+            --platform=managed \
+            --allow-unauthenticated \
+            --service-account=mcp-service-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+            --set-secrets=SENDER_EMAIL=MCP_SENDER_EMAIL:latest,APP_PASSWORD=MCP_APP_PASSWORD:latest,GOOGLE_API_KEY=MCP_GOOGLE_API_KEY:latest
+
+      - name: Show deployed URL
+        run: gcloud run services describe ${{ env.SERVICE_NAME }} --region=${{ env.REGION }} --format="value(status.url)"
