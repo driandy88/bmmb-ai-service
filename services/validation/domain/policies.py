@@ -18,7 +18,6 @@ class ValidationPolicy(BaseModel):
     default_minimum_bank_statement_months: int
     financial_statement_max_age_months: int = 18
     bank_statement_max_age_months: int = 2
-    required_application_fields: set[str] = Field(default_factory=set)
     accepted_bank_currency: str = "MYR"
 
 
@@ -38,14 +37,5 @@ BMMB_SME_POLICY_V1 = ValidationPolicy(
         "partnership": 12,
     },
     default_minimum_bank_statement_months=6,
-    required_application_fields={
-        "main_contact_names",
-        "main_contact_emails",
-        "main_contact_phone_numbers",
-        "financing_amount",
-        "product_type",
-        "tenure_months",
-        "repayment_frequency",
-    },
     accepted_bank_currency="MYR",
 )

@@ -113,7 +113,7 @@ class TestResultsByDocument:
         assert "results_by_document" in dumped
         assert set(dumped["results_by_document"]) == {
             "SSM_CORPORATE_FORM", "FINANCIAL_STATEMENT", "BANK_STATEMENT",
-            "IDENTITY_DOCUMENT", "CONSENT_FORM", "APPLICATION",
+            "IDENTITY_DOCUMENT",
         }
 
     def test_every_catalog_rule_has_a_document_group(self):
@@ -125,13 +125,6 @@ class TestFailingBundle:
     def test_overall_failed(self, failing_bundle_raw):
         report = _run(failing_bundle_raw)
         assert report.overall_passed is False
-
-    def test_missing_consent_form_is_caught(self, failing_bundle_raw):
-        report = _run(failing_bundle_raw)
-        consent_check = next(r for r in report.results if r.check == "verify_consent_signatures")
-        assert consent_check.passed is False
-        assert consent_check.status is ValidationStatus.FAILED
-        assert consent_check.details["missing_consent"]
 
     def test_failed_check_wins_over_needs_review(self, passing_bundle_raw):
         raw = passing_bundle_raw.copy()
@@ -190,7 +183,6 @@ class TestSkippedChecksForIncompleteBundles:
             "verify_bank_statement_duration",
             "check_ic_front_and_back",
             "find_missing_ic_documents",
-            "verify_consent_signatures",
         ):
             check = next(r for r in report.results if r.check == check_name)
             assert check.passed is None
@@ -304,18 +296,6 @@ class TestNewRulesWiring:
         ]
         report = _run(raw)
         check = next(r for r in report.results if r.check == "check_bank_statement_freshness")
-        assert check.passed is False
-
-    def test_missing_application_details_field_is_caught(self, passing_bundle_raw):
-        raw = passing_bundle_raw.copy()
-        raw["extracted_documents"] = [
-            dict(doc, data=dict(doc["data"], main_contact_emails=[]))
-            if doc["document_type"] == "customer_information"
-            else doc
-            for doc in raw["extracted_documents"]
-        ]
-        report = _run(raw)
-        check = next(r for r in report.results if r.check == "verify_application_details_completeness")
         assert check.passed is False
 
 

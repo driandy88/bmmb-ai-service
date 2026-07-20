@@ -21,9 +21,7 @@ from services.validation.rules import (
     person_similarity,
     strict_match_entity_names,
     strict_match_ic_numbers,
-    verify_application_details_completeness,
     verify_bank_statement_duration,
-    verify_consent_signatures,
     verify_financial_sections_present,
     verify_ssm_completeness,
 )
@@ -133,44 +131,6 @@ class TestCheckIcFrontAndBack:
         result = check_ic_front_and_back(
             [{"individual_name": "A", "nric_passport": "1", "front_image_present": False, "back_image_present": None}]
         )
-        assert result["passed"] is False
-
-
-class TestVerifyConsentSignatures:
-    def test_signed_consent_for_everyone(self):
-        ssm_people = [{"name": "A", "nric_passport": "1"}]
-        consent_forms = [{"nric_passport": "1", "signature_present": True}]
-        result = verify_consent_signatures(ssm_people, consent_forms)
-        assert result["passed"] is True
-
-    def test_missing_consent_form(self):
-        ssm_people = [{"name": "A", "nric_passport": "1"}]
-        result = verify_consent_signatures(ssm_people, [])
-        assert result["passed"] is False
-        assert len(result["details"]["missing_consent"]) == 1
-        assert result["details"]["unsigned_consent"] == []
-
-    def test_unsigned_consent_form(self):
-        ssm_people = [{"name": "A", "nric_passport": "1"}]
-        consent_forms = [{"nric_passport": "1", "signature_present": False}]
-        result = verify_consent_signatures(ssm_people, consent_forms)
-        assert result["passed"] is False
-        assert len(result["details"]["unsigned_consent"]) == 1
-
-    def test_unconfirmed_signature_is_needs_review_not_failed(self):
-        # null ("not confirmed either way") must NOT be treated the same as
-        # False ("confirmed unsigned") -- this is the tri-state fix.
-        ssm_people = [{"name": "A", "nric_passport": "1"}]
-        consent_forms = [{"nric_passport": "1", "signature_present": None}]
-        result = verify_consent_signatures(ssm_people, consent_forms)
-        assert result["passed"] is None
-        assert result["details"]["unsigned_consent"] == []
-        assert len(result["details"]["unconfirmed_consent"]) == 1
-
-    def test_missing_form_outranks_unconfirmed(self):
-        ssm_people = [{"name": "A", "nric_passport": "1"}, {"name": "B", "nric_passport": "2"}]
-        consent_forms = [{"nric_passport": "1", "signature_present": None}]  # B has no form at all
-        result = verify_consent_signatures(ssm_people, consent_forms)
         assert result["passed"] is False
 
 
@@ -389,27 +349,3 @@ class TestCheckBankStatementCurrency:
         result = check_bank_statement_currency(["MYR", None], accepted_currency="MYR")
         assert result["passed"] is None
         assert result["details"]["documents_with_unknown_currency"] == 1
-
-
-class TestVerifyApplicationDetailsCompleteness:
-    def test_all_fields_present_passes(self):
-        result = verify_application_details_completeness({
-            "main_contact_names": ["MOHD AIMAN"],
-            "main_contact_emails": ["aiman@example.com"],
-            "main_contact_phone_numbers": ["+60123456789"],
-        })
-        assert result["passed"] is True
-
-    def test_missing_field_fails(self):
-        result = verify_application_details_completeness({
-            "main_contact_names": ["MOHD AIMAN"],
-            "main_contact_emails": [],
-            "main_contact_phone_numbers": ["+60123456789"],
-        })
-        assert result["passed"] is False
-        assert "Main Contact Email(s)" in result["details"]["missing_fields"]
-
-    def test_all_fields_missing_fails(self):
-        result = verify_application_details_completeness({})
-        assert result["passed"] is False
-        assert len(result["details"]["missing_fields"]) == 3
