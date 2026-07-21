@@ -14,7 +14,7 @@ the environment for /mcp/gmail/send to work; /health and /mcp/servers do not.
 """
 from fastapi import APIRouter, FastAPI, HTTPException
 
-from .agent import GmailConfigError, send_gmail
+from .agent import DEFAULT_SYSTEM_PROMPT, GmailConfigError, send_gmail
 from .schemas import GmailSendRequest, GmailSendResponse, McpField, McpServerInfo
 
 router = APIRouter(tags=["mcp"])
@@ -36,6 +36,7 @@ _GMAIL = McpServerInfo(
                  placeholder="e.g. Introduce yourself as the BMMB MCP agent and offer to help on the project.",
                  help="The agent writes a polite, natural body from this description."),
     ],
+    system_prompt=DEFAULT_SYSTEM_PROMPT,
 )
 
 _CATALOG = {_GMAIL.key: _GMAIL}
@@ -63,7 +64,7 @@ async def gmail_send(req: GmailSendRequest):
     a transport error.
     """
     try:
-        return await send_gmail(req.content_about, req.subject, req.to, req.cc)
+        return await send_gmail(req.content_about, req.subject, req.to, req.cc, req.system_prompt)
     except GmailConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:  # noqa: BLE001

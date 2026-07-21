@@ -48,3 +48,19 @@ def test_send_missing_config_returns_503(monkeypatch):
 def test_send_missing_required_field_returns_422():
     r = client.post("/mcp/gmail/send", json={"subject": "s", "content_about": "hi"})  # no `to`
     assert r.status_code == 422
+
+
+def test_catalog_exposes_default_prompt_with_signoff():
+    # The UI prefills its "customize prompt" box from this; the default always signs off.
+    prompt = client.get("/mcp/servers").json()[0]["system_prompt"]
+    assert prompt and "BMMB MCP Email Agent" in prompt
+
+
+def test_send_accepts_optional_system_prompt(monkeypatch):
+    # The override is accepted (not a 422); still guarded by config here.
+    for key in ("SENDER_EMAIL", "APP_PASSWORD", "GOOGLE_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    r = client.post("/mcp/gmail/send", json={
+        "to": "x@y.com", "subject": "s", "content_about": "hi", "system_prompt": "Write tersely.",
+    })
+    assert r.status_code == 503
