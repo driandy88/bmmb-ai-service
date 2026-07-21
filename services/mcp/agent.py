@@ -26,11 +26,15 @@ warnings.filterwarnings("ignore", message="Key 'additionalProperties' is not sup
 _SERVER_SCRIPT = str(Path(__file__).resolve().parent / "servers" / "email_server.py")
 _MODEL = "gemini-2.5-flash"
 
-_SYSTEM_PROMPT = (
-    "You are an assistant that sends emails. Write a natural, polite, well-structured "
-    "plain-text body from the description you are given. Use the exact recipient, CC, and "
-    "subject provided -- do not change them. Call the send_email tool exactly once. If the "
-    "tool returns an error, report that error verbatim."
+DEFAULT_SYSTEM_PROMPT = (
+    "You are an assistant that sends emails on behalf of BMMB. Write a natural, polite, "
+    "well-structured plain-text body from the description you are given. Always end the email "
+    "with this exact sign-off on its own lines, so the recipient can tell it came from the "
+    "agent:\n\n"
+    "Regards,\n"
+    "BMMB MCP Email Agent\n\n"
+    "Use the exact recipient, CC, and subject provided -- do not change them. Call the "
+    "send_email tool exactly once. If the tool returns an error, report that error verbatim."
 )
 
 
@@ -83,8 +87,12 @@ async def send_gmail(
     subject: str,
     to: str,
     cc: Union[None, str, list] = None,
+    system_prompt: Optional[str] = None,
 ) -> dict:
     """Compose and send one email through the Gmail MCP server.
+
+    `system_prompt` overrides how the agent writes the email (advanced use); when
+    omitted, DEFAULT_SYSTEM_PROMPT is used, which signs off as "BMMB MCP Email Agent".
 
     Returns { success, detail, agent_message, to, cc, subject }. `detail` is the
     tool's verbatim result. Raises GmailConfigError if the server isn't configured.
@@ -104,7 +112,7 @@ async def send_gmail(
     agent = create_agent(
         model=ChatGoogleGenerativeAI(model=_MODEL),
         tools=tools,
-        system_prompt=_SYSTEM_PROMPT,
+        system_prompt=(system_prompt.strip() if system_prompt and system_prompt.strip() else DEFAULT_SYSTEM_PROMPT),
     )
 
     response = await agent.ainvoke(

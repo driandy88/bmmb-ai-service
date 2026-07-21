@@ -14,6 +14,11 @@ class GmailSendRequest(BaseModel):
     subject: str = Field(..., description="Subject line, used exactly as given")
     content_about: str = Field(..., description="What the email should be about; the agent writes the body")
     cc: Optional[str] = Field(None, description="Optional comma-separated CC addresses")
+    system_prompt: Optional[str] = Field(
+        None,
+        description="Advanced: override the agent's system prompt. When omitted, the default "
+                    "(which signs off as 'BMMB MCP Email Agent') is used.",
+    )
 
 
 class GmailSendResponse(BaseModel):
@@ -41,3 +46,6 @@ class McpServerInfo(BaseModel):
     name: str
     description: str
     fields: List[McpField]
+    system_prompt: Optional[str] = None   # the agent's default prompt, editable via the request's
+                                          # optional system_prompt override (advanced); the UI prefills
+                                          # its "customize prompt" box from this.
