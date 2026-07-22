@@ -27,7 +27,13 @@ class BundleContext:
     customer_info_doc: CustomerInfoDoc | None
     entity_name: str
     entity_type: str
+    # All SSM people (directors + shareholders), keyed by NRIC -- used for
+    # cross-matching an IC number when an IC is present.
     ssm_people_by_nric: dict[str, object]
+    # Directors only. IC-document coverage and consent-signature requirements
+    # apply to directors, NOT shareholders -- a shareholder is not required to
+    # submit an IC or sign a consent form.
+    ssm_directors_by_nric: dict[str, object]
 
     @classmethod
     def from_bundle(cls, bundle: ValidationBundle) -> "BundleContext":
@@ -44,10 +50,13 @@ class BundleContext:
         entity_type = ssm_form_docs[0].data.entity_type if ssm_form_docs else ""
 
         ssm_people_by_nric = {}
+        ssm_directors_by_nric = {}
         for doc in ssm_form_docs:
-            for group in (doc.data.directors, doc.data.shareholders):
-                for person in group or []:
-                    ssm_people_by_nric[person.nric_passport] = person
+            for person in doc.data.directors or []:
+                ssm_people_by_nric[person.nric_passport] = person
+                ssm_directors_by_nric[person.nric_passport] = person
+            for person in doc.data.shareholders or []:
+                ssm_people_by_nric[person.nric_passport] = person
 
         return cls(
             financial_statement_docs=financial_statement_docs,
@@ -60,8 +69,13 @@ class BundleContext:
             entity_name=entity_name,
             entity_type=entity_type,
             ssm_people_by_nric=ssm_people_by_nric,
+            ssm_directors_by_nric=ssm_directors_by_nric,
         )
 
     @property
     def ssm_people(self) -> list[dict]:
         return [person.model_dump(mode="json") for person in self.ssm_people_by_nric.values()]
+
+    @property
+    def ssm_directors(self) -> list[dict]:
+        return [person.model_dump(mode="json") for person in self.ssm_directors_by_nric.values()]

@@ -82,11 +82,7 @@ def validate_from_extraction(
     bundle_id: Optional[str] = Query(None),
     system_date: Optional[date] = Query(None, description="Defaults to today if omitted."),
     entity_type: Optional[str] = Query(
-        None, description="Defaults to extracted_by_template['Application Details']"
-                           "['Business Entity Type'] if omitted."),
-    tenure_months: Optional[int] = Query(None),
-    repayment_frequency: Optional[str] = Query(None),
-    signature_present: Optional[bool] = Query(None),
+        None, description="No extraction source; defaults to \"\" (with a warning) if omitted."),
     enable_ai_review: bool = Query(True),
 ):
     """No field here can cause a 400 -- anything not supplied and not
@@ -100,9 +96,6 @@ def validate_from_extraction(
             bundle_id=bundle_id,
             system_date=system_date,
             entity_type=entity_type,
-            tenure_months=tenure_months,
-            repayment_frequency=repayment_frequency,
-            signature_present=signature_present,
             enable_ai_review=enable_ai_review,
         )
     except SystemExit as e:

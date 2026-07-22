@@ -30,14 +30,37 @@ class DocumentProvenance(BaseModel):
 # ---------------------------------------------------------
 # 2. Document Data Payloads
 # ---------------------------------------------------------
+class CustomerInfoDirector(BaseModel):
+    """One director's personal particulars from the Customer Information Form."""
+    name: str
+    address: str
+    email: str
+    religion: str
+    marital_status: str
+    estimated_monthly_income: str
+    experience_in_current_business: str
+    higher_education: str
+    emergency_contact_name: str
+    emergency_contact_number: str
+    emergency_contact_relationship: str
+    spouse_name: str
+    spouse_contact_number: str
+
 class CustomerInfoData(BaseModel):
-    main_contact_names: List[str]
-    main_contact_emails: List[str]
-    main_contact_phone_numbers: List[str]
-    financing_amount: float
-    product_type: str
-    tenure_months: int
-    repayment_frequency: str
+    """The institution's Customer Information Form -- director particulars
+    (one row per director) plus company information. The completeness rule
+    checks every field here is filled in."""
+    directors: List[CustomerInfoDirector]
+    company_age: str
+    company_number_of_staff: str
+    company_current_office_address: str
+    company_office_status: str
+    company_office_monthly_rent: str
+    company_office_telephone: str
+    company_email_address: str
+    company_auditor_firm_name: str
+    company_auditor_contact_person: str
+    company_auditor_contact_number: str
 
 class SsmCorporateFormData(BaseModel):
     entity_name: str

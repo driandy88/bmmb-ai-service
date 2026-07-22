@@ -1,57 +1,55 @@
 {
-  "_comment": "One entry per POST /extract call made for this application, keyed by template name. Each value is exactly that call's `data.extracted_data` (see docs/api_contracts.md). Same persona (Alpha Tech Solutions Sdn Bhd) as services/validation/examples/sample_bundle_passing.json, so extraction_adapter.build_validation_bundle() on this fixture produces an equivalent, all-checks-passing bundle.",
-  "SSM Form 24": {
+  "_comment": "Mimics the CURRENT deployed extraction output (extraction-service on Cloud Run), keyed by template name -> that call's extracted_data. Differs from extraction_results_example.json in three ways that match the live templates: (1) SSM is one combined 'SSM Business Registration' template instead of Form 24/44/49, with a Shareholders row_group that now carries 'Shareholder NRIC or Passport Number'; (2) the Consent Form uses an 'Applicants' row_group with a per-signatory 'Consent Form Signature' boolean; (3) Bank Statements carries a 'Currency' attribute. TENGKU IDRIS is a shareholder-only party (not a director): he has a Shareholder NRIC but no MyKad and no consent signature -- the bundle must still pass, proving shareholders are not held to the IC-coverage or consent-signature rules.",
+  "SSM Business Registration": {
+    "Document Type": "SSM Business Registration",
     "Entity Name": "ALPHA TECH SOLUTIONS SDN BHD",
     "Business Registration Number": "202301098765",
     "Incorporation Date": "12-03-2023",
+    "MSIC Code": "62010",
+    "Main Business": "SOFTWARE DEVELOPMENT",
+    "Sub-businesses": "IT consultancy; Cloud services",
+    "Business Description": "Custom software development and IT consultancy services.",
     "Registered Address": "LOT 2-4-19, WISMA RAMPAI, TAMAN SRI RAMPAI, SETAPAK, KUALA LUMPUR",
-    "Business Nature": [
-      "SOFTWARE DEVELOPMENT"
+    "Directors": [
+      {
+        "Director Name": "MOHD AIMAN BIN ZULKIFLI",
+        "Director NRIC or Passport Number": "880214-14-5123",
+        "ID Type": "MyKad",
+        "Corresponding Director Address": "NO 29, JALAN AMAN SERENIA 11/7, BANDAR SERENIA, 43900 SEPANG, SELANGOR"
+      },
+      {
+        "Director Name": "NURUL AIN BINTI ZULKIFLI",
+        "Director NRIC or Passport Number": "900101-10-1234",
+        "ID Type": "MyKad",
+        "Corresponding Director Address": "NO 12, JALAN DAMAI 3/2, TAMAN DAMAI, 43900 SEPANG, SELANGOR"
+      }
     ],
     "Shareholders": [
       {
         "Shareholder Name": "MOHD AIMAN BIN ZULKIFLI",
+        "Shareholder NRIC or Passport Number": "880214-14-5123",
+        "Shareholder Percentage": "50%",
         "Shareholder Address": "NO 29, JALAN AMAN SERENIA 11/7, BANDAR SERENIA, 43900 SEPANG, SELANGOR",
-        "Shareholder Percentage": "18,000"
+        "Corresponding Shareholder Address": "NO 29, JALAN AMAN SERENIA 11/7, BANDAR SERENIA, 43900 SEPANG, SELANGOR",
+        "Shareholder Entity's Business Registration Number": "N/A"
       },
       {
         "Shareholder Name": "NURUL AIN BINTI ZULKIFLI",
+        "Shareholder NRIC or Passport Number": "900101-10-1234",
+        "Shareholder Percentage": "30%",
         "Shareholder Address": "NO 12, JALAN DAMAI 3/2, TAMAN DAMAI, 43900 SEPANG, SELANGOR",
-        "Shareholder Percentage": "12,000"
-      }
-    ],
-    "Director NRIC or Passport Number": [
-      "880214-14-5123"
-    ],
-    "Document Type": "SSM Form 24"
-  },
-  "SSM Form 44": {
-    "Entity Name": "ALPHA TECH SOLUTIONS SDN BHD",
-    "Registered Address": "LOT 2-4-19, WISMA RAMPAI, TAMAN SRI RAMPAI, SETAPAK, KUALA LUMPUR",
-    "Document Type": "SSM Form 44"
-  },
-  "SSM Form 49": {
-    "Entity Name": "ALPHA TECH SOLUTIONS SDN BHD",
-    "Business Registration Number": "202301098765",
-    "Incorporation Date": "12-03-2023",
-    "Registered Address": "LOT 2-4-19, WISMA RAMPAI, TAMAN SRI RAMPAI, SETAPAK, KUALA LUMPUR",
-    "Business Address": "LOT 2-4-19, WISMA RAMPAI, TAMAN SRI RAMPAI, SETAPAK, KUALA LUMPUR",
-    "Business Nature": [
-      "SOFTWARE DEVELOPMENT"
-    ],
-    "Directors": [
-      {
-        "Director Name": "MOHD AIMAN BIN ZULKIFLI",
-        "Director Address": "NO 29, JALAN AMAN SERENIA 11/7, BANDAR SERENIA, 43900 SEPANG, SELANGOR",
-        "Director NRIC or Passport Number": "880214-14-5123"
+        "Corresponding Shareholder Address": "NO 12, JALAN DAMAI 3/2, TAMAN DAMAI, 43900 SEPANG, SELANGOR",
+        "Shareholder Entity's Business Registration Number": "N/A"
       },
       {
-        "Director Name": "NURUL AIN BINTI ZULKIFLI",
-        "Director Address": "NO 12, JALAN DAMAI 3/2, TAMAN DAMAI, 43900 SEPANG, SELANGOR",
-        "Director NRIC or Passport Number": "900101-10-1234"
+        "Shareholder Name": "TENGKU IDRIS BIN ISMAIL",
+        "Shareholder NRIC or Passport Number": "700101-14-5555",
+        "Shareholder Percentage": "20%",
+        "Shareholder Address": "NO 8, JALAN SETIA 2/1, SETIA ALAM, 40170 SHAH ALAM, SELANGOR",
+        "Corresponding Shareholder Address": "NO 8, JALAN SETIA 2/1, SETIA ALAM, 40170 SHAH ALAM, SELANGOR",
+        "Shareholder Entity's Business Registration Number": "N/A"
       }
-    ],
-    "Document Type": "SSM Form 49"
+    ]
   },
   "Financial Statements (Sdn Bhd)": {
     "Balance Sheet Present": true,
@@ -101,7 +99,8 @@
   "Bank Statements": {
     "Bank Name": "MAYBANK BERHAD",
     "Account Number Masked": "****4567",
-    "Statement Period": "01 Jan 2026 to 30 Jun 2026",
+    "Currency": "MYR",
+    "Document Type": "Bank Statements",
     "Transactions": [
       {
         "Transaction Date": "2026-01-01",
@@ -159,14 +158,15 @@
         "Transaction Credit": 4500.0,
         "Transaction Balance": 60100.0
       }
-    ],
-    "Document Type": "Bank Statements"
+    ]
   },
   "MyKad (Director ID or Passport)": {
+    "Document Type": "MyKad (Director ID or Passport)",
     "Directors": [
       {
         "Director Name": "MOHD AIMAN BIN ZULKIFLI",
         "Director NRIC or Passport Number": "880214-14-5123",
+        "Director Address": "NO 29, JALAN AMAN SERENIA 11/7, BANDAR SERENIA, 43900 SEPANG, SELANGOR",
         "Front Side IC Present": true,
         "Back Side IC Present": true,
         "ID Type": "MyKad"
@@ -174,15 +174,16 @@
       {
         "Director Name": "NURUL AIN BINTI ZULKIFLI",
         "Director NRIC or Passport Number": "900101-10-1234",
+        "Director Address": "NO 12, JALAN DAMAI 3/2, TAMAN DAMAI, 43900 SEPANG, SELANGOR",
         "Front Side IC Present": true,
         "Back Side IC Present": true,
         "ID Type": "MyKad"
       }
-    ],
-    "Document Type": "MyKad (Director ID or Passport)"
+    ]
   },
   "Consent Form": {
     "Entity Name": "ALPHA TECH SOLUTIONS SDN BHD",
+    "Document Type": "Consent Form",
     "Applicants": [
       {
         "Director Name": "MOHD AIMAN BIN ZULKIFLI",
@@ -193,30 +194,8 @@
         "Director Name": "NURUL AIN BINTI ZULKIFLI",
         "Director NRIC or Passport Number": "900101-10-1234",
         "Consent Form Signature": true
-      },
-      {
-        "Director Name": "MOHD AIMAN BIN ZULKIFLI",
-        "Director NRIC or Passport Number": "880214-14-5123",
-        "Consent Form Signature": true
       }
-    ],
-    "Document Type": "Consent Form"
-  },
-  "Application Details": {
-    "Main Contacts": [
-      {
-        "Main Contact Name": "MOHD AIMAN BIN ZULKIFLI",
-        "Main Contact Email": "aiman@alphatech.my",
-        "Main Contact Phone Number": "+60123456789"
-      }
-    ],
-    "Business Entity Type": "Sdn Bhd",
-    "Proposed Program": "SME Term Financing",
-    "Proposed Financing Amount": 500000.0,
-    "Referrer": "Branch",
-    "Referrer Detail": "Kota Bharu Branch",
-    "Additional Notes": null,
-    "Document Type": "Application Details"
+    ]
   },
   "Customer Information Form": {
     "Document Type": "Customer Information Form",

@@ -30,30 +30,21 @@ def test_application_service_preserves_engine_results(passing_bundle_raw):
 def test_extraction_application_service_returns_adapter_result():
     result = ExtractionValidationApplicationService().build_bundle(
         {
-            "SSM Form 24": {
+            "SSM Business Registration": {
                 "Entity Name": "SOLO SDN BHD",
                 "Business Registration Number": "202301000001",
-            },
-            "Application Details": {
-                "Business Entity Type": "Sdn Bhd",
-                # Contacts come from the "Main Contacts" row_group -- one
-                # correlated object per contact (name/email/phone stay aligned).
-                "Main Contacts": [
-                    {
-                        "Main Contact Name": "A",
-                        "Main Contact Email": "a@example.com",
-                        "Main Contact Phone Number": "0123456789",
-                    },
+                "Incorporation Date": "01-01-2023",
+                "MSIC Code": "62010",
+                "Registered Address": "1 JALAN SATU, KUALA LUMPUR",
+                "Directors": [
+                    {"Director Name": "A", "Director NRIC or Passport Number": "111111-11-1111"},
                 ],
-                "Proposed Financing Amount": 1000,
-                "Proposed Program": "SME Term Financing",
+                "Shareholders": [
+                    {"Shareholder Name": "A", "Shareholder NRIC or Passport Number": "111111-11-1111"},
+                ],
             },
         },
         entity_type="Sdn Bhd",
-        tenure_months=60,
-        repayment_frequency="Monthly",
-        signature_present=True,
     )
 
     assert result.bundle.extracted_documents
-    assert result.warnings == []

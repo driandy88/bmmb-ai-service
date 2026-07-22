@@ -55,6 +55,7 @@ from .bundle import (
     ConsentFormData,
     ConsentFormDoc,
     CustomerInfoData,
+    CustomerInfoDirector,
     CustomerInfoDoc,
     DocumentProvenance,
     FinancialStatementData,
@@ -203,6 +204,142 @@ _SSM_SUBTYPE_BY_TEMPLATE = {
     "Form 32A": "form_32a",
 }
 
+# SSM Business Registration is now extracted as ONE combined template instead
+# of the three per-form templates above (see docs/ssm-one-form.md). The
+# per-form keys are still accepted for backward compatibility with in-flight
+# and historical bundles.
+_SSM_COMBINED_TEMPLATE = "SSM Business Registration"
+
+# Fields the removed verify_ssm_completeness rule used to guard indirectly.
+# With that rule gone, the adapter raises an AdapterWarning per missing field
+# so an incomplete SSM extraction still surfaces, just as a warning rather
+# than a failing check. Entity Name / Business Registration Number are already
+# warned on by _safe_str below, so they're not repeated here.
+_SSM_COMBINED_REQUIRED_SCALARS = {
+    "Incorporation Date": "the company's incorporation date",
+    "Registered Address": "the registered office address",
+}
+
+
+def _warn_incomplete_combined_ssm(
+    extracted: dict, document_id: str, warnings: list[AdapterWarning]
+) -> None:
+    """Emit an AdapterWarning for each incomplete field on a combined SSM doc."""
+    for field, expected in _SSM_COMBINED_REQUIRED_SCALARS.items():
+        if not extracted.get(field):
+            warnings.append(AdapterWarning(
+                document_type="ssm_corporate_form", document_id=document_id, field=field,
+                message=f"SSM Business Registration is missing '{field}'.",
+                current_state="null or empty", expected_state=expected,
+            ))
+    # Classification: at least one of MSIC Code / Main Business should be present.
+    if not extracted.get("MSIC Code") and not extracted.get("Main Business"):
+        warnings.append(AdapterWarning(
+            document_type="ssm_corporate_form", document_id=document_id, field="MSIC Code",
+            message="SSM Business Registration has neither 'MSIC Code' nor 'Main Business'.",
+            current_state="both null or empty", expected_state="an MSIC code or a main-business description",
+        ))
+    # Directors must be a non-empty array (null when empty, per the template).
+    if not extracted.get("Directors"):
+        warnings.append(AdapterWarning(
+            document_type="ssm_corporate_form", document_id=document_id, field="Directors",
+            message="SSM Business Registration lists no directors.",
+            current_state="null or empty", expected_state="at least one director row",
+        ))
+    if not extracted.get("Shareholders"):
+        warnings.append(AdapterWarning(
+            document_type="ssm_corporate_form", document_id=document_id, field="Shareholders",
+            message="SSM Business Registration lists no shareholders.",
+            current_state="null or empty", expected_state="at least one shareholder row",
+        ))
+
+
+def _build_ssm_doc(
+    extracted: dict,
+    *,
+    document_id: str,
+    document_subtype: Optional[str],
+    source_template: str,
+    entity_type: str,
+    warnings: list[AdapterWarning],
+    warn_incomplete: bool,
+) -> SsmCorporateDoc:
+    """Build one SsmCorporateDoc from either the combined or a per-form payload.
+
+    Both shapes carry the same fields we validate against: scalar Entity Name /
+    Business Registration Number, a Directors row_group (Name + NRIC), and a
+    Shareholders row_group. `warn_incomplete` turns on the field-presence
+    warnings for the combined template (the old completeness rule's job).
+    """
+    directors = None
+    if "Directors" in extracted:
+        director_rows = _safe_list(extracted.get("Directors"), warnings=warnings,
+                                   document_type="ssm_corporate_form", document_id=document_id, field="Directors")
+        directors = [
+            PersonInfo(
+                name=_safe_str((row or {}).get("Director Name"), warnings=warnings,
+                                document_type="ssm_corporate_form", document_id=document_id,
+                                field=f"Directors[{i}].Director Name"),
+                nric_passport=_safe_str((row or {}).get("Director NRIC or Passport Number"), warnings=warnings,
+                                         document_type="ssm_corporate_form", document_id=document_id,
+                                         field=f"Directors[{i}].Director NRIC or Passport Number"),
+            )
+            for i, row in enumerate(director_rows)
+        ]
+
+    # The combined SSM Business Registration template now carries a
+    # "Shareholder NRIC or Passport Number" attribute, so shareholders can be
+    # built the same way as directors and reach find_missing_ic_documents.
+    # The legacy per-form path (SSM Form 24) never had that attribute -- if no
+    # row carries the NRIC key, keep degrading to "no shareholders on this doc"
+    # rather than fabricating blank-NRIC people that would pollute IC coverage.
+    _SHAREHOLDER_NRIC = "Shareholder NRIC or Passport Number"
+    shareholders = None
+    if "Shareholders" in extracted:
+        shareholder_rows = _safe_list(extracted.get("Shareholders"), warnings=warnings,
+                                      document_type="ssm_corporate_form", document_id=document_id, field="Shareholders")
+        if any(_SHAREHOLDER_NRIC in (row or {}) for row in shareholder_rows):
+            shareholders = [
+                PersonInfo(
+                    name=_safe_str((row or {}).get("Shareholder Name"), warnings=warnings,
+                                    document_type="ssm_corporate_form", document_id=document_id,
+                                    field=f"Shareholders[{i}].Shareholder Name"),
+                    nric_passport=_safe_str((row or {}).get(_SHAREHOLDER_NRIC), warnings=warnings,
+                                             document_type="ssm_corporate_form", document_id=document_id,
+                                             field=f"Shareholders[{i}].{_SHAREHOLDER_NRIC}"),
+                )
+                for i, row in enumerate(shareholder_rows)
+            ]
+        elif shareholder_rows:
+            warnings.append(AdapterWarning(
+                document_type="ssm_corporate_form", document_id=document_id, field="Shareholders",
+                message="Shareholders present but no Shareholder NRIC or Passport "
+                        "Number attribute on any row to match them against IC/consent documents.",
+                current_state=f"{len(shareholder_rows)} shareholder name(s), 0 shareholder NRIC(s)",
+                expected_state="a Shareholder NRIC or Passport Number value per shareholder",
+            ))
+
+    if warn_incomplete:
+        _warn_incomplete_combined_ssm(extracted, document_id, warnings)
+
+    return SsmCorporateDoc(
+        document_id=document_id,
+        document_type="ssm_corporate_form",
+        document_subtype=document_subtype,
+        provenance=DocumentProvenance(source_template=source_template),
+        data=SsmCorporateFormData(
+            entity_name=_safe_str(extracted.get("Entity Name"), warnings=warnings,
+                                   document_type="ssm_corporate_form", document_id=document_id, field="Entity Name"),
+            business_registration_number=_safe_str(
+                extracted.get("Business Registration Number"), warnings=warnings,
+                document_type="ssm_corporate_form", document_id=document_id, field="Business Registration Number",
+            ),
+            entity_type=entity_type,
+            directors=directors,
+            shareholders=shareholders,
+        ),
+    )
+
 
 def build_ssm_corporate_docs(
     extracted_by_template: dict[str, dict],
@@ -210,103 +347,57 @@ def build_ssm_corporate_docs(
     entity_type: Optional[str] = None,
     warnings: Optional[list[AdapterWarning]] = None,
 ) -> list[SsmCorporateDoc]:
-    """One SsmCorporateDoc per SSM template present in `extracted_by_template`.
+    """Build the SSM corporate document(s) from `extracted_by_template`.
+
+    Prefers the single combined "SSM Business Registration" template
+    (docs/ssm-one-form.md); also accepts the legacy per-form "SSM Form
+    24/44/49" keys for backward compatibility. Both can appear, though in
+    practice only one shape does.
 
     `entity_type` ("Sdn Bhd"/"Sole Proprietor"/"Partnership") has no source
-    attribute on any SSM template -- per the rules table, it's entered by
-    SME Sales on the Application Details page. If not passed explicitly,
-    this reads it straight from `extracted_by_template["Application
-    Details"]["Business Entity Type"]` when that template is present in the
-    same call (it usually will be); otherwise records an AdapterWarning and
+    attribute in extraction at all -- it must be passed explicitly (e.g. the
+    API `entity_type` param). If omitted, records an AdapterWarning and
     defaults to "".
 
-    NOTE: extraction currently has no template at all for SSM's own Form B
-    (sole prop registration) / Form D (partnership registration) -- only
-    Form 24/44/49 (Sdn Bhd) and Form 9&28/32A. A Sole Prop/Partnership
-    bundle can't produce an ssm_corporate_form doc with document_subtype
-    "form_b"/"form_d" until those templates are added.
-
-    `warnings`, if passed, collects AdapterWarnings for null fields (e.g. a
-    null Entity Name) or a null Directors/Shareholders row_group -- see
-    module docstring.
+    Completeness is no longer a validation rule: instead of counting distinct
+    forms, this raises an AdapterWarning per missing field on the combined doc
+    (see _warn_incomplete_combined_ssm). `warnings`, if passed, collects those
+    plus the usual null-field warnings -- see module docstring.
     """
     warnings = warnings if warnings is not None else []
 
     if entity_type is None:
-        entity_type = (extracted_by_template.get("Application Details") or {}).get("Business Entity Type")
-        if entity_type is None:
-            warnings.append(AdapterWarning(
-                document_type="ssm_corporate_form", document_id="(all)",
-                field="entity_type",
-                message="No entity_type override supplied and 'Application Details' -> "
-                        "'Business Entity Type' isn't available either -- defaulted to \"\".",
-                current_state="no signal available (defaulted to \"\")",
-                expected_state="\"Sdn Bhd\", \"Sole Proprietor\", or \"Partnership\"",
-            ))
-            entity_type = ""
+        warnings.append(AdapterWarning(
+            document_type="ssm_corporate_form", document_id="(all)",
+            field="entity_type",
+            message="No entity_type supplied -- defaulted to \"\". There is no source "
+                    "attribute for it in extraction; pass it explicitly (e.g. the API "
+                    "entity_type param).",
+            current_state="no signal available (defaulted to \"\")",
+            expected_state="\"Sdn Bhd\", \"Sole Proprietor\", or \"Partnership\"",
+        ))
+        entity_type = ""
 
     docs: list[SsmCorporateDoc] = []
+
+    # New single-template path.
+    combined = extracted_by_template.get(_SSM_COMBINED_TEMPLATE)
+    if combined is not None:
+        docs.append(_build_ssm_doc(
+            combined, document_id="ssm_business_registration", document_subtype=None,
+            source_template=_SSM_COMBINED_TEMPLATE, entity_type=entity_type,
+            warnings=warnings, warn_incomplete=True,
+        ))
+
+    # Legacy per-form path (backward compatibility).
     for template_name, subtype in _SSM_SUBTYPE_BY_TEMPLATE.items():
         extracted = extracted_by_template.get(template_name)
         if extracted is None:
             continue
-        document_id = f"ssm_{subtype}"
-
-        directors = None
-        if "Directors" in extracted:
-            director_rows = _safe_list(extracted.get("Directors"), warnings=warnings,
-                                       document_type="ssm_corporate_form", document_id=document_id, field="Directors")
-            directors = [
-                PersonInfo(
-                    name=_safe_str((row or {}).get("Director Name"), warnings=warnings,
-                                    document_type="ssm_corporate_form", document_id=document_id,
-                                    field=f"Directors[{i}].Director Name"),
-                    nric_passport=_safe_str((row or {}).get("Director NRIC or Passport Number"), warnings=warnings,
-                                             document_type="ssm_corporate_form", document_id=document_id,
-                                             field=f"Directors[{i}].Director NRIC or Passport Number"),
-                )
-                for i, row in enumerate(director_rows)
-            ]
-
-        # GAP: SSM Form 24 has "Shareholder Name"/"Address"/"Percentage" but
-        # no "Shareholder NRIC or Passport Number" attribute at all -- and
-        # PersonInfo.nric_passport is required, so shareholders can't be
-        # built without one. `shareholders` is Optional on
-        # SsmCorporateFormData (unlike e.g. tenure_months), so this degrades
-        # to "no shareholders on this doc" rather than blocking the whole
-        # bundle -- but it means find_missing_ic_documents/
-        # verify_consent_signatures won't see these shareholders at all.
-        # Add a "Shareholder NRIC or Passport Number" attribute to close
-        # this gap for real.
-        shareholders = None
-        if "Shareholders" in extracted:
-            shareholder_rows = _safe_list(extracted.get("Shareholders"), warnings=warnings,
-                                          document_type="ssm_corporate_form", document_id=document_id, field="Shareholders")
-            warnings.append(AdapterWarning(
-                document_type="ssm_corporate_form", document_id=document_id,
-                field="Shareholders",
-                message="Shareholders present but no Shareholder NRIC or Passport "
-                        "Number attribute exists to match them against IC/consent documents.",
-                current_state=f"{len(shareholder_rows)} shareholder name(s), 0 shareholder NRIC(s)",
-                expected_state="a Shareholder NRIC or Passport Number value per shareholder",
-            ))
-
-        docs.append(SsmCorporateDoc(
-            document_id=document_id,
-            document_type="ssm_corporate_form",
-            document_subtype=subtype,
-            provenance=DocumentProvenance(source_template=template_name),
-            data=SsmCorporateFormData(
-                entity_name=_safe_str(extracted.get("Entity Name"), warnings=warnings,
-                                       document_type="ssm_corporate_form", document_id=document_id, field="Entity Name"),
-                business_registration_number=_safe_str(
-                    extracted.get("Business Registration Number"), warnings=warnings,
-                    document_type="ssm_corporate_form", document_id=document_id, field="Business Registration Number",
-                ),
-                entity_type=entity_type,
-                directors=directors,
-                shareholders=shareholders,
-            ),
+        docs.append(_build_ssm_doc(
+            extracted, document_id=f"ssm_{subtype}", document_subtype=subtype,
+            source_template=template_name, entity_type=entity_type,
+            warnings=warnings, warn_incomplete=False,
         ))
     return docs
 
@@ -477,20 +568,29 @@ def build_bank_statement_doc(
         document_type="bank_statement", document_id=document_id, field="Bank Name",
     )
 
-    # These fields are required by the target validation rules, but the
-    # current Bank Statements extraction template has no source attributes
-    # for them. Keep them explicitly unknown and surface the integration gap.
-    for field, expected in (
-        ("Currency", "a currency code, e.g. MYR"),
-        ("Account Type", "an account type, e.g. current or savings"),
-    ):
+    # Currency is read from the template's "Currency" attribute. For now a
+    # non-MYR statement is only warned (the check_bank_statement_currency rule
+    # already treats a mismatch as needs-review, not a hard fail -- it needs
+    # manual conversion before balances compare like-for-like).
+    currency = _optional_str(
+        extracted.get("Currency"), warnings=warnings,
+        document_type="bank_statement", document_id=document_id, field="Currency",
+    )
+    if currency is not None and currency.strip().upper() != "MYR":
         warnings.append(AdapterWarning(
-            document_type="bank_statement", document_id=document_id,
-            field=field,
-            message=f"{field} has no source attribute in the current Bank Statements template.",
-            current_state="no signal available (left as null)",
-            expected_state=expected,
+            document_type="bank_statement", document_id=document_id, field="Currency",
+            message=f"Bank statement currency is {currency!r}, not MYR -- needs conversion and manual review.",
+            current_state=currency, expected_state="MYR",
         ))
+
+    # Account Type still has no source attribute on the Bank Statements
+    # template -- keep it explicitly unknown and surface the integration gap.
+    warnings.append(AdapterWarning(
+        document_type="bank_statement", document_id=document_id, field="Account Type",
+        message="Account Type has no source attribute in the current Bank Statements template.",
+        current_state="no signal available (left as null)",
+        expected_state="an account type, e.g. current or savings",
+    ))
 
     monthly_balances = []
     all_dates: list[date] = []
@@ -513,7 +613,7 @@ def build_bank_statement_doc(
         data=BankStatementData(
             entity_name=entity_name,
             bank_name=bank_name,
-            currency=None,
+            currency=currency,
             account_type=None,
             statement_start_date=min(all_dates),
             statement_end_date=max(all_dates),
@@ -574,20 +674,19 @@ def build_identity_documents(
 def build_consent_form_docs(
     extracted_by_template: dict[str, dict],
     *,
-    signature_present: Optional[bool] = None,
     warnings: Optional[list[AdapterWarning]] = None,
 ) -> list[ConsentFormDoc]:
     """One ConsentFormDoc per signatory on the Consent Form template.
 
-    GAP: no "signature_present" attribute exists on the Consent Form
-    template -- there's currently no extracted signal for whether a
-    signature was actually captured. `signature_present` must be supplied
-    explicitly (e.g. from a separate signature-detection step, or manual
-    confirmation); if omitted, stays None ("not confirmed" -- distinct from
-    False/"confirmed unsigned"; verify_consent_signatures treats the two
-    differently), recorded as an AdapterWarning, not silently. Add a
-    "Signature Present" boolean attribute to the Consent Form template to
-    close this gap for real.
+    The live template puts the signatories in an "Applicants" row_group; each
+    row carries Director Name, Director NRIC or Passport Number, and a
+    "Consent Form Signature" boolean. "Directors" is accepted as a fallback
+    key for older extraction output / fixtures.
+
+    Per-row signature comes from that "Consent Form Signature" boolean. A null
+    boolean stays None ("not confirmed" -- distinct from False/"confirmed
+    unsigned"; verify_consent_signatures treats the two differently), recorded
+    as an AdapterWarning, not silently.
     """
     warnings = warnings if warnings is not None else []
     extracted = extracted_by_template.get("Consent Form")
@@ -597,115 +696,110 @@ def build_consent_form_docs(
 
     entity_name = _safe_str(extracted.get("Entity Name"), warnings=warnings, document_type="consent_form",
                              document_id=document_id, field="Entity Name")
-    rows = _safe_list(extracted.get("Directors"), warnings=warnings,
-                      document_type="consent_form", document_id=document_id, field="Directors")
+    # Live template row_group is "Applicants"; fall back to "Directors" for
+    # older extraction output.
+    row_group_key = "Applicants" if "Applicants" in extracted else "Directors"
+    rows = _safe_list(extracted.get(row_group_key), warnings=warnings,
+                      document_type="consent_form", document_id=document_id, field=row_group_key)
 
-    if signature_present is None:
-        warnings.append(AdapterWarning(
-            document_type="consent_form", document_id=document_id,
-            field="signature_present",
-            message="No signature_present override supplied and no source attribute exists "
-                    "on the Consent Form template -- left as null (not confirmed either way).",
-            current_state="no signal available (null -- not confirmed, not denied)",
-            expected_state="true if a captured signature was confirmed, false if confirmed absent",
-        ))
-
-    return [
-        ConsentFormDoc(
+    docs = []
+    for i, row in enumerate(rows):
+        row = row or {}
+        row_signature = _safe_bool(
+            row.get("Consent Form Signature"), warnings=warnings, document_type="consent_form",
+            document_id=f"consent_form_{i}", field=f"{row_group_key}[{i}].Consent Form Signature",
+            default=None,  # null stays "not confirmed", never a silent False
+        )
+        docs.append(ConsentFormDoc(
             document_id=f"consent_form_{i}",
             document_type="consent_form",
             provenance=DocumentProvenance(source_template="Consent Form"),
             data=ConsentFormData(
                 entity_name=entity_name,
-                individual_name=_safe_str((row or {}).get("Director Name"), warnings=warnings, document_type="consent_form",
-                                           document_id=f"consent_form_{i}", field=f"Directors[{i}].Director Name"),
-                nric_passport=_safe_str((row or {}).get("Director NRIC or Passport Number"), warnings=warnings, document_type="consent_form",
-                                         document_id=f"consent_form_{i}", field=f"Directors[{i}].Director NRIC or Passport Number"),
+                individual_name=_safe_str(row.get("Director Name"), warnings=warnings, document_type="consent_form",
+                                           document_id=f"consent_form_{i}", field=f"{row_group_key}[{i}].Director Name"),
+                nric_passport=_safe_str(row.get("Director NRIC or Passport Number"), warnings=warnings, document_type="consent_form",
+                                         document_id=f"consent_form_{i}", field=f"{row_group_key}[{i}].Director NRIC or Passport Number"),
                 position=None,
-                signature_present=signature_present,  # stays None if not confirmed either way
+                signature_present=row_signature,
             ),
-        )
-        for i, row in enumerate(rows)
-    ]
+        ))
+    return docs
 
 
-# ── Customer information / Application Details ───────────────────────────────
+# ── Customer information ─────────────────────────────────────────────────────
+
+# Customer Information Form template -> CustomerInfoData field mapping.
+# model field: extraction attribute name.
+_CUSTOMER_INFO_DIRECTOR_FIELDS = {
+    "name": "Director Name",
+    "address": "Director Address",
+    "email": "Director Email Address",
+    "religion": "Director Religion",
+    "marital_status": "Director Marital Status",
+    "estimated_monthly_income": "Director Estimated Monthly Income",
+    "experience_in_current_business": "Director Experience in Current Business",
+    "higher_education": "Director Higher Education",
+    "emergency_contact_name": "Director Emergency Contact Name",
+    "emergency_contact_number": "Director Emergency Contact Number",
+    "emergency_contact_relationship": "Director Emergency Contact Relationship",
+    "spouse_name": "Director Spouse Name",
+    "spouse_contact_number": "Director Spouse Contact Number",
+}
+_CUSTOMER_INFO_COMPANY_FIELDS = {
+    "company_age": "Company Age",
+    "company_number_of_staff": "Company Number of Staff",
+    "company_current_office_address": "Company Current Office Address",
+    "company_office_status": "Company Office Status",
+    "company_office_monthly_rent": "Company Office Monthly Rent",
+    "company_office_telephone": "Company Office Telephone",
+    "company_email_address": "Company Email Address",
+    "company_auditor_firm_name": "Company Auditor Firm Name",
+    "company_auditor_contact_person": "Company Auditor Contact Person",
+    "company_auditor_contact_number": "Company Auditor Contact Number",
+}
+
 
 def build_customer_information_doc(
     extracted_by_template: dict[str, dict],
     *,
-    tenure_months: Optional[int] = None,
-    repayment_frequency: Optional[str] = None,
     warnings: Optional[list[AdapterWarning]] = None,
 ) -> Optional[CustomerInfoDoc]:
-    """CustomerInfoDoc built from the "Application Details" template (not
-    "Customer Information Form", despite the name -- see the extraction ->
-    validation assessment: main contact / financing fields live on
-    Application Details).
+    """CustomerInfoDoc built from the "Customer Information Form" template --
+    director personal particulars (one row per director) plus company info.
 
-    GAP: no "tenure_months" or "repayment_frequency" attribute exists on
-    Application Details -- both are required (non-Optional) fields on
-    CustomerInfoData. If not supplied, defaults to 0 / "Unknown" and
-    records an AdapterWarning rather than blocking bundle construction.
+    Null fields are coerced to "" here (not warned per-field): the
+    verify_customer_information_completeness rule is the single place that
+    reports which fields are unfilled, so the adapter doesn't also flood
+    adapter_warnings with one entry per blank cell.
     """
     warnings = warnings if warnings is not None else []
-    extracted = extracted_by_template.get("Application Details")
+    extracted = extracted_by_template.get("Customer Information Form")
     if not extracted:
         return None
     document_id = "customer_information"
 
-    if tenure_months is None:
-        warnings.append(AdapterWarning(
-            document_type="customer_information", document_id=document_id,
-            field="tenure_months",
-            message="No tenure_months override supplied and no source attribute exists "
-                    "on Application Details -- defaulted to 0.",
-            current_state="no signal available (defaulted to 0)",
-            expected_state="the requested financing tenure in months",
-        ))
-        tenure_months = 0
-    if repayment_frequency is None:
-        warnings.append(AdapterWarning(
-            document_type="customer_information", document_id=document_id,
-            field="repayment_frequency",
-            message="No repayment_frequency override supplied and no source attribute exists "
-                    "on Application Details -- defaulted to \"Unknown\".",
-            current_state="no signal available (defaulted to \"Unknown\")",
-            expected_state="e.g. \"Monthly\", \"Quarterly\"",
-        ))
-        repayment_frequency = "Unknown"
+    def blank(value: object) -> str:
+        return "" if value is None else str(value)
 
-    # Main contacts are one correlated object per contact ("Main Contacts"
-    # row_group), so name/email/phone stay aligned; fan them back out into the
-    # three parallel lists CustomerInfoData expects.
-    contact_rows = _safe_list(extracted.get("Main Contacts"), warnings=warnings,
-                              document_type="customer_information", document_id=document_id, field="Main Contacts")
+    director_rows = _safe_list(extracted.get("Directors"), warnings=warnings,
+                               document_type="customer_information", document_id=document_id, field="Directors")
+    directors = [
+        CustomerInfoDirector(**{
+            model_field: blank((row or {}).get(attr))
+            for model_field, attr in _CUSTOMER_INFO_DIRECTOR_FIELDS.items()
+        })
+        for row in director_rows
+    ]
 
     return CustomerInfoDoc(
         document_id=document_id,
         document_type="customer_information",
-        provenance=DocumentProvenance(source_template="Application Details"),
+        provenance=DocumentProvenance(source_template="Customer Information Form"),
         data=CustomerInfoData(
-            main_contact_names=[_safe_str((r or {}).get("Main Contact Name"), warnings=warnings,
-                                          document_type="customer_information", document_id=document_id,
-                                          field=f"Main Contacts[{i}].Main Contact Name")
-                                for i, r in enumerate(contact_rows)],
-            main_contact_emails=[_safe_str((r or {}).get("Main Contact Email"), warnings=warnings,
-                                           document_type="customer_information", document_id=document_id,
-                                           field=f"Main Contacts[{i}].Main Contact Email")
-                                 for i, r in enumerate(contact_rows)],
-            main_contact_phone_numbers=[_safe_str((r or {}).get("Main Contact Phone Number"), warnings=warnings,
-                                                  document_type="customer_information", document_id=document_id,
-                                                  field=f"Main Contacts[{i}].Main Contact Phone Number")
-                                        for i, r in enumerate(contact_rows)],
-            financing_amount=_safe_float(extracted.get("Proposed Financing Amount"), warnings=warnings,
-                                          document_type="customer_information", document_id=document_id,
-                                          field="Proposed Financing Amount"),
-            product_type=_safe_str(extracted.get("Proposed Program"), warnings=warnings,
-                                    document_type="customer_information", document_id=document_id,
-                                    field="Proposed Program"),
-            tenure_months=tenure_months,
-            repayment_frequency=repayment_frequency,
+            directors=directors,
+            **{model_field: blank(extracted.get(attr))
+               for model_field, attr in _CUSTOMER_INFO_COMPANY_FIELDS.items()},
         ),
     )
 
@@ -718,9 +812,6 @@ def build_validation_bundle(
     bundle_id: Optional[str] = None,
     system_date: Optional[date] = None,
     entity_type: Optional[str] = None,
-    tenure_months: Optional[int] = None,
-    repayment_frequency: Optional[str] = None,
-    signature_present: Optional[bool] = None,
     tax_declaration_entity_name: Optional[str] = None,
     tax_declaration_fye_dates: Optional[list[str]] = None,
 ) -> AdapterResult:
@@ -742,13 +833,10 @@ def build_validation_bundle(
     blocks bundle construction.
 
     `bundle_id`/`system_date` default to a generated id / today's date if
-    omitted. `entity_type` is read from `extracted_by_template["Application
-    Details"]["Business Entity Type"]` when not passed explicitly (see
-    build_ssm_corporate_docs). `tenure_months`/`repayment_frequency`/
-    `signature_present`/`tax_declaration_*` have no source in extraction at
-    all yet (see each build_* function's docstring for the specific gap and
-    the attribute to add) and default to conservative placeholders with a
-    warning when omitted.
+    omitted. `entity_type` has no source attribute in extraction and must be
+    passed explicitly (see build_ssm_corporate_docs); `tax_declaration_*` have
+    no extraction source yet. Each defaults to a conservative placeholder with
+    a warning when omitted.
     """
     warnings: list[AdapterWarning] = []
     bundle_id = bundle_id or f"bundle-{uuid4()}"
@@ -772,17 +860,14 @@ def build_validation_bundle(
         *tax_declaration_docs,
         *build_financial_statement_docs(extracted_by_template, entity_name=entity_name, warnings=warnings),
         *build_identity_documents(extracted_by_template, warnings=warnings),
-        *build_consent_form_docs(extracted_by_template, signature_present=signature_present, warnings=warnings),
+        *build_consent_form_docs(extracted_by_template, warnings=warnings),
     ]
 
     bank_doc = build_bank_statement_doc(extracted_by_template, entity_name=entity_name, warnings=warnings)
     if bank_doc:
         documents.append(bank_doc)
 
-    customer_info_doc = build_customer_information_doc(
-        extracted_by_template, tenure_months=tenure_months, repayment_frequency=repayment_frequency,
-        warnings=warnings,
-    )
+    customer_info_doc = build_customer_information_doc(extracted_by_template, warnings=warnings)
     if customer_info_doc:
         documents.append(customer_info_doc)
 

@@ -21,29 +21,11 @@ from services.validation.rules import (
     person_similarity,
     strict_match_entity_names,
     strict_match_ic_numbers,
+    verify_customer_information_completeness,
     verify_bank_statement_duration,
+    verify_consent_signatures,
     verify_financial_sections_present,
-    verify_ssm_completeness,
 )
-
-
-class TestVerifySsmCompleteness:
-    def test_sdn_bhd_all_forms_present(self):
-        result = verify_ssm_completeness("Sdn Bhd", ["form_24", "form_44", "form_49"])
-        assert result["passed"] is True
-
-    def test_sdn_bhd_missing_form(self):
-        result = verify_ssm_completeness("Sdn Bhd", ["form_24", "form_44"])
-        assert result["passed"] is False
-        assert result["details"]["missing_forms"] == ["form_49"]
-
-    def test_sole_proprietor_uses_form_b_and_d(self):
-        result = verify_ssm_completeness("Sole Proprietor", ["form_b", "form_d"])
-        assert result["passed"] is True
-
-    def test_entity_type_matching_is_case_insensitive(self):
-        result = verify_ssm_completeness("  sdn bhd  ", ["form_24", "form_44", "form_49"])
-        assert result["passed"] is True
 
 
 class TestVerifyFinancialSectionsPresent:
@@ -131,6 +113,44 @@ class TestCheckIcFrontAndBack:
         result = check_ic_front_and_back(
             [{"individual_name": "A", "nric_passport": "1", "front_image_present": False, "back_image_present": None}]
         )
+        assert result["passed"] is False
+
+
+class TestVerifyConsentSignatures:
+    def test_signed_consent_for_everyone(self):
+        ssm_people = [{"name": "A", "nric_passport": "1"}]
+        consent_forms = [{"nric_passport": "1", "signature_present": True}]
+        result = verify_consent_signatures(ssm_people, consent_forms)
+        assert result["passed"] is True
+
+    def test_missing_consent_form(self):
+        ssm_people = [{"name": "A", "nric_passport": "1"}]
+        result = verify_consent_signatures(ssm_people, [])
+        assert result["passed"] is False
+        assert len(result["details"]["missing_consent"]) == 1
+        assert result["details"]["unsigned_consent"] == []
+
+    def test_unsigned_consent_form(self):
+        ssm_people = [{"name": "A", "nric_passport": "1"}]
+        consent_forms = [{"nric_passport": "1", "signature_present": False}]
+        result = verify_consent_signatures(ssm_people, consent_forms)
+        assert result["passed"] is False
+        assert len(result["details"]["unsigned_consent"]) == 1
+
+    def test_unconfirmed_signature_is_needs_review_not_failed(self):
+        # null ("not confirmed either way") must NOT be treated the same as
+        # False ("confirmed unsigned") -- this is the tri-state fix.
+        ssm_people = [{"name": "A", "nric_passport": "1"}]
+        consent_forms = [{"nric_passport": "1", "signature_present": None}]
+        result = verify_consent_signatures(ssm_people, consent_forms)
+        assert result["passed"] is None
+        assert result["details"]["unsigned_consent"] == []
+        assert len(result["details"]["unconfirmed_consent"]) == 1
+
+    def test_missing_form_outranks_unconfirmed(self):
+        ssm_people = [{"name": "A", "nric_passport": "1"}, {"name": "B", "nric_passport": "2"}]
+        consent_forms = [{"nric_passport": "1", "signature_present": None}]  # B has no form at all
+        result = verify_consent_signatures(ssm_people, consent_forms)
         assert result["passed"] is False
 
 
@@ -349,3 +369,54 @@ class TestCheckBankStatementCurrency:
         result = check_bank_statement_currency(["MYR", None], accepted_currency="MYR")
         assert result["passed"] is None
         assert result["details"]["documents_with_unknown_currency"] == 1
+
+
+def _full_customer_info():
+    director = {
+        "name": "AIMAN", "address": "ADDR", "email": "a@x.my", "religion": "Islam",
+        "marital_status": "Married", "estimated_monthly_income": "15000",
+        "experience_in_current_business": "10 years", "higher_education": "Degree",
+        "emergency_contact_name": "ZUL", "emergency_contact_number": "+60123456781",
+        "emergency_contact_relationship": "Father", "spouse_name": "SITI",
+        "spouse_contact_number": "+60123456780",
+    }
+    return {
+        "directors": [director],
+        "company_age": "3 years", "company_number_of_staff": "12",
+        "company_current_office_address": "OFFICE", "company_office_status": "Rented",
+        "company_office_monthly_rent": "4500", "company_office_telephone": "+60341234567",
+        "company_email_address": "info@x.my", "company_auditor_firm_name": "AZMAN & CO",
+        "company_auditor_contact_person": "AZMAN", "company_auditor_contact_number": "+60341239999",
+    }
+
+
+class TestVerifyCustomerInformationCompleteness:
+    def test_all_fields_present_passes(self):
+        result = verify_customer_information_completeness(_full_customer_info())
+        assert result["passed"] is True
+
+    def test_missing_company_field_fails(self):
+        data = _full_customer_info()
+        data["company_office_status"] = ""
+        result = verify_customer_information_completeness(data)
+        assert result["passed"] is False
+        assert "Company Office Status" in result["details"]["missing_fields"]
+
+    def test_missing_director_field_fails(self):
+        data = _full_customer_info()
+        data["directors"][0]["spouse_name"] = ""
+        result = verify_customer_information_completeness(data)
+        assert result["passed"] is False
+        assert "Director[0] Director Spouse Name" in result["details"]["missing_fields"]
+
+    def test_no_directors_fails(self):
+        data = _full_customer_info()
+        data["directors"] = []
+        result = verify_customer_information_completeness(data)
+        assert result["passed"] is False
+
+    def test_all_fields_missing_fails(self):
+        result = verify_customer_information_completeness({})
+        assert result["passed"] is False
+        # 10 company fields + the "no directors" entry
+        assert len(result["details"]["missing_fields"]) == 11

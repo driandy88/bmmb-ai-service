@@ -10,6 +10,13 @@
         "Entity Name": "ALPHA TECH SOLUTIONS SDN BHD",
         "Business Registration Number": "202301098765",
         "Entity Type": "Sdn Bhd",
+        "Directors": [
+          {
+            "Name": "MOHD AIMAN BIN ZULKIFLI",
+            "NRIC/Passport": "880214-14-5123",
+            "Position": "Director"
+          }
+        ],
         "Shareholders": [
           {
             "Name": "MOHD AIMAN BIN ZULKIFLI",
