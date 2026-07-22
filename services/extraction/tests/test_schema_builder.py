@@ -14,7 +14,7 @@ leaves one behind -- which must not fail *these* tests too.
 import pytest
 
 from app.config import TemplateNotFoundError, get_template, list_templates
-from app.schema_builder import build_gemini_schema, generate_extraction_prompt
+from app.schema_builder import build_gemini_schema, generate_extraction_prompt, reshape_locations
 
 _SEEDED_TEMPLATE_NAMES = {
     "Company Act Section 14", "SSM Form 24", "SSM Form 44", "SSM Form 49",
@@ -171,6 +171,82 @@ class TestFieldTypeMapping:
         schema = build_gemini_schema(COMPANY_ACT_SECTION_14)
         loc = schema["properties"]["_locations"]["properties"]["MISC Code"]
         assert set(loc["properties"]) == {"real_page", "shown_page", "section", "document"}
+
+
+class TestRowGroupLocations:
+    def test_row_group_location_is_a_per_row_list(self, monkeypatch):
+        # A row_group's provenance is a LIST (one entry per row), not a single
+        # location object like an ungrouped field -- each row can come from a
+        # different file/page.
+        schema = _schema_from_attrs(monkeypatch, [
+            _ta("Financial Statement Date", "Datetime", "Multiple", row_group="Financials By Year"),
+            _ta("Revenue", "Numeric", "Multiple", row_group="Financials By Year"),
+        ])
+        loc = schema["properties"]["_locations"]["properties"]["Financials By Year"]
+        assert loc["type"] == "ARRAY"
+        item = loc["items"]
+        assert item["type"] == "OBJECT"
+        # a `_row_key` to match the entry back to its data row, plus a full
+        # location object per column
+        assert set(item["properties"]) == {"_row_key", "Financial Statement Date", "Revenue"}
+        assert item["properties"]["_row_key"]["type"] == "STRING"
+        assert set(item["properties"]["Revenue"]["properties"]) == {
+            "real_page", "shown_page", "section", "document"}
+
+    def test_ungrouped_field_location_stays_a_single_object(self, monkeypatch):
+        schema = _schema_from_attrs(monkeypatch, [_ta("Some Field", "Alphanumeric", "Unique")])
+        loc = schema["properties"]["_locations"]["properties"]["Some Field"]
+        assert loc["type"] == "OBJECT"
+        assert set(loc["properties"]) == {"real_page", "shown_page", "section", "document"}
+
+
+class TestReshapeLocations:
+    def _use_group(self, monkeypatch, group, columns):
+        """Point schema_builder.get_template at a synthetic row_group template so
+        reshape_locations can resolve the group name without a live DB."""
+        attrs = [_ta(c, "Numeric", "Multiple", row_group=group) for c in columns]
+        tmpl = {"id": "synthetic", "name": "Synthetic", "description": "",
+                "group_name": None, "llm_prompt": None, "template_attributes": attrs}
+        monkeypatch.setattr("app.schema_builder.get_template", lambda _id: tmpl)
+
+    def test_folds_list_into_dict_keyed_by_row_key(self, monkeypatch):
+        self._use_group(monkeypatch, "Financials By Year", ["Financial Statement Date", "Revenue"])
+        result = {"_locations": {"Financials By Year": [
+            {"_row_key": "31-12-2024",
+             "Financial Statement Date": {"real_page": 15, "shown_page": "12", "section": "SOFP", "document": "a.pdf"},
+             "Revenue": {"real_page": 16, "shown_page": "13", "section": "P&L", "document": "a.pdf"}},
+            {"_row_key": "31-12-2023",
+             "Revenue": {"real_page": 16, "shown_page": "13", "section": "P&L", "document": "a.pdf"}},
+        ]}}
+        locs = reshape_locations(result, "synthetic")["_locations"]["Financials By Year"]
+        assert set(locs) == {"31-12-2024", "31-12-2023"}
+        assert locs["31-12-2024"]["Revenue"]["real_page"] == 16
+        assert "_row_key" not in locs["31-12-2024"]  # consumed as the key, not left in the block
+
+    def test_drops_null_cell_locations(self, monkeypatch):
+        self._use_group(monkeypatch, "G", ["A", "B"])
+        result = {"_locations": {"G": [{"_row_key": "k", "A": {"real_page": 1}, "B": None}]}}
+        locs = reshape_locations(result, "synthetic")["_locations"]["G"]
+        assert set(locs["k"]) == {"A"}  # the null B location is dropped, not kept as noise
+
+    def test_missing_row_key_falls_back_to_position(self, monkeypatch):
+        self._use_group(monkeypatch, "G", ["A"])
+        result = {"_locations": {"G": [{"A": {"real_page": 1}}, {"A": {"real_page": 2}}]}}
+        locs = reshape_locations(result, "synthetic")["_locations"]["G"]
+        assert set(locs) == {"row_1", "row_2"}
+
+    def test_duplicate_row_keys_are_disambiguated(self, monkeypatch):
+        self._use_group(monkeypatch, "G", ["A"])
+        result = {"_locations": {"G": [
+            {"_row_key": "dup", "A": {"real_page": 1}},
+            {"_row_key": "dup", "A": {"real_page": 2}},
+        ]}}
+        locs = reshape_locations(result, "synthetic")["_locations"]["G"]
+        assert set(locs) == {"dup", "dup (2)"}
+
+    def test_noop_when_no_locations(self, monkeypatch):
+        self._use_group(monkeypatch, "G", ["A"])
+        assert reshape_locations({"mocked": True}, "synthetic") == {"mocked": True}
 
 
 class TestPrompt:

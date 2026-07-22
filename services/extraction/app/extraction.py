@@ -2,7 +2,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.config import TemplateNotFoundError, get_template
 from app.gemini_client import GeminiCallError, GeminiConfigError, GeminiParseError, run_extraction
-from app.schema_builder import build_gemini_schema, generate_extraction_prompt
+from app.schema_builder import build_gemini_schema, generate_extraction_prompt, reshape_locations
 from app.schemas import ApiResponse
 
 router = APIRouter(tags=["Extraction"])
@@ -72,6 +72,11 @@ async def extract_document(
         raise HTTPException(status_code=502, detail=f"Gemini API error: {exc}")
     except GeminiParseError as exc:
         raise HTTPException(status_code=502, detail=f"Failed to parse Gemini response: {exc}")
+
+    # Fold each row_group's per-row `_locations` list into a dict keyed by the
+    # row's identifying value (e.g. Financial Statement Date) -- the shape the
+    # schema can't declare directly. No-op for templates without row_groups.
+    extracted = reshape_locations(extracted, template_id)
 
     return ApiResponse(data={
         "template_id": template_id,

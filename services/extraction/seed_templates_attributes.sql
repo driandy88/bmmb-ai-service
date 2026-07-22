@@ -341,7 +341,13 @@ Fields to extract:
    - Financing Cost  |  Type: Numeric — e.g. 197100
        Interest and profit-sharing charges on borrowings, labelled ''Finance Costs'', ''Interest Expense'', or, for Islamic facilities, ''Profit Expense'' / ''Financing Cost''. Sits between Operating Profit and Profit Before Tax. Store as a positive number. Exclude interest income, which belongs in Other Income. Financial statements present two or three comparative year columns side by side; extract one value per year column and keep it aligned with the corresponding Financial Statement Date. Figures in parentheses are negative. If the statement is presented in thousands (RM''000), multiply by 1,000 before storing.
 
-For each field above, also populate its entry in _locations with:
+Also populate _locations to record where each value was read from:
+  - For each ungrouped field, set _locations[<field name>] to one location object.
+  - For each repeating group, set _locations[<group name>] to a LIST with one entry per
+    extracted row, in the same order as the rows. Each entry has `_row_key` — a copy of
+    that row''s identifying value (for financial statements, its Financial Statement Date),
+    so it can be matched to its row — plus one location object per column.
+Each location object has:
   real_page  — the actual sequential page number of the source document/PDF file, counting the
                first page as 1 regardless of any printed page numbers or cover/title pages
                (null if unknown). This is used to jump to the right page in the file.
