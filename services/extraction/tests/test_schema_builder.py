@@ -118,14 +118,17 @@ class TestSchemaShape:
 
 
 class TestRequiredKeys:
-    def test_top_level_data_fields_required_locations_optional(self):
-        # Every data field/group is required (so its key is always emitted),
-        # but the advisory _locations metadata block is left optional.
+    def test_data_fields_and_locations_all_required(self):
+        # Data fields, the _locations block, and every entry inside it are all
+        # required so their keys are always emitted (leaf page/section values stay
+        # nullable). _locations used to be optional, but the model routinely
+        # skipped it, so provenance came back missing.
         schema = build_gemini_schema(BANK_STATEMENTS)
         required = set(schema["required"])
-        data_fields = set(schema["properties"]) - {"_locations"}
-        assert required == data_fields
-        assert "_locations" not in required
+        assert required == set(schema["properties"])   # everything, including _locations
+        assert "_locations" in required
+        loc = schema["properties"]["_locations"]
+        assert set(loc["required"]) == set(loc["properties"])  # every field/group entry required
 
     def test_row_group_columns_all_required(self):
         schema = build_gemini_schema(BANK_STATEMENTS)
@@ -191,6 +194,10 @@ class TestRowGroupLocations:
         assert set(item["properties"]) == {"_row_key", "Financial Statement Date", "Revenue"}
         assert item["properties"]["_row_key"]["type"] == "STRING"
         assert set(item["properties"]["Revenue"]["properties"]) == {
+            "real_page", "shown_page", "section", "document"}
+        # required so the model emits a fully-shaped location per row, not a skip
+        assert set(item["required"]) == set(item["properties"])
+        assert set(item["properties"]["Revenue"]["required"]) == {
             "real_page", "shown_page", "section", "document"}
 
     def test_ungrouped_field_location_stays_a_single_object(self, monkeypatch):
