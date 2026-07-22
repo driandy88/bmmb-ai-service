@@ -23,7 +23,9 @@ def _scalar_schema(data_type: str) -> dict:
 def _location_schema() -> dict:
     """One {real_page, shown_page, section, document} slot per field/group,
     so the caller can point a document preview at the page a value was
-    actually read from."""
+    actually read from. All four keys are required (so they're always emitted)
+    but nullable (so the model writes explicit null for anything it can't
+    determine, rather than guessing)."""
     return {
         "type": "OBJECT",
         "nullable": True,
@@ -33,6 +35,7 @@ def _location_schema() -> dict:
             "section": {"type": "STRING", "nullable": True},
             "document": {"type": "STRING", "nullable": True},
         },
+        "required": ["real_page", "shown_page", "section", "document"],
     }
 
 
@@ -79,9 +82,12 @@ def build_gemini_schema(template_id: str) -> dict:
     point: feed in several years of statements and each year's figures sit in a
     different file, and within one year Revenue, Total Equity and Depreciation
     sit on different pages -- one location for the whole group (or whole row) can
-    only ever be right for one field. All location metadata is optional (not
-    required) so a required key never nudges the model to invent a page number it
-    couldn't find.
+    only ever be right for one field. `_locations` and every entry inside it are
+    marked `required` (leaf page/section values stay nullable): left optional, the
+    model routinely skipped the whole block, so provenance came back missing even
+    when it was clearly readable. Required + nullable forces the keys to appear --
+    filled where the model can, explicit null where it can't -- the same trick the
+    data fields use.
     """
     tmpl = get_template(template_id)
     ungrouped, grouped = _partition(tmpl["template_attributes"])
@@ -112,20 +118,28 @@ def build_gemini_schema(template_id: str) -> dict:
         location_props[group_name] = {
             "type": "ARRAY",
             "nullable": True,
-            "items": {"type": "OBJECT", "properties": loc_row_props},
+            # Require every key in each row's location entry (leaves stay nullable)
+            # so the model emits one fully-shaped entry per row instead of skipping.
+            "items": {"type": "OBJECT", "properties": loc_row_props, "required": list(loc_row_props)},
         }
 
-    # Captured before adding _locations so the metadata block stays optional.
     data_fields = list(properties)
+    required = list(data_fields)
 
     if location_props:
         properties["_locations"] = {
             "type": "OBJECT",
             "nullable": True,
             "properties": location_props,
+            # Require _locations and each field/group entry inside it. Left
+            # optional, the model routinely returned the whole block with only a
+            # couple of entries filled; requiring the keys (leaves stay nullable)
+            # forces provenance to be emitted for every value.
+            "required": list(location_props),
         }
+        required.append("_locations")
 
-    return {"type": "OBJECT", "properties": properties, "required": data_fields}
+    return {"type": "OBJECT", "properties": properties, "required": required}
 
 
 def reshape_locations(result: dict, template_id: str) -> dict:
