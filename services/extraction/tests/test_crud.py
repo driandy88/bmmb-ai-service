@@ -114,10 +114,10 @@ class TestAttributeCRUD:
         assert r.status_code == 404
 
     def test_delete_attribute_in_use_409(self):
-        # "MISC Code" is wired to the seeded "Company Act Section 14"
+        # "MSIC Code" is wired to the seeded "Company Act Section 14"
         # template -- must refuse deletion, not silently orphan it.
-        misc_code_id = next(a["id"] for a in client.get("/attributes/").json() if a["name"] == "MISC Code")
-        r = client.delete(f"/attributes/{misc_code_id}", headers=AUTH_HEADERS)
+        msic_code_id = next(a["id"] for a in client.get("/attributes/").json() if a["name"] == "MSIC Code")
+        r = client.delete(f"/attributes/{msic_code_id}", headers=AUTH_HEADERS)
         assert r.status_code == 409
         assert "Company Act Section 14" in r.json()["detail"]
 

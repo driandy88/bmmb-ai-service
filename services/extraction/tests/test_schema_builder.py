@@ -153,7 +153,7 @@ class TestFieldTypeMapping:
 
     def test_alphanumeric_maps_to_STRING(self):
         schema = build_gemini_schema(COMPANY_ACT_SECTION_14)
-        assert schema["properties"]["MISC Code"]["type"] == "STRING"
+        assert schema["properties"]["MSIC Code"]["type"] == "STRING"
 
     def test_all_fields_nullable(self):
         schema = build_gemini_schema(CUSTOMER_INFORMATION_FORM)
@@ -169,7 +169,7 @@ class TestFieldTypeMapping:
 
     def test_location_schema_has_all_four_keys(self):
         schema = build_gemini_schema(COMPANY_ACT_SECTION_14)
-        loc = schema["properties"]["_locations"]["properties"]["MISC Code"]
+        loc = schema["properties"]["_locations"]["properties"]["MSIC Code"]
         assert set(loc["properties"]) == {"real_page", "shown_page", "section", "document"}
 
 
