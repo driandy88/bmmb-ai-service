@@ -5,7 +5,7 @@
 BEGIN;
 
 -- attributes: 79 rows
-INSERT INTO attributes (id, name, description, data_type, example) VALUES (1, 'MISC Code', 'The MISC (Malaysian Industry Standard Classification) code assigned to the entity, typically appearing as a 5-digit numeric code near the business/objects clause of the Company Act Section 14 statement. May be labelled ''MISC Code'', ''MSIC Code'' or appear beside the nature-of-business description. Extract the digits only, without any label or surrounding brackets.', 'alphanumeric', '12345');
+INSERT INTO attributes (id, name, description, data_type, example) VALUES (1, 'MSIC Code', 'The MISC (Malaysian Industry Standard Classification) code assigned to the entity, typically appearing as a 5-digit numeric code near the business/objects clause of the Company Act Section 14 statement. May be labelled ''MISC Code'', ''MSIC Code'' or appear beside the nature-of-business description. Extract the digits only, without any label or surrounding brackets.', 'alphanumeric', '12345');
 INSERT INTO attributes (id, name, description, data_type, example) VALUES (2, 'Business Description', 'The full narrative description of the company''s objects/business activities as stated in the Company Act Section 14 declaration. Usually one or more long paragraphs following a phrase such as ''the objects for which the company is established are''. Capture the entire paragraph(s) verbatim, preserving line breaks; do not summarise or truncate.', 'alphanumeric', 'To carry on the business of general cleaning of buildings, including the provision of ... (long text paragraph)');
 INSERT INTO attributes (id, name, description, data_type, example) VALUES (3, 'Entity Name', 'The registered legal name of the company exactly as printed on the form, typically in the header block beside ''Name of Company'' / ''Nama Syarikat''. Retain the full suffix and punctuation as printed (e.g. ''SDN. BHD.'', ''BHD.''). Extract only the subject company, not the names of any other companies mentioned as shareholders or agents.', 'alphanumeric', 'AJS MAJU SERVICES SDN. BHD.');
 INSERT INTO attributes (id, name, description, data_type, example) VALUES (4, 'Business Registration Number', 'The company registration number issued by SSM, labelled as ''Registration No.'', ''No. Pendaftaran'', or ''Company No.'' Modern format is a 12-digit number followed by the legacy number in brackets, e.g. 201401032382(1108466-M). Older documents may show only the legacy format (e.g. 1108466-M). Extract the value exactly as printed including brackets and hyphens.', 'alphanumeric', '201401032382(1108466-M)');
@@ -114,7 +114,7 @@ Document description: A statutory statement made under Section 14 of the Compani
 
 Fields to extract:
 
-1. MISC Code  |  Type: Alphanumeric — e.g. 12345
+1. MSIC Code  |  Type: Alphanumeric — e.g. 12345
    The MISC (Malaysian Industry Standard Classification) code assigned to the entity, typically appearing as a 5-digit numeric code near the business/objects clause of the Company Act Section 14 statement. May be labelled ''MISC Code'', ''MSIC Code'' or appear beside the nature-of-business description. Extract the digits only, without any label or surrounding brackets.
 2. Business Description  |  Type: Alphanumeric — e.g. To carry on the business of general cleaning of buildings, including the provision of ... (long text paragraph)
    The full narrative description of the company''s objects/business activities as stated in the Company Act Section 14 declaration. Usually one or more long paragraphs following a phrase such as ''the objects for which the company is established are''. Capture the entire paragraph(s) verbatim, preserving line breaks; do not summarise or truncate.
@@ -341,7 +341,13 @@ Fields to extract:
    - Financing Cost  |  Type: Numeric — e.g. 197100
        Interest and profit-sharing charges on borrowings, labelled ''Finance Costs'', ''Interest Expense'', or, for Islamic facilities, ''Profit Expense'' / ''Financing Cost''. Sits between Operating Profit and Profit Before Tax. Store as a positive number. Exclude interest income, which belongs in Other Income. Financial statements present two or three comparative year columns side by side; extract one value per year column and keep it aligned with the corresponding Financial Statement Date. Figures in parentheses are negative. If the statement is presented in thousands (RM''000), multiply by 1,000 before storing.
 
-For each field above, also populate its entry in _locations with:
+Also populate _locations to record where each value was read from:
+  - For each ungrouped field, set _locations[<field name>] to one location object.
+  - For each repeating group, set _locations[<group name>] to a LIST with one entry per
+    extracted row, in the same order as the rows. Each entry has `_row_key` — a copy of
+    that row''s identifying value (for financial statements, its Financial Statement Date),
+    so it can be matched to its row — plus one location object per column.
+Each location object has:
   real_page  — the actual sequential page number of the source document/PDF file, counting the
                first page as 1 regardless of any printed page numbers or cover/title pages
                (null if unknown). This is used to jump to the right page in the file.

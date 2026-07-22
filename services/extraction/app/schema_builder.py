@@ -68,10 +68,20 @@ def build_gemini_schema(template_id: str) -> dict:
     raw JSON row-by-row and field-by-field. Row_group row-objects require every
     column for the same reason.
 
-    Every top-level field/group also carries a sibling `_locations` entry so a
-    document viewer can jump straight to where a value was read from. That
-    metadata is left optional (not required) so a required key never nudges the
-    model to invent a page number where it genuinely couldn't find one.
+    Provenance lives in a sibling `_locations` block so a document viewer can
+    jump straight to where a value was read from. Each ungrouped field gets one
+    location object there. A row_group instead gets a LIST under
+    `_locations[group]` -- one entry per row, in row order, each carrying a
+    `_row_key` (a copy of that row's identifying value, e.g. its Financial
+    Statement Date) plus one location per column. reshape_locations() later folds
+    that list into a dict keyed by `_row_key`, so the caller reads
+    `_locations[group][<row key>][<column>]`. Per-VALUE, per-row provenance is the
+    point: feed in several years of statements and each year's figures sit in a
+    different file, and within one year Revenue, Total Equity and Depreciation
+    sit on different pages -- one location for the whole group (or whole row) can
+    only ever be right for one field. All location metadata is optional (not
+    required) so a required key never nudges the model to invent a page number it
+    couldn't find.
     """
     tmpl = get_template(template_id)
     ungrouped, grouped = _partition(tmpl["template_attributes"])
@@ -91,7 +101,19 @@ def build_gemini_schema(template_id: str) -> dict:
             "nullable": True,
             "items": {"type": "OBJECT", "properties": row_props, "required": list(row_props)},
         }
-        location_props[group_name] = _location_schema()
+        # Per-row provenance: a list parallel to the rows above. Gemini's schema
+        # can't declare a dict keyed by a runtime date, so the model emits a list
+        # and reshape_locations() keys it by `_row_key` afterwards. Each entry
+        # carries `_row_key` (copy of the row's identifying value, for matching)
+        # plus one location per column. All optional so an un-locatable row emits.
+        loc_row_props = {"_row_key": {"type": "STRING", "nullable": True}}
+        for m in members:
+            loc_row_props[m["attribute"]["name"]] = _location_schema()
+        location_props[group_name] = {
+            "type": "ARRAY",
+            "nullable": True,
+            "items": {"type": "OBJECT", "properties": loc_row_props},
+        }
 
     # Captured before adding _locations so the metadata block stays optional.
     data_fields = list(properties)
@@ -104,6 +126,45 @@ def build_gemini_schema(template_id: str) -> dict:
         }
 
     return {"type": "OBJECT", "properties": properties, "required": data_fields}
+
+
+def reshape_locations(result: dict, template_id: str) -> dict:
+    """Fold each row_group's `_locations[group]` list into a dict keyed by the
+    row's `_row_key`, so provenance is looked up by the same key that identifies
+    the data row: `_locations[group][<row key>][<column>] = {real_page, ...}`.
+
+    build_gemini_schema() has the model emit that provenance as a list (a Gemini
+    response_schema can't declare an object keyed by a runtime value like a date),
+    so this is where the list becomes the date-keyed dict callers actually want.
+    Mutates and returns `result`; a no-op when there's no `_locations`, so a
+    mocked or ungrouped response passes straight through.
+    """
+    if not isinstance(result, dict):
+        return result
+    locations = result.get("_locations")
+    if not isinstance(locations, dict):
+        return result
+
+    _, grouped = _partition(get_template(template_id)["template_attributes"])
+    for group_name in grouped:
+        rows = locations.get(group_name)
+        if not isinstance(rows, list):
+            continue  # null, absent, or already reshaped -- leave as-is
+        keyed: dict = {}
+        for i, row in enumerate(rows):
+            if not isinstance(row, dict):
+                continue
+            raw_key = row.pop("_row_key", None)
+            key = str(raw_key) if raw_key not in (None, "") else f"row_{i + 1}"
+            # Two rows sharing a key (e.g. the same date) would otherwise clobber
+            # each other; suffix the later ones so every row's provenance survives.
+            unique, n = key, 2
+            while unique in keyed:
+                unique, n = f"{key} ({n})", n + 1
+            # Drop null/empty cell locations so absent provenance isn't noise.
+            keyed[unique] = {col: loc for col, loc in row.items() if loc}
+        locations[group_name] = keyed
+    return result
 
 
 def render_extraction_prompt(tmpl: dict) -> str:
@@ -141,7 +202,13 @@ def render_extraction_prompt(tmpl: dict) -> str:
 
     lines += [
         "",
-        "For each field above, also populate its entry in _locations with:",
+        "Also populate _locations to record where each value was read from:",
+        "  - For each ungrouped field, set _locations[<field name>] to one location object.",
+        "  - For each repeating group, set _locations[<group name>] to a LIST with one entry per",
+        "    extracted row, in the same order as the rows. Each entry has `_row_key` — a copy of",
+        "    that row's identifying value (for financial statements, its Financial Statement Date),",
+        "    so it can be matched to its row — plus one location object per column.",
+        "Each location object has:",
         "  real_page  — the actual sequential page number of the source document/PDF file, counting the",
         "               first page as 1 regardless of any printed page numbers or cover/title pages",
         "               (null if unknown). This is used to jump to the right page in the file.",

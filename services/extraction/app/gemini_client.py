@@ -42,6 +42,10 @@ SYSTEM_INSTRUCTION = (
     "section — the nearest heading or section title where the value was found; "
     "document — the exact source document name (matching one of the "
     "'--- Source document: <name> ---' markers) the value came from. "
+    "When _locations for a repeating group is a list, output one entry per extracted row, in the "
+    "same order as the rows, each with `_row_key` set to that row's identifying value (e.g. its "
+    "Financial Statement Date) and one location per column — different rows may come from different "
+    "files/pages, and different columns within a row may sit on different pages. "
     "Return only the extracted data as JSON matching the provided schema. "
     "Use null for any field or location that is not present or cannot be determined."
 )
