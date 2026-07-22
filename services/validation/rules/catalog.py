@@ -19,7 +19,6 @@ class RuleDefinition:
 
 
 RULE_CATALOG = (
-    RuleDefinition("ssm.document_completeness", "verify_ssm_completeness", "ssm", "Required SSM forms are present.", "SSM_CORPORATE_FORM"),
     RuleDefinition("financial_statement.freshness", "calculate_financial_18_month_rule", "financial", "Latest financial year is within the allowed age.", "FINANCIAL_STATEMENT"),
     RuleDefinition("financial_statement.consecutive_years", "check_financial_consecutive_years", "financial", "Financial documents cover two consecutive years.", "FINANCIAL_STATEMENT"),
     RuleDefinition("financial_statement.completeness", "verify_financial_sections_present", "financial", "Each financial statement contains required sections.", "FINANCIAL_STATEMENT"),
@@ -31,6 +30,8 @@ RULE_CATALOG = (
     RuleDefinition("bank_statement.currency", "check_bank_statement_currency", "bank_statement", "Bank statement currency matches the accepted currency.", "BANK_STATEMENT"),
     RuleDefinition("identity_document.front_and_back", "check_ic_front_and_back", "identity", "Each IC has front and back images.", "IDENTITY_DOCUMENT"),
     RuleDefinition("identity_document.coverage", "find_missing_ic_documents", "identity", "Required parties have corresponding IC documents.", "IDENTITY_DOCUMENT"),
+    RuleDefinition("consent.signature", "verify_consent_signatures", "consent", "Required parties have signed consent forms.", "CONSENT_FORM"),
+    RuleDefinition("customer_information.completeness", "verify_customer_information_completeness", "customer_information", "Every Customer Information Form field is completed.", "CUSTOMER_INFORMATION"),
     RuleDefinition("entity_name.match", "strict_match_entity_names", "matching", "Entity names match across documents.", "SSM_CORPORATE_FORM"),
     RuleDefinition("identity_document.number_match", "strict_match_ic_numbers", "matching", "Identity numbers match across documents.", "SSM_CORPORATE_FORM"),
 )

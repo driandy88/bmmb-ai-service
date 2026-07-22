@@ -17,13 +17,48 @@
       "document_id": "doc_000",
       "document_type": "customer_information",
       "data": {
-        "main_contact_names": ["MOHD AIMAN BIN ZULKIFLI"],
-        "main_contact_emails": ["aiman@alphatech.my"],
-        "main_contact_phone_numbers": ["+60123456789"],
-        "financing_amount": 500000.00,
-        "product_type": "SME Term Financing",
-        "tenure_months": 60,
-        "repayment_frequency": "Monthly"
+        "directors": [
+          {
+            "name": "MOHD AIMAN BIN ZULKIFLI",
+            "address": "NO 29, JALAN AMAN SERENIA 11/7, BANDAR SERENIA, 43900 SEPANG, SELANGOR",
+            "email": "aiman@alphatech.my",
+            "religion": "Islam",
+            "marital_status": "Married",
+            "estimated_monthly_income": "15000",
+            "experience_in_current_business": "10 years",
+            "higher_education": "Degree",
+            "emergency_contact_name": "ZULKIFLI BIN AHMAD",
+            "emergency_contact_number": "+60123456781",
+            "emergency_contact_relationship": "Father",
+            "spouse_name": "SITI BINTI HASSAN",
+            "spouse_contact_number": "+60123456780"
+          },
+          {
+            "name": "NURUL AIN BINTI ZULKIFLI",
+            "address": "NO 12, JALAN DAMAI 3/2, TAMAN DAMAI, 43900 SEPANG, SELANGOR",
+            "email": "nurul@alphatech.my",
+            "religion": "Islam",
+            "marital_status": "Single",
+            "estimated_monthly_income": "12000",
+            "experience_in_current_business": "10 years",
+            "higher_education": "Degree",
+            "emergency_contact_name": "ZULKIFLI BIN AHMAD",
+            "emergency_contact_number": "+60123456781",
+            "emergency_contact_relationship": "Father",
+            "spouse_name": "N/A",
+            "spouse_contact_number": "N/A"
+          }
+        ],
+        "company_age": "3 years",
+        "company_number_of_staff": "12",
+        "company_current_office_address": "LOT 2-4-19, WISMA RAMPAI, TAMAN SRI RAMPAI, SETAPAK, KUALA LUMPUR",
+        "company_office_status": "Rented",
+        "company_office_monthly_rent": "4500",
+        "company_office_telephone": "+60341234567",
+        "company_email_address": "info@alphatech.my",
+        "company_auditor_firm_name": "AZMAN & CO",
+        "company_auditor_contact_person": "AZMAN BIN OMAR",
+        "company_auditor_contact_number": "+60341239999"
       }
     },
     {
@@ -39,10 +74,10 @@
             "name": "MOHD AIMAN BIN ZULKIFLI",
             "nric_passport": "880214-14-5123"
           },
-            {
-                "name": "NURUL AIN BINTI ZULKIFLI",
-                "nric_passport": "900101-10-1234"
-            }
+          {
+            "name": "NURUL AIN BINTI ZULKIFLI",
+            "nric_passport": "900101-10-1234"
+          }
         ]
       }
     },
@@ -60,11 +95,11 @@
             "nric_passport": "880214-14-5123",
             "position": "DIRECTOR"
           },
-            {
-                "name": "NURUL AIN BINTI ZULKIFLI",
-                "nric_passport": "900101-10-1234",
-                "position": "DIRECTOR"
-            }
+          {
+            "name": "NURUL AIN BINTI ZULKIFLI",
+            "nric_passport": "900101-10-1234",
+            "position": "DIRECTOR"
+          }
         ]
       }
     },
@@ -112,14 +147,14 @@
       }
     },
     {
-        "document_id": "doc_005b",
-        "document_type": "identity_document",
-        "data": {
-            "individual_name": "NURUL AIN BINTI ZULKIFLI",
-            "nric_passport": "900101-10-1234",
-            "front_image_present": true,
-            "back_image_present": true
-        }
+      "document_id": "doc_005b",
+      "document_type": "identity_document",
+      "data": {
+        "individual_name": "NURUL AIN BINTI ZULKIFLI",
+        "nric_passport": "900101-10-1234",
+        "front_image_present": true,
+        "back_image_present": true
+      }
     },
     {
       "document_id": "doc_006",

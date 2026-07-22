@@ -66,6 +66,89 @@ class TestBuildSsmCorporateDocs:
         assert docs == []
 
 
+class TestBuildSsmCorporateDocsCombinedTemplate:
+    """The single 'SSM Business Registration' template (docs/ssm-one-form.md)."""
+
+    def _combined(self, **overrides):
+        base = {
+            "Document Type": "SSM Business Registration",
+            "Entity Name": "ValueCapital Sdn. Bhd.",
+            "Business Registration Number": "715023-H",
+            "Incorporation Date": "24 Apr 2013",
+            "MSIC Code": "46590",
+            "Main Business": "Wholesale trade",
+            "Registered Address": "23, Jalan Anggerik 4, 81200 Johor Bahru",
+            "Directors": [
+                {"Director Name": "Rowan Atkinson", "Director NRIC or Passport Number": "550106-12-5821"},
+            ],
+            "Shareholders": [
+                {"Shareholder Name": "Rowan Atkinson", "Shareholder Percentage": "60%",
+                 "Shareholder NRIC or Passport Number": "550106-12-5821"},
+            ],
+        }
+        base.update(overrides)
+        return {"SSM Business Registration": base}
+
+    def test_one_combined_doc_with_no_subtype(self):
+        docs = build_ssm_corporate_docs(self._combined(), entity_type="Sdn Bhd")
+        assert len(docs) == 1
+        assert docs[0].document_subtype is None
+        assert docs[0].document_id == "ssm_business_registration"
+        assert docs[0].data.entity_name == "ValueCapital Sdn. Bhd."
+
+    def test_directors_parsed_from_combined_template(self):
+        docs = build_ssm_corporate_docs(self._combined(), entity_type="Sdn Bhd")
+        assert [p.name for p in docs[0].data.directors] == ["Rowan Atkinson"]
+        assert [p.nric_passport for p in docs[0].data.directors] == ["550106-12-5821"]
+
+    def test_shareholders_built_now_that_nric_attribute_exists(self):
+        # The combined template carries Shareholder NRIC or Passport Number,
+        # so shareholders build (no longer degrade to None) and reach
+        # find_missing_ic_documents.
+        warnings = []
+        docs = build_ssm_corporate_docs(self._combined(), entity_type="Sdn Bhd", warnings=warnings)
+        assert [p.name for p in docs[0].data.shareholders] == ["Rowan Atkinson"]
+        assert [p.nric_passport for p in docs[0].data.shareholders] == ["550106-12-5821"]
+        # The old "no Shareholder NRIC attribute" gap warning is gone.
+        assert not any("no Shareholder NRIC" in w.message for w in warnings)
+
+    def test_shareholder_with_null_nric_warns_but_still_builds(self):
+        warnings = []
+        docs = build_ssm_corporate_docs(
+            self._combined(**{"Shareholders": [
+                {"Shareholder Name": "No ID Holder", "Shareholder NRIC or Passport Number": None},
+            ]}),
+            entity_type="Sdn Bhd", warnings=warnings,
+        )
+        assert docs[0].data.shareholders[0].nric_passport == ""
+        assert any("Shareholder NRIC" in w.field for w in warnings)
+
+    def test_complete_combined_doc_raises_no_completeness_warning(self):
+        warnings = []
+        build_ssm_corporate_docs(self._combined(), entity_type="Sdn Bhd", warnings=warnings)
+        # The shareholder-NRIC gap warning is expected; no missing-field warnings.
+        fields = {w.field for w in warnings}
+        assert "Incorporation Date" not in fields
+        assert "Registered Address" not in fields
+        assert "Directors" not in fields
+
+    def test_missing_fields_raise_warnings_not_failure(self):
+        warnings = []
+        docs = build_ssm_corporate_docs(
+            self._combined(**{"Incorporation Date": None, "Registered Address": None, "Directors": None}),
+            entity_type="Sdn Bhd", warnings=warnings,
+        )
+        assert len(docs) == 1  # still builds -- warning, not error
+        fields = {w.field for w in warnings}
+        assert {"Incorporation Date", "Registered Address", "Directors"} <= fields
+
+    def test_null_directors_group_is_tolerated(self):
+        docs = build_ssm_corporate_docs(
+            self._combined(**{"Directors": None}), entity_type="Sdn Bhd",
+        )
+        assert docs[0].data.directors == []
+
+
 class TestBuildFinancialStatementDocs:
     def test_one_doc_per_year_column(self, extracted_by_template):
         docs = build_financial_statement_docs(extracted_by_template, entity_name="ALPHA TECH SOLUTIONS SDN BHD")
@@ -98,6 +181,8 @@ class TestBuildBankStatementDoc:
         assert doc.data.monthly_balances[0].end_balance == 42500.00
 
     def test_maps_available_bank_name_and_preserves_unknown_fields(self, extracted_by_template):
+        # This fixture's Bank Statements has no Currency attribute -> null,
+        # warned; Account Type has no source attribute at all.
         warnings = []
         doc = build_bank_statement_doc(extracted_by_template, entity_name="X", warnings=warnings)
         assert doc.data.bank_name == "MAYBANK BERHAD"
@@ -105,11 +190,24 @@ class TestBuildBankStatementDoc:
         assert doc.data.account_type is None
         assert {w.field for w in warnings} >= {"Currency", "Account Type"}
 
+    def test_reads_myr_currency_without_warning(self, extracted_by_template):
+        extracted_by_template["Bank Statements"]["Currency"] = "MYR"
+        warnings = []
+        doc = build_bank_statement_doc(extracted_by_template, entity_name="X", warnings=warnings)
+        assert doc.data.currency == "MYR"
+        assert not any(w.field == "Currency" for w in warnings)
+
+    def test_non_myr_currency_is_read_and_warned(self, extracted_by_template):
+        extracted_by_template["Bank Statements"]["Currency"] = "SGD"
+        warnings = []
+        doc = build_bank_statement_doc(extracted_by_template, entity_name="X", warnings=warnings)
+        assert doc.data.currency == "SGD"
+        assert any(w.field == "Currency" and "not MYR" in w.message for w in warnings)
+
     def test_records_source_template_provenance(self, extracted_by_template):
         result = build_validation_bundle(
             extracted_by_template,
-            entity_type="Sdn Bhd", tenure_months=60,
-            repayment_frequency="Monthly", signature_present=True,
+            entity_type="Sdn Bhd",
         )
         assert result.bundle.extracted_documents
         assert all(doc.provenance is not None for doc in result.bundle.extracted_documents)
@@ -167,53 +265,65 @@ class TestBuildIdentityDocuments:
 
 class TestBuildConsentFormDocs:
     def test_one_doc_per_signatory(self, extracted_by_template):
-        docs = build_consent_form_docs(extracted_by_template, signature_present=True)
+        docs = build_consent_form_docs(extracted_by_template)
         assert len(docs) == 3  # 2 directors + 1 duplicate company-representative signature
 
-    def test_signature_present_stays_null_when_not_supplied(self, extracted_by_template):
+    def test_signature_read_from_extraction(self, extracted_by_template):
+        # The live template carries a per-signatory "Consent Form Signature"
+        # boolean -- the signature value comes straight from extraction.
+        docs = build_consent_form_docs(extracted_by_template)
+        assert all(d.data.signature_present is True for d in docs)
+
+    def test_null_signature_stays_null_not_false(self, extracted_by_template):
         # null ("not confirmed"), not False ("confirmed unsigned") -- see
         # ConsentFormData.signature_present's docstring.
+        extracted_by_template["Consent Form"]["Applicants"][0]["Consent Form Signature"] = None
         docs = build_consent_form_docs(extracted_by_template)
-        assert all(d.data.signature_present is None for d in docs)
+        assert docs[0].data.signature_present is None
 
-    def test_signature_present_override_applied_to_all(self, extracted_by_template):
-        docs = build_consent_form_docs(extracted_by_template, signature_present=True)
-        assert all(d.data.signature_present is True for d in docs)
+    def test_confirmed_unsigned_is_false_not_null(self, extracted_by_template):
+        extracted_by_template["Consent Form"]["Applicants"][0]["Consent Form Signature"] = False
+        docs = build_consent_form_docs(extracted_by_template)
+        assert docs[0].data.signature_present is False
+
+    def test_reads_legacy_directors_row_group_as_fallback(self, extracted_by_template):
+        # Older extraction output used a "Directors" row_group with no
+        # signature attribute -- still parsed, signature left null.
+        consent = extracted_by_template["Consent Form"]
+        consent["Directors"] = [{k: v for k, v in row.items() if k != "Consent Form Signature"}
+                                for row in consent.pop("Applicants")]
+        docs = build_consent_form_docs(extracted_by_template)
+        assert len(docs) == 3
+        assert all(d.data.signature_present is None for d in docs)
 
 
 class TestBuildCustomerInformationDoc:
-    def test_maps_application_details_not_customer_information_form(self, extracted_by_template):
-        doc = build_customer_information_doc(
-            extracted_by_template, tenure_months=60, repayment_frequency="Monthly",
-        )
-        assert doc.data.main_contact_names == ["MOHD AIMAN BIN ZULKIFLI"]
-        assert doc.data.financing_amount == 500000.00
-        assert doc.data.product_type == "SME Term Financing"
-
-    def test_multiple_main_contacts_stay_row_aligned(self, extracted_by_template):
-        # Contacts come from the "Main Contacts" row_group -- name/email/phone are
-        # fanned out into the three parallel lists CustomerInfoData keeps, index for
-        # index, so contact 2's email can't land against contact 1's name.
-        extracted_by_template["Application Details"]["Main Contacts"] = [
-            {"Main Contact Name": "AIMAN", "Main Contact Email": "aiman@x.my", "Main Contact Phone Number": "011"},
-            {"Main Contact Name": "NURUL", "Main Contact Email": "nurul@x.my", "Main Contact Phone Number": "012"},
+    def test_reads_from_customer_information_form_template(self, extracted_by_template):
+        doc = build_customer_information_doc(extracted_by_template)
+        assert doc.provenance.source_template == "Customer Information Form"
+        assert [d.name for d in doc.data.directors] == [
+            "MOHD AIMAN BIN ZULKIFLI", "NURUL AIN BINTI ZULKIFLI",
         ]
-        doc = build_customer_information_doc(
-            extracted_by_template, tenure_months=60, repayment_frequency="Monthly",
-        )
-        assert doc.data.main_contact_names == ["AIMAN", "NURUL"]
-        assert doc.data.main_contact_emails == ["aiman@x.my", "nurul@x.my"]
-        assert doc.data.main_contact_phone_numbers == ["011", "012"]
+        assert doc.data.company_office_status == "Rented"
 
-    def test_missing_tenure_or_frequency_defaults_and_warns(self, extracted_by_template):
+    def test_director_particulars_stay_row_aligned(self, extracted_by_template):
+        extracted_by_template["Customer Information Form"]["Directors"] = [
+            {"Director Name": "AIMAN", "Director Email Address": "aiman@x.my"},
+            {"Director Name": "NURUL", "Director Email Address": "nurul@x.my"},
+        ]
+        doc = build_customer_information_doc(extracted_by_template)
+        assert [d.name for d in doc.data.directors] == ["AIMAN", "NURUL"]
+        assert [d.email for d in doc.data.directors] == ["aiman@x.my", "nurul@x.my"]
+
+    def test_null_fields_coerced_to_blank_not_warned_per_field(self, extracted_by_template):
+        extracted_by_template["Customer Information Form"]["Company Office Status"] = None
         warnings = []
         doc = build_customer_information_doc(extracted_by_template, warnings=warnings)
-        assert doc.data.tenure_months == 0
-        assert doc.data.repayment_frequency == "Unknown"
-        assert {w.field for w in warnings} >= {"tenure_months", "repayment_frequency"}
+        assert doc.data.company_office_status == ""  # completeness rule reports it, adapter doesn't warn
+        assert not any(w.field == "Company Office Status" for w in warnings)
 
     def test_missing_template_returns_none(self):
-        assert build_customer_information_doc({}, tenure_months=1, repayment_frequency="Monthly") is None
+        assert build_customer_information_doc({}) is None
 
 
 class TestNullValuesCrossTheAdapterSafely:
@@ -244,32 +354,21 @@ class TestNullValuesCrossTheAdapterSafely:
         assert any(w.field == "Auditor's Report Present" for w in warnings)
 
     def test_null_element_within_an_array_is_flagged_per_row(self, extracted_by_template):
-        extracted_by_template["Consent Form"]["Directors"][0]["Director NRIC or Passport Number"] = None
+        extracted_by_template["Consent Form"]["Applicants"][0]["Director NRIC or Passport Number"] = None
         warnings = []
-        docs = build_consent_form_docs(extracted_by_template, signature_present=True, warnings=warnings)
+        docs = build_consent_form_docs(extracted_by_template, warnings=warnings)
         assert docs[0].data.nric_passport == ""  # doesn't crash
         assert any(
             w.document_id == "consent_form_0" and "NRIC" in w.field
             for w in warnings
         )
 
-    def test_null_financing_amount_defaults_to_zero_and_is_flagged(self, extracted_by_template):
-        extracted_by_template["Application Details"]["Proposed Financing Amount"] = None
-        warnings = []
-        doc = build_customer_information_doc(
-            extracted_by_template, tenure_months=60, repayment_frequency="Monthly", warnings=warnings,
-        )
-        assert doc.data.financing_amount == 0.0
-        assert any(w.field == "Proposed Financing Amount" for w in warnings)
-
-
 class TestBuildValidationBundle:
     def test_full_bundle_builds_and_passes_every_check(self, extracted_by_template):
         result = build_validation_bundle(
             extracted_by_template,
             bundle_id="BUNDLE-TEST-1", system_date=date(2026, 7, 7),
-            entity_type="Sdn Bhd", tenure_months=60, repayment_frequency="Monthly",
-            signature_present=True,
+            entity_type="Sdn Bhd",
         )
         report = ValidationEngine().run(result.bundle)
         assert report.overall_passed is True
@@ -284,8 +383,7 @@ class TestBuildValidationBundle:
         result = build_validation_bundle(
             extracted_by_template,
             bundle_id="BUNDLE-TEST-1B", system_date=date(2026, 7, 7),
-            entity_type="Sdn Bhd", tenure_months=60, repayment_frequency="Monthly",
-            signature_present=True,
+            entity_type="Sdn Bhd",
         )
         fields = {w.field for w in result.warnings}
         assert fields == {
@@ -297,7 +395,7 @@ class TestBuildValidationBundle:
         result = build_validation_bundle(
             extracted_by_template,
             bundle_id="BUNDLE-TEST-2", system_date=date(2026, 7, 7),
-            entity_type="Sdn Bhd", tenure_months=60, repayment_frequency="Monthly",
+            entity_type="Sdn Bhd",
         )
         assert set(result.bundle.metadata.document_types_present) == {
             d.document_type for d in result.bundle.extracted_documents
@@ -315,18 +413,19 @@ class TestBuildValidationBundle:
                 },
             },
             bundle_id="BUNDLE-PARTIAL", system_date=date(2026, 7, 7),
-            entity_type="Sdn Bhd", tenure_months=0, repayment_frequency="Monthly",
+            entity_type="Sdn Bhd",
         )
         assert result.bundle.metadata.document_types_present == ["ssm_corporate_form"]
         report = ValidationEngine().run(result.bundle)
-        ssm_check = next(r for r in report.results if r.check == "verify_ssm_completeness")
-        assert ssm_check.passed is False  # only form_24, not the full 24+44+49 set
+        # SSM completeness is no longer a check; the bundle still builds and the
+        # remaining rules just skip the document types that aren't present.
+        assert report.overall_passed is True
 
     def test_entity_name_propagates_from_ssm_to_financial_and_bank_docs(self, extracted_by_template):
         result = build_validation_bundle(
             extracted_by_template,
             bundle_id="BUNDLE-TEST-3", system_date=date(2026, 7, 7),
-            entity_type="Sdn Bhd", tenure_months=60, repayment_frequency="Monthly",
+            entity_type="Sdn Bhd",
         )
         financial_docs = [d for d in result.bundle.extracted_documents if d.document_type == "financial_statement"]
         bank_docs = [d for d in result.bundle.extracted_documents if d.document_type == "bank_statement"]
@@ -339,7 +438,7 @@ class TestBuildValidationBundle:
         result = build_validation_bundle(
             extracted_by_template,
             bundle_id="BUNDLE-TEST-4", system_date=date(2026, 7, 7),
-            entity_type="Sdn Bhd", tenure_months=60, repayment_frequency="Monthly",
+            entity_type="Sdn Bhd",
         )
         assert result.bundle is not None
         assert any(w.document_type == "bank_statement" for w in result.warnings)
@@ -357,24 +456,20 @@ class TestBuildValidationBundleWithNoOverrides:
         assert result.bundle.metadata.system_date == date.today()
         assert len(result.bundle.extracted_documents) > 0
 
-    def test_entity_type_is_read_from_application_details(self, extracted_by_template):
+    def test_entity_type_warns_and_defaults_when_not_supplied(self, extracted_by_template):
+        # entity_type has no extraction source (Application Details was dropped);
+        # omitting it defaults to "" with a warning, never a crash.
         result = build_validation_bundle(extracted_by_template)
         ssm_docs = [d for d in result.bundle.extracted_documents if d.document_type == "ssm_corporate_form"]
-        assert all(d.data.entity_type == "Sdn Bhd" for d in ssm_docs)
-        # No warning for entity_type since it was derivable from Application
-        # Details' "Business Entity Type", unlike tenure_months/repayment_frequency.
-        assert not any(w.field == "entity_type" for w in result.warnings)
-
-    def test_missing_tenure_and_repayment_frequency_are_warned_not_raised(self, extracted_by_template):
-        result = build_validation_bundle(extracted_by_template)
-        fields = {w.field for w in result.warnings}
-        assert "tenure_months" in fields
-        assert "repayment_frequency" in fields
+        assert all(d.data.entity_type == "" for d in ssm_docs)
+        assert any(w.field == "entity_type" for w in result.warnings)
         report = ValidationEngine().run(result.bundle)
         assert report is not None  # still produced a complete report
 
-    def test_signature_present_stays_null_and_is_warned(self, extracted_by_template):
+    def test_signature_read_from_extraction_when_not_supplied(self, extracted_by_template):
+        # No signature_present override -> each consent doc's signature comes
+        # from the extracted "Consent Form Signature" boolean (all true here).
         result = build_validation_bundle(extracted_by_template)
-        assert any(w.field == "signature_present" for w in result.warnings)
+        assert not any(w.field == "signature_present" for w in result.warnings)
         consent_docs = [d for d in result.bundle.extracted_documents if d.document_type == "consent_form"]
-        assert all(d.data.signature_present is None for d in consent_docs)
+        assert all(d.data.signature_present is True for d in consent_docs)

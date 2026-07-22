@@ -12,8 +12,9 @@ from .date_logic import (
 from .completeness import (
     check_ic_front_and_back,
     find_missing_ic_documents,
+    verify_customer_information_completeness,
+    verify_consent_signatures,
     verify_financial_sections_present,
-    verify_ssm_completeness,
 )
 from .matching import (
     entity_similarity,
@@ -37,10 +38,11 @@ __all__ = [
     "check_bank_statement_currency",
     "verify_bank_statement_duration",
     "months_between",
-    "verify_ssm_completeness",
     "verify_financial_sections_present",
     "find_missing_ic_documents",
     "check_ic_front_and_back",
+    "verify_consent_signatures",
+    "verify_customer_information_completeness",
     "strict_match_entity_names",
     "fuzzy_match_entity_names",
     "strict_match_ic_numbers",

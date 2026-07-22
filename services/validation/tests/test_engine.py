@@ -34,9 +34,9 @@ class TestPassingBundle:
     def test_results_have_stable_rule_ids_and_explicit_status(self, passing_bundle_raw):
         report = _run(passing_bundle_raw)
 
-        ssm = next(r for r in report.results if r.check == "verify_ssm_completeness")
-        assert ssm.rule_id == "ssm.document_completeness"
-        assert ssm.status is ValidationStatus.PASSED
+        freshness = next(r for r in report.results if r.check == "calculate_financial_18_month_rule")
+        assert freshness.rule_id == "financial_statement.freshness"
+        assert freshness.status is ValidationStatus.PASSED
 
         entity_match = next(
             r for r in report.results
@@ -53,13 +53,10 @@ class TestPassingBundle:
         bundle = ValidationBundle(**passing_bundle_raw)
         policy = ValidationPolicy(
             policy_id="test-policy",
-            required_ssm_forms_by_entity={"sdn bhd": {"form_24"}},
-            default_required_ssm_forms={"form_24"},
             minimum_bank_statement_months_by_entity={"sdn bhd": 6},
             default_minimum_bank_statement_months=6,
             financial_statement_max_age_months=24,
             bank_statement_max_age_months=3,
-            required_application_fields={"main_contact_names"},
         )
         report = ValidationEngine(policy=policy).run(bundle)
         assert report.policy_id == "test-policy"
@@ -88,10 +85,9 @@ class TestResultsByDocument:
         regrouped_total = sum(len(results) for results in grouped.values())
         assert regrouped_total == len(report.results)
 
-    def test_ssm_completeness_and_cross_document_matching_share_ssm_group(self, passing_bundle_raw):
+    def test_cross_document_matching_is_grouped_under_ssm(self, passing_bundle_raw):
         report = _run(passing_bundle_raw)
         ssm_group_checks = {r.check for r in report.results_by_document["SSM_CORPORATE_FORM"]}
-        assert "verify_ssm_completeness" in ssm_group_checks
         assert any(check.startswith("strict_match_entity_names[") for check in ssm_group_checks)
         assert any(check.startswith("strict_match_ic_numbers[") for check in ssm_group_checks)
 
@@ -113,7 +109,7 @@ class TestResultsByDocument:
         assert "results_by_document" in dumped
         assert set(dumped["results_by_document"]) == {
             "SSM_CORPORATE_FORM", "FINANCIAL_STATEMENT", "BANK_STATEMENT",
-            "IDENTITY_DOCUMENT",
+            "IDENTITY_DOCUMENT", "CONSENT_FORM", "CUSTOMER_INFORMATION",
         }
 
     def test_every_catalog_rule_has_a_document_group(self):
@@ -125,6 +121,13 @@ class TestFailingBundle:
     def test_overall_failed(self, failing_bundle_raw):
         report = _run(failing_bundle_raw)
         assert report.overall_passed is False
+
+    def test_missing_consent_form_is_caught(self, failing_bundle_raw):
+        report = _run(failing_bundle_raw)
+        consent_check = next(r for r in report.results if r.check == "verify_consent_signatures")
+        assert consent_check.passed is False
+        assert consent_check.status is ValidationStatus.FAILED
+        assert consent_check.details["missing_consent"]
 
     def test_failed_check_wins_over_needs_review(self, passing_bundle_raw):
         raw = passing_bundle_raw.copy()
@@ -171,10 +174,6 @@ class TestSkippedChecksForIncompleteBundles:
         }
         report = _run(raw)
 
-        # SSM completeness is a real check (fails: only form_24, not 24+44+49)
-        ssm_check = next(r for r in report.results if r.check == "verify_ssm_completeness")
-        assert ssm_check.passed is False
-
         # Everything that needs a document type absent from this bundle is
         # skipped (passed=None), not silently marked as failed.
         for check_name in (
@@ -183,13 +182,15 @@ class TestSkippedChecksForIncompleteBundles:
             "verify_bank_statement_duration",
             "check_ic_front_and_back",
             "find_missing_ic_documents",
+            "verify_consent_signatures",
         ):
             check = next(r for r in report.results if r.check == check_name)
             assert check.passed is None
             assert check.status is ValidationStatus.NOT_APPLICABLE
 
-        # A skipped check never flips overall_passed to False on its own.
-        assert report.overall_passed is False  # only because of the real ssm_check failure above
+        # With only an SSM doc present and every other check skipped, nothing
+        # fails -- a skipped check never flips overall_passed to False.
+        assert report.overall_passed is True
 
     def test_empty_bundle_produces_only_skips(self):
         raw = {
@@ -296,6 +297,18 @@ class TestNewRulesWiring:
         ]
         report = _run(raw)
         check = next(r for r in report.results if r.check == "check_bank_statement_freshness")
+        assert check.passed is False
+
+    def test_missing_customer_information_field_is_caught(self, passing_bundle_raw):
+        raw = passing_bundle_raw.copy()
+        raw["extracted_documents"] = [
+            dict(doc, data=dict(doc["data"], company_office_status=""))
+            if doc["document_type"] == "customer_information"
+            else doc
+            for doc in raw["extracted_documents"]
+        ]
+        report = _run(raw)
+        check = next(r for r in report.results if r.check == "verify_customer_information_completeness")
         assert check.passed is False
 
 
