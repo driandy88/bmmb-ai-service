@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.attributes import router as attributes_router
 from app.extraction import router as extraction_router
+from app.metadata import router as metadata_router
 from app.templates import router as templates_router
 
 app = FastAPI(
@@ -27,6 +28,7 @@ app.add_middleware(
 )
 
 app.include_router(extraction_router)
+app.include_router(metadata_router)
 app.include_router(templates_router)
 app.include_router(attributes_router)
 
