@@ -13,7 +13,7 @@ exporters (e.g. page.get_text("json")). We assemble the dict ourselves.
 Run:  ./.venv/bin/python notebooks/explore_pymupdf.py
       ./.venv/bin/python notebooks/explore_pymupdf.py /path/to/file.pdf ...
       ./.venv/bin/python notebooks/explore_pymupdf.py --full file.pdf   # + raw DQT matrices
-Requires: PyMuPDF, pillow  (both in requirements-dev.txt)
+Requires: PyMuPDF, pillow  (both runtime deps in requirements.txt)
 """
 import hashlib
 import io
