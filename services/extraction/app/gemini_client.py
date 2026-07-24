@@ -108,7 +108,7 @@ def run_extraction(
     callers translate these into HTTP errors.
     """
     client = _get_client()
-    contents = []
+    contents = []   
     for filename, mime_type, file_bytes in files:
         contents.append(f"--- Source document: {filename} ---")
         contents.append(types.Part.from_bytes(data=file_bytes, mime_type=mime_type))

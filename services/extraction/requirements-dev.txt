@@ -2,6 +2,6 @@
 pytest==8.*
 httpx==0.27.*
 reportlab==4.*
-pillow==10.*
+# pillow is a runtime dep now (pinned in requirements.txt) -- don't re-pin here.
 jupyter==1.*
 requests==2.*
