@@ -26,8 +26,10 @@ from services.validation.rules import (
     verify_bank_statement_duration,
     verify_consent_signatures,
     verify_financial_sections_present,
+    verify_required_documents_present,
 )
-from services.validation.rules._utils import NOT_AVAILABLE
+from services.validation.rules._utils import NOT_AVAILABLE, normalize_id_type
+from services.validation.domain.policies import ValidationPolicy
 
 
 class TestVerifyFinancialSectionsPresent:
@@ -82,7 +84,9 @@ class TestFindMissingIcDocuments:
         ssm_people = [{"name": "A", "nric_passport": "880214-14-5123"}]
         result = find_missing_ic_documents(ssm_people, [])
         assert result["passed"] is False
-        assert result["details"]["missing_people"] == [{"name": "A", "nric_passport": "880214-14-5123"}]
+        assert result["details"]["missing_people"] == [
+            {"name": "A", "nric_passport": "880214-14-5123", "id_type": None}
+        ]
 
     def test_nric_matching_ignores_formatting(self):
         ssm_people = [{"name": "A", "nric_passport": "880214-14-5123"}]
@@ -116,6 +120,152 @@ class TestCheckIcFrontAndBack:
             [{"individual_name": "A", "nric_passport": "1", "front_image_present": False, "back_image_present": None}]
         )
         assert result["passed"] is False
+
+
+class TestNormalizeIdType:
+    def test_mykad_spellings_resolve_to_mykad(self):
+        for raw in ("MyKad", "mykad", "MY KAD", "IC", "NRIC", "Identity Card", "Kad Pengenalan"):
+            assert normalize_id_type(raw) == "mykad", raw
+
+    def test_passport_spellings_resolve_to_passport(self):
+        for raw in ("Passport", "PASSPORT", "pasport", "International Passport"):
+            assert normalize_id_type(raw) == "passport", raw
+
+    def test_blank_or_unrecognized_stays_unknown(self):
+        for raw in (None, "", "   ", "Driving Licence"):
+            assert normalize_id_type(raw) is None, raw
+
+
+class TestPassportIdentityDocuments:
+    """TICKET-6: a passport is a recognized alternate identity document.
+
+    A passport has no IC-style back: one bio-data page image is the whole
+    requirement, so a passport-holding director must not be failed for a
+    "missing back" or reported as missing an IC.
+    """
+
+    def test_passport_needs_only_a_bio_data_page(self):
+        result = check_ic_front_and_back([{
+            "individual_name": "A", "nric_passport": "A12345678", "id_type": "passport",
+            "front_image_present": True, "back_image_present": False,
+        }])
+        assert result["passed"] is True
+
+    def test_passport_without_a_bio_data_page_fails(self):
+        result = check_ic_front_and_back([{
+            "individual_name": "A", "nric_passport": "A12345678", "id_type": "passport",
+            "front_image_present": False, "back_image_present": None,
+        }])
+        assert result["passed"] is False
+        assert result["details"]["incomplete_documents"][0]["missing_sides"] == ["bio_data_page"]
+
+    def test_unreadable_passport_bio_data_page_is_needs_review(self):
+        result = check_ic_front_and_back([{
+            "individual_name": "A", "nric_passport": "A12345678", "id_type": "passport",
+            "front_image_present": None, "back_image_present": None,
+        }])
+        assert result["passed"] is None
+        assert result["details"]["needs_review_documents"][0]["unconfirmed_sides"] == ["bio_data_page"]
+
+    def test_unknown_id_type_is_held_to_the_stricter_mykad_requirement(self):
+        # An unrecognized/absent ID Type must not weaken the check -- MyKad is
+        # both the common case and the stricter of the two requirements.
+        result = check_ic_front_and_back([{
+            "individual_name": "A", "nric_passport": "880214-14-5123",
+            "front_image_present": True, "back_image_present": False,
+        }])
+        assert result["passed"] is False
+        assert result["details"]["incomplete_documents"][0]["missing_sides"] == ["back"]
+
+    def test_passport_holder_with_a_passport_is_not_missing_an_ic(self):
+        ssm_people = [{"name": "A", "nric_passport": "A12345678", "id_type": "passport"}]
+        ic_documents = [{"individual_name": "A", "nric_passport": "A12345678", "id_type": "passport"}]
+        result = find_missing_ic_documents(ssm_people, ic_documents)
+        assert result["passed"] is True
+
+    def test_missing_passport_is_reported_as_a_passport_not_an_ic(self):
+        result = find_missing_ic_documents(
+            [{"name": "A", "nric_passport": "A12345678", "id_type": "Passport"}], [],
+        )
+        assert result["passed"] is False
+        assert result["details"]["missing_people"][0]["id_type"] == "passport"
+        assert "passport" in result["message"].lower()
+        assert "IC" not in result["message"]
+
+
+class TestVerifyRequiredDocumentsPresent:
+    """FINDINGS #1: a near-empty package must not read as a clean pass."""
+
+    _POLICY = ValidationPolicy(
+        policy_id="test-slots",
+        minimum_bank_statement_months_by_entity={"sole prop": 12},
+        default_minimum_bank_statement_months=6,
+        entity_type_aliases={"enterprise": "sole prop"},
+        required_document_slots=[
+            ["ssm_corporate_form"], ["financial_statement"], ["bank_statement"],
+        ],
+        required_document_slots_by_entity={
+            "sole prop": [
+                ["ssm_corporate_form"],
+                ["financial_statement", "tax_declaration"],
+                ["bank_statement"],
+            ],
+        },
+    )
+
+    def _check(self, present, entity_type="Sdn Bhd"):
+        return verify_required_documents_present(present, entity_type, policy=self._POLICY)
+
+    def test_empty_package_fails_instead_of_passing_vacuously(self):
+        result = self._check([])
+        assert result["passed"] is False
+        assert result["details"]["missing_document_slots"] == self._POLICY.required_document_slots
+
+    def test_complete_package_passes(self):
+        result = self._check(["ssm_corporate_form", "financial_statement", "bank_statement"])
+        assert result["passed"] is True
+        assert result["details"]["missing_document_slots"] == []
+
+    def test_partially_filled_package_names_only_what_is_missing(self):
+        result = self._check(["ssm_corporate_form"])
+        assert result["passed"] is False
+        assert result["details"]["missing_document_slots"] == [
+            ["financial_statement"], ["bank_statement"],
+        ]
+        assert "ssm_corporate_form" not in result["message"]
+
+    def test_document_types_beyond_the_required_slots_are_not_flagged(self):
+        result = self._check(
+            ["ssm_corporate_form", "financial_statement", "bank_statement", "consent_form"],
+        )
+        assert result["passed"] is True
+        assert "consent_form" in result["details"]["present_document_types"]
+
+    def test_sole_prop_may_satisfy_the_financials_slot_with_a_tax_declaration(self):
+        present = ["ssm_corporate_form", "tax_declaration", "bank_statement"]
+        assert self._check(present, entity_type="Sole Prop")["passed"] is True
+        assert "financial_statement or tax_declaration" in self._check(
+            ["ssm_corporate_form"], entity_type="Sole Prop",
+        )["message"]
+
+    def test_sdn_bhd_may_not_substitute_a_tax_declaration(self):
+        result = self._check(["ssm_corporate_form", "tax_declaration", "bank_statement"])
+        assert result["passed"] is False
+        assert result["details"]["missing_document_slots"] == [["financial_statement"]]
+
+    def test_entity_type_resolves_through_the_alias_table(self):
+        # "Enterprise" is a sole prop, so it gets the Borang B alternative --
+        # the same resolution the bank-statement minimum uses.
+        result = self._check(
+            ["ssm_corporate_form", "tax_declaration", "bank_statement"], entity_type="Enterprise",
+        )
+        assert result["details"]["resolved_entity_type_key"] == "sole prop"
+        assert result["passed"] is True
+
+    def test_unresolvable_entity_type_falls_back_to_the_default_slots(self):
+        result = self._check(["ssm_corporate_form", "bank_statement"], entity_type="")
+        assert result["details"]["resolved_entity_type_key"] is None
+        assert result["details"]["missing_document_slots"] == [["financial_statement"]]
 
 
 class TestVerifyConsentSignatures:

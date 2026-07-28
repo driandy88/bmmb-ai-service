@@ -73,6 +73,26 @@ class BundleContext:
         )
 
     @property
+    def present_document_types(self) -> list[str]:
+        """Canonical document types actually present, in catalog-ish order.
+
+        Derived from the parsed documents themselves, not from
+        BundleMetadata.document_types_present -- that's caller-declared
+        metadata, and the package.completeness gate has to check what really
+        arrived, not what the caller said arrived.
+        """
+        groups = (
+            ("ssm_corporate_form", self.ssm_form_docs),
+            ("financial_statement", self.financial_statement_docs),
+            ("tax_declaration", self.tax_declaration_docs),
+            ("bank_statement", self.bank_statement_docs),
+            ("identity_document", self.identity_docs),
+            ("consent_form", self.consent_form_docs),
+            ("customer_information", [self.customer_info_doc] if self.customer_info_doc else []),
+        )
+        return [document_type for document_type, docs in groups if docs]
+
+    @property
     def ssm_people(self) -> list[dict]:
         return [person.model_dump(mode="json") for person in self.ssm_people_by_nric.values()]
 

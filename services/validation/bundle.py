@@ -15,6 +15,11 @@ class PersonInfo(BaseModel):
     name: str
     nric_passport: str
     position: Optional[str] = None
+    # Which identity document this person is expected to produce: "mykad" or
+    # "passport" (rules/_utils.normalize_id_type's canonical values), or None
+    # when the source document didn't state it. A Malaysian IC and a foreign
+    # passport carry different requirements -- see IdentityDocumentData.id_type.
+    id_type: Optional[str] = None
 
 
 class DocumentProvenance(BaseModel):
@@ -126,8 +131,17 @@ class BankStatementData(BaseModel):
 class IdentityDocumentData(BaseModel):
     individual_name: str
     nric_passport: str
+    # "mykad" or "passport" (rules/_utils.normalize_id_type's canonical
+    # values), or None when extraction's "ID Type" attribute was absent or
+    # unrecognized. This changes what counts as a complete document: a MyKad
+    # needs both a front and a back image, a passport needs only its bio-data
+    # page (there is no IC-style "back"). None is held to the *stricter*
+    # MyKad requirement, so an unreadable ID Type can never weaken the check.
+    id_type: Optional[str] = None
     # Optional, not bool -- see FinancialStatementData's note. None means
     # "couldn't tell from the image," not "confirmed missing."
+    # For a passport, front_image_present carries the bio-data page and
+    # back_image_present is not applicable.
     front_image_present: Optional[bool] = None
     back_image_present: Optional[bool] = None
     expiry_date: Optional[date] = None

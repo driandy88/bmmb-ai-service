@@ -36,6 +36,18 @@ def extracted_by_template() -> dict:
     return raw
 
 
+@pytest.fixture
+def deployed_extraction() -> dict:
+    """The shape the *deployed* extraction-service actually returns today:
+    one combined "SSM Business Registration" template (with per-director
+    "ID Type"), an "Applicants" consent row_group, and a Bank Statements
+    "Currency" attribute. Use this for anything that has to hold against
+    live output rather than the older per-form fixture above."""
+    raw = json.loads((EXAMPLES_DIR / "raw_extraction_example_2.json").read_text())
+    raw.pop("_comment", None)
+    return raw
+
+
 class TestBuildSsmCorporateDocs:
     def test_one_doc_per_ssm_template_present(self, extracted_by_template):
         docs = build_ssm_corporate_docs(extracted_by_template, entity_type="Sdn Bhd")
@@ -148,6 +160,85 @@ class TestBuildSsmCorporateDocsCombinedTemplate:
             self._combined(**{"Directors": None}), entity_type="Sdn Bhd",
         )
         assert docs[0].data.directors == []
+
+
+class TestDirectorIdTypeOnTheCombinedSsmTemplate:
+    """TICKET-6: the deployed SSM template already declares each director's
+    "ID Type" -- that's what says whether a director is expected to produce a
+    MyKad or a passport, so it has to reach PersonInfo rather than being
+    dropped at the adapter."""
+
+    def test_director_id_type_is_read_and_normalized(self, deployed_extraction):
+        deployed_extraction["SSM Business Registration"]["Directors"][1]["ID Type"] = "Passport"
+        docs = build_ssm_corporate_docs(deployed_extraction, entity_type="Sdn Bhd")
+        assert [p.id_type for p in docs[0].data.directors] == ["mykad", "passport"]
+
+    def test_absent_director_id_type_stays_none(self, deployed_extraction):
+        for row in deployed_extraction["SSM Business Registration"]["Directors"]:
+            row.pop("ID Type")
+        docs = build_ssm_corporate_docs(deployed_extraction, entity_type="Sdn Bhd")
+        assert all(p.id_type is None for p in docs[0].data.directors)
+
+
+class TestPassportDirectorThroughTheDeployedPipeline:
+    """TICKET-6 end-to-end: raw deployed-shape extraction for a director who
+    holds a passport, not a MyKad -- through the adapter and the full rule
+    engine. Before the fix this reported "Missing 1 IC"."""
+
+    PASSPORT_NUMBER = "A12345678"
+
+    @pytest.fixture
+    def passport_extraction(self, deployed_extraction) -> dict:
+        """NURUL AIN holds a passport: passport number on every document, a
+        bio-data page instead of a front/back pair, and no IC back side."""
+        old_nric = "900101-10-1234"
+        for row in deployed_extraction["SSM Business Registration"]["Directors"]:
+            if row["Director NRIC or Passport Number"] == old_nric:
+                row["Director NRIC or Passport Number"] = self.PASSPORT_NUMBER
+                row["ID Type"] = "Passport"
+        for row in deployed_extraction["SSM Business Registration"]["Shareholders"]:
+            if row["Shareholder NRIC or Passport Number"] == old_nric:
+                row["Shareholder NRIC or Passport Number"] = self.PASSPORT_NUMBER
+        for row in deployed_extraction["MyKad (Director ID or Passport)"]["Directors"]:
+            if row["Director NRIC or Passport Number"] == old_nric:
+                row["Director NRIC or Passport Number"] = self.PASSPORT_NUMBER
+                row["ID Type"] = "Passport"
+                row["Back Side IC Present"] = False  # a passport has no IC back
+        for row in deployed_extraction["Consent Form"]["Applicants"]:
+            if row["Director NRIC or Passport Number"] == old_nric:
+                row["Director NRIC or Passport Number"] = self.PASSPORT_NUMBER
+        return deployed_extraction
+
+    def _report(self, extraction: dict):
+        result = build_validation_bundle(
+            extraction, bundle_id="BUNDLE-PASSPORT", system_date=date(2026, 7, 7),
+            entity_type="Sdn Bhd",
+        )
+        return ValidationEngine().run(result.bundle)
+
+    def test_passport_holder_is_not_reported_as_missing_an_ic(self, passport_extraction):
+        report = self._report(passport_extraction)
+        coverage = next(r for r in report.results if r.check == "find_missing_ic_documents")
+        assert coverage.details["missing_people"] == []
+        assert coverage.passed is True
+
+    def test_absent_ic_back_side_does_not_fail_a_passport_holder(self, passport_extraction):
+        report = self._report(passport_extraction)
+        sides = next(r for r in report.results if r.check == "check_ic_front_and_back")
+        assert sides.passed is True
+
+    def test_a_passport_with_no_bio_data_page_still_fails(self, passport_extraction):
+        for row in passport_extraction["MyKad (Director ID or Passport)"]["Directors"]:
+            if row["ID Type"] == "Passport":
+                row["Front Side IC Present"] = False
+        report = self._report(passport_extraction)
+        sides = next(r for r in report.results if r.check == "check_ic_front_and_back")
+        assert sides.passed is False
+
+    def test_the_whole_passport_package_still_passes_every_check(self, passport_extraction):
+        report = self._report(passport_extraction)
+        failed = [r.check for r in report.results if r.passed is False]
+        assert failed == []
 
 
 class TestBuildFinancialStatementDocs:
@@ -310,6 +401,50 @@ class TestBuildIdentityDocuments:
         assert docs[1].data.back_image_present is False
         assert any(w.document_id == "identity_document_1" and "NRIC" in w.field for w in warnings)
 
+    def test_id_type_is_read_and_normalized(self, deployed_extraction):
+        # TICKET-6: "ID Type" already exists on the MyKad template but the
+        # adapter used to drop it, so a passport-holding director was
+        # indistinguishable from a MyKad holder downstream.
+        mykad = deployed_extraction["MyKad (Director ID or Passport)"]
+        mykad["Directors"][1]["ID Type"] = "Passport"
+        docs = build_identity_documents(deployed_extraction)
+        assert docs[0].data.id_type == "mykad"
+        assert docs[1].data.id_type == "passport"
+
+    def test_unknown_or_absent_id_type_stays_none(self):
+        warnings = []
+        docs = build_identity_documents({
+            "MyKad (Director ID or Passport)": {
+                "Directors": [
+                    {"Director Name": "A", "Director NRIC or Passport Number": "1"},
+                    {"Director Name": "B", "Director NRIC or Passport Number": "2",
+                     "ID Type": "Driving Licence"},
+                ],
+            }
+        }, warnings=warnings)
+        assert [d.data.id_type for d in docs] == [None, None]
+
+        # An absent ID Type is routine (the fallback is the stricter MyKad
+        # rule, so it can't let anything through) -- no warning. A value that
+        # *was* read off the document but isn't a recognized identity type is
+        # a real anomaly a reviewer should see.
+        id_type_warnings = [w for w in warnings if w.field.endswith("ID Type")]
+        assert [w.document_id for w in id_type_warnings] == ["identity_document_1"]
+        assert "Driving Licence" in id_type_warnings[0].current_state
+
+    def test_unreadable_ic_side_stays_null_and_is_flagged(self, deployed_extraction):
+        # TICKET-5 regression: an unreadable IC image must reach the rules as
+        # None ("couldn't tell" -> needs review), never as False or True.
+        mykad = deployed_extraction["MyKad (Director ID or Passport)"]
+        mykad["Directors"][0]["Front Side IC Present"] = None
+        warnings = []
+        docs = build_identity_documents(deployed_extraction, warnings=warnings)
+        assert docs[0].data.front_image_present is None
+        assert any(
+            w.document_id == "identity_document_0" and "Front Side IC Present" in w.field
+            for w in warnings
+        )
+
 
 class TestBuildConsentFormDocs:
     def test_one_doc_per_signatory(self, extracted_by_template):
@@ -469,8 +604,15 @@ class TestBuildValidationBundle:
         assert result.bundle.metadata.document_types_present == ["ssm_corporate_form"]
         report = ValidationEngine().run(result.bundle)
         # SSM completeness is no longer a check; the bundle still builds and the
-        # remaining rules just skip the document types that aren't present.
-        assert report.overall_passed is True
+        # remaining rules just skip the document types that aren't present...
+        assert all(
+            r.passed is None for r in report.results if r.rule_id != "package.completeness"
+        )
+        # ...but the package as a whole is incomplete, and package.completeness
+        # (FINDINGS #1) is what says so instead of letting the skips read as a pass.
+        gate = next(r for r in report.results if r.rule_id == "package.completeness")
+        assert gate.passed is False
+        assert report.overall_passed is False
 
     def test_entity_name_propagates_from_ssm_to_financial_and_bank_docs(self, extracted_by_template):
         result = build_validation_bundle(

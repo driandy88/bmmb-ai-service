@@ -24,6 +24,7 @@ from typing import Callable, Iterator, Optional
 
 from ..domain.context import BundleContext
 from ..domain.policies import ValidationPolicy
+from ._utils import normalize_id
 from .catalog import RULE_CATALOG
 from .completeness import (
     check_ic_front_and_back,
@@ -31,6 +32,7 @@ from .completeness import (
     verify_customer_information_completeness,
     verify_consent_signatures,
     verify_financial_sections_present,
+    verify_required_documents_present,
 )
 from .date_logic import (
     calculate_financial_18_month_rule,
@@ -88,6 +90,16 @@ def _bank_statement_periods(docs) -> list[dict]:
 def _financial_docs(bc: BundleContext):
     """Financial statements, or Rule 2's tax-declaration fallback."""
     return bc.financial_statement_docs or bc.tax_declaration_docs
+
+
+def _run_package_completeness(ctx: RuleRunContext) -> list[RuleOutcome]:
+    # The one rule that never returns a skip: "no documents in the bundle" is
+    # the condition it exists to fail on, not a reason to sit it out.
+    bc = ctx.bundle_context
+    result = verify_required_documents_present(
+        bc.present_document_types, bc.entity_type, policy=ctx.policy,
+    )
+    return [RuleOutcome("verify_required_documents_present", result=result)]
 
 
 def _run_financial_freshness(ctx: RuleRunContext) -> list[RuleOutcome]:
@@ -207,11 +219,36 @@ def _run_bank_statement_currency(ctx: RuleRunContext) -> list[RuleOutcome]:
     return [RuleOutcome("check_bank_statement_currency", result=result)]
 
 
+def _identity_documents_with_declared_id_type(bc: BundleContext) -> list[dict]:
+    """identity_docs as dicts, backfilling id_type from the SSM declaration.
+
+    Which images a document must carry depends on whether it's a MyKad or a
+    passport. Extraction's per-image "ID Type" is the first source, but it
+    isn't always populated -- and the SSM corporate form independently
+    declares each person's ID Type, which is the authoritative record of what
+    they're expected to produce. So when the document itself doesn't say, fall
+    back to what SSM declared for the person that document belongs to (joined
+    by NRIC/passport). Only when neither says anything does it stay unknown,
+    and unknown is held to the stricter MyKad requirement.
+    """
+    declared_by_id = {
+        normalize_id(nric): person.id_type
+        for nric, person in bc.ssm_people_by_nric.items()
+    }
+    documents = []
+    for doc in bc.identity_docs:
+        data = doc.data.model_dump(mode="json")
+        if not data.get("id_type"):
+            data["id_type"] = declared_by_id.get(normalize_id(data["nric_passport"]))
+        documents.append(data)
+    return documents
+
+
 def _run_ic_front_and_back(ctx: RuleRunContext) -> list[RuleOutcome]:
     bc = ctx.bundle_context
     if not bc.identity_docs:
         return [RuleOutcome("check_ic_front_and_back", skip_reason="No identity_document in bundle.")]
-    ic_documents = [d.data.model_dump(mode="json") for d in bc.identity_docs]
+    ic_documents = _identity_documents_with_declared_id_type(bc)
     return [RuleOutcome("check_ic_front_and_back", result=check_ic_front_and_back(ic_documents))]
 
 
@@ -219,7 +256,7 @@ def _run_ic_coverage(ctx: RuleRunContext) -> list[RuleOutcome]:
     bc = ctx.bundle_context
     if not bc.identity_docs:
         return [RuleOutcome("find_missing_ic_documents", skip_reason="No identity_document in bundle.")]
-    ic_documents = [d.data.model_dump(mode="json") for d in bc.identity_docs]
+    ic_documents = _identity_documents_with_declared_id_type(bc)
     # Directors only: shareholders are not required to submit an IC.
     result = find_missing_ic_documents(bc.ssm_directors, ic_documents)
     return [RuleOutcome("find_missing_ic_documents", result=result)]
@@ -301,6 +338,7 @@ def _run_ic_number_match(ctx: RuleRunContext) -> list[RuleOutcome]:
 
 
 RULE_RUNNERS: dict[str, RuleRunner] = {
+    "package.completeness": _run_package_completeness,
     "financial_statement.freshness": _run_financial_freshness,
     "financial_statement.consecutive_years": _run_financial_consecutive_years,
     "financial_statement.completeness": _run_financial_sections_present,

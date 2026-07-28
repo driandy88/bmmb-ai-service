@@ -108,7 +108,7 @@ class TestResultsByDocument:
         dumped = report.model_dump(mode="json")
         assert "results_by_document" in dumped
         assert set(dumped["results_by_document"]) == {
-            "SSM_CORPORATE_FORM", "FINANCIAL_STATEMENT", "BANK_STATEMENT",
+            "PACKAGE", "SSM_CORPORATE_FORM", "FINANCIAL_STATEMENT", "BANK_STATEMENT",
             "IDENTITY_DOCUMENT", "CONSENT_FORM", "CUSTOMER_INFORMATION",
         }
 
@@ -150,6 +150,189 @@ class TestFailingBundle:
         assert report.overall_status is ValidationStatus.FAILED
 
 
+class TestPackageCompletenessGate:
+    """FINDINGS #1: almost every rule degrades to not_applicable on a missing
+    document, so without a gate outside the rule loop a near-empty package
+    reads as a clean pass. package.completeness is that gate."""
+
+    _EMPTY = {
+        "bundle_id": "BUNDLE-EMPTY",
+        "metadata": {
+            "total_documents_received": 0,
+            "system_date": "2026-07-08",
+            "document_types_present": [],
+        },
+        "extracted_documents": [],
+    }
+
+    def test_empty_bundle_no_longer_reads_as_a_clean_pass(self):
+        report = _run(self._EMPTY)
+        gate = next(r for r in report.results if r.rule_id == "package.completeness")
+        assert gate.passed is False
+        assert gate.status is ValidationStatus.FAILED
+        assert report.overall_passed is False
+
+    def test_gate_always_runs_and_is_never_not_applicable(self):
+        # The whole point: unlike every other rule, this one can't degrade to
+        # not_applicable when documents are missing -- that's what it checks.
+        report = _run(self._EMPTY)
+        gate = next(r for r in report.results if r.rule_id == "package.completeness")
+        assert gate.status is not ValidationStatus.NOT_APPLICABLE
+
+    def test_complete_package_passes_the_gate(self, passing_bundle_raw):
+        report = _run(passing_bundle_raw)
+        gate = next(r for r in report.results if r.rule_id == "package.completeness")
+        assert gate.passed is True
+
+    def test_gate_is_reported_under_its_own_document_group(self, passing_bundle_raw):
+        report = _run(passing_bundle_raw)
+        package_checks = {r.check for r in report.results_by_document["PACKAGE"]}
+        assert package_checks == {"verify_required_documents_present"}
+
+    def test_sole_prop_may_satisfy_the_financials_slot_with_a_tax_declaration(self):
+        raw = dict(self._EMPTY)
+        raw["extracted_documents"] = [
+            {
+                "document_id": "doc_ssm", "document_type": "ssm_corporate_form",
+                "data": {
+                    "entity_name": "SOLO TRADING", "business_registration_number": "SP001",
+                    "entity_type": "Sole Proprietor",
+                },
+            },
+            {
+                "document_id": "doc_tax", "document_type": "tax_declaration",
+                "data": {"entity_name": "SOLO TRADING", "financial_year_end": "2025-12-31"},
+            },
+        ]
+        report = _run(raw)
+        gate = next(r for r in report.results if r.rule_id == "package.completeness")
+        missing = [slot for slot in gate.details["missing_document_slots"]]
+        assert ["financial_statement", "tax_declaration"] not in missing
+
+    def test_sdn_bhd_may_not_substitute_a_tax_declaration_for_audited_statements(self):
+        raw = dict(self._EMPTY)
+        raw["extracted_documents"] = [
+            {
+                "document_id": "doc_ssm", "document_type": "ssm_corporate_form",
+                "data": {
+                    "entity_name": "ALPHA SDN BHD", "business_registration_number": "202301",
+                    "entity_type": "Sdn Bhd",
+                },
+            },
+            {
+                "document_id": "doc_tax", "document_type": "tax_declaration",
+                "data": {"entity_name": "ALPHA SDN BHD", "financial_year_end": "2025-12-31"},
+            },
+        ]
+        report = _run(raw)
+        gate = next(r for r in report.results if r.rule_id == "package.completeness")
+        assert ["financial_statement"] in gate.details["missing_document_slots"]
+
+
+class TestPassportDirector:
+    """TICKET-6: a director holding a passport instead of a Malaysian IC is
+    validated against the passport requirements, not reported as missing an IC."""
+
+    def _passport_bundle(self, **identity_overrides) -> dict:
+        identity_data = {
+            "individual_name": "JAMES WRIGHT",
+            "nric_passport": "A12345678",
+            "id_type": "passport",
+            "front_image_present": True,
+            "back_image_present": None,
+            **identity_overrides,
+        }
+        return {
+            "bundle_id": "BUNDLE-PASSPORT",
+            "metadata": {
+                "total_documents_received": 2,
+                "system_date": "2026-07-08",
+                "document_types_present": ["ssm_corporate_form", "identity_document"],
+            },
+            "extracted_documents": [
+                {
+                    "document_id": "doc_ssm",
+                    "document_type": "ssm_corporate_form",
+                    "data": {
+                        "entity_name": "ALPHA TECH SOLUTIONS SDN BHD",
+                        "business_registration_number": "202301098765",
+                        "entity_type": "Sdn Bhd",
+                        "directors": [{
+                            "name": "JAMES WRIGHT",
+                            "nric_passport": "A12345678",
+                            "id_type": "passport",
+                        }],
+                    },
+                },
+                {
+                    "document_id": "doc_passport",
+                    "document_type": "identity_document",
+                    "data": identity_data,
+                },
+            ],
+        }
+
+    def test_passport_holder_is_not_reported_as_missing_an_ic(self):
+        report = _run(self._passport_bundle())
+        coverage = next(r for r in report.results if r.check == "find_missing_ic_documents")
+        assert coverage.passed is True
+        assert coverage.details["missing_people"] == []
+
+    def test_absent_back_image_does_not_fail_a_passport(self):
+        report = _run(self._passport_bundle(back_image_present=False))
+        sides = next(r for r in report.results if r.check == "check_ic_front_and_back")
+        assert sides.passed is True
+
+    def test_missing_passport_bio_data_page_still_fails(self):
+        report = _run(self._passport_bundle(front_image_present=False))
+        sides = next(r for r in report.results if r.check == "check_ic_front_and_back")
+        assert sides.passed is False
+        assert sides.status is ValidationStatus.FAILED
+
+    def test_passport_number_is_still_matched_against_the_ssm_record(self):
+        report = _run(self._passport_bundle(nric_passport="B99999999"))
+        number_match = next(r for r in report.results if r.check.startswith("strict_match_ic_numbers["))
+        assert number_match.passed is False
+        assert number_match.status is ValidationStatus.FAILED
+
+
+class TestUnreadableIcImageNeedsReview:
+    """TICKET-5: an unreadable (null) IC side is 'needs review', never a pass.
+
+    Verified, not fixed -- the tri-state was already handled correctly; these
+    lock the behaviour in end-to-end so it can't silently collapse into a pass.
+    """
+
+    def _with_identity_flags(self, passing_bundle_raw, **flags) -> dict:
+        raw = passing_bundle_raw.copy()
+        raw["extracted_documents"] = [
+            dict(doc, data=dict(doc["data"], **flags))
+            if doc["document_type"] == "identity_document"
+            else doc
+            for doc in raw["extracted_documents"]
+        ]
+        return raw
+
+    def test_unreadable_front_is_needs_review_not_passed(self, passing_bundle_raw):
+        report = _run(self._with_identity_flags(passing_bundle_raw, front_image_present=None))
+        sides = next(r for r in report.results if r.check == "check_ic_front_and_back")
+        assert sides.passed is None
+        assert sides.status is ValidationStatus.NEEDS_REVIEW
+        assert report.overall_status is ValidationStatus.NEEDS_REVIEW
+
+    def test_unreadable_back_is_needs_review_not_passed(self, passing_bundle_raw):
+        report = _run(self._with_identity_flags(passing_bundle_raw, back_image_present=None))
+        sides = next(r for r in report.results if r.check == "check_ic_front_and_back")
+        assert sides.status is ValidationStatus.NEEDS_REVIEW
+
+    def test_confirmed_missing_side_still_outranks_unreadable(self, passing_bundle_raw):
+        report = _run(self._with_identity_flags(
+            passing_bundle_raw, front_image_present=None, back_image_present=False,
+        ))
+        sides = next(r for r in report.results if r.check == "check_ic_front_and_back")
+        assert sides.status is ValidationStatus.FAILED
+
+
 class TestSkippedChecksForIncompleteBundles:
     def test_missing_document_types_are_skipped_not_failed(self):
         raw = {
@@ -188,11 +371,17 @@ class TestSkippedChecksForIncompleteBundles:
             assert check.passed is None
             assert check.status is ValidationStatus.NOT_APPLICABLE
 
-        # With only an SSM doc present and every other check skipped, nothing
-        # fails -- a skipped check never flips overall_passed to False.
-        assert report.overall_passed is True
+        # A skipped check never flips overall_passed to False on its own --
+        # but the missing documents those checks skipped over are exactly what
+        # package.completeness (FINDINGS #1) is there to fail on.
+        assert all(
+            r.status is ValidationStatus.NOT_APPLICABLE
+            for r in report.results
+            if r.rule_id != "package.completeness"
+        )
+        assert next(r for r in report.results if r.rule_id == "package.completeness").passed is False
 
-    def test_empty_bundle_produces_only_skips(self):
+    def test_empty_bundle_produces_only_skips_plus_a_failed_completeness_gate(self):
         raw = {
             "bundle_id": "BUNDLE-EMPTY",
             "metadata": {
@@ -203,10 +392,14 @@ class TestSkippedChecksForIncompleteBundles:
             "extracted_documents": [],
         }
         report = _run(raw)
-        assert report.overall_passed is True
-        assert all(r.passed is None for r in report.results)
+        assert all(
+            r.passed is None for r in report.results if r.rule_id != "package.completeness"
+        )
         assert report.entity_name == ""
         assert report.entity_type == ""
+        # Nothing in the bundle to object to, rule by rule -- the gate is the
+        # only thing standing between an empty package and a clean pass.
+        assert report.overall_passed is False
 
 
 class TestCrossDocumentMatching:

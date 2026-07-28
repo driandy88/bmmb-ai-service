@@ -134,6 +134,114 @@ class TestRegistryOutcomeShape:
         assert len(entity_match_outcomes) == len(expected_docs)
 
 
+class TestPackageCompletenessRunner:
+    """FINDINGS #1: the gate rule, at the registry seam."""
+
+    def test_shipped_policy_actually_configures_required_slots(self):
+        # An empty slot list switches the gate off entirely (see
+        # ValidationPolicy.required_document_slots) -- the shipped policy must
+        # never regress to that fail-open state.
+        assert BMMB_SME_POLICY_V1.required_document_slots
+
+    def test_gate_produces_a_result_even_when_the_bundle_is_empty(self):
+        raw = {
+            "bundle_id": "BUNDLE-EMPTY",
+            "metadata": {
+                "total_documents_received": 0,
+                "system_date": "2026-07-08",
+                "document_types_present": [],
+            },
+            "extracted_documents": [],
+        }
+        context = _context(raw)
+        system_date = ValidationBundle(**raw).metadata.system_date
+        pairs = dict(run_all_rules(context, BMMB_SME_POLICY_V1, system_date))
+
+        gate = pairs["package.completeness"]
+        assert gate.skip_reason is None
+        assert gate.result["passed"] is False
+
+    def test_present_document_types_come_from_the_documents_not_the_metadata(self):
+        # Caller-declared metadata must not be able to talk the gate into
+        # believing a document arrived when it didn't.
+        raw = _ssm_only_raw([], [])
+        raw["metadata"]["document_types_present"] = [
+            "ssm_corporate_form", "financial_statement", "bank_statement",
+            "identity_document", "consent_form", "customer_information",
+        ]
+        context = _context(raw)
+        assert context.present_document_types == ["ssm_corporate_form"]
+
+        pairs = dict(run_all_rules(context, BMMB_SME_POLICY_V1, ValidationBundle(**raw).metadata.system_date))
+        assert pairs["package.completeness"].result["passed"] is False
+
+    def test_slot_list_is_chosen_by_resolved_entity_type(self):
+        # "Perniagaan Tunggal" resolves to the sole-prop key via the alias
+        # table, which is what opens the Borang B alternative.
+        raw = _ssm_only_raw([], [])
+        raw["extracted_documents"][0]["data"]["entity_type"] = "Perniagaan Tunggal"
+        context = _context(raw)
+        pairs = dict(run_all_rules(context, BMMB_SME_POLICY_V1, ValidationBundle(**raw).metadata.system_date))
+
+        details = pairs["package.completeness"].result["details"]
+        assert details["resolved_entity_type_key"] == "sole prop"
+        assert ["financial_statement", "tax_declaration"] in details["required_document_slots"]
+
+    def test_sole_prop_slots_stay_in_step_with_the_default_slots(self):
+        # The sole-prop list is derived from the default one so a newly-added
+        # mandatory slot can't be silently left out of it. Only the financials
+        # slot may differ.
+        default_slots = BMMB_SME_POLICY_V1.required_document_slots
+        for entity_key in BMMB_SME_POLICY_V1.required_document_slots_by_entity:
+            override = BMMB_SME_POLICY_V1.required_document_slots_for(entity_key)
+            assert len(override) == len(default_slots)
+            for override_slot, default_slot in zip(override, default_slots):
+                assert set(default_slot) <= set(override_slot)
+
+
+class TestIdentityDocumentTypeFallsBackToTheSsmDeclaration:
+    """TICKET-6: the SSM form independently declares each person's ID Type.
+
+    Extraction doesn't always populate "ID Type" on the identity document
+    itself, so when it doesn't, the SSM declaration is what says whether to
+    require a MyKad's front+back or a passport's single bio-data page."""
+
+    _DIRECTOR_NRIC = "A12345678"
+
+    def _raw(self, ssm_id_type, doc_id_type) -> dict:
+        raw = _ssm_only_raw(
+            [{"name": "JAMES WRIGHT", "nric_passport": self._DIRECTOR_NRIC, "id_type": ssm_id_type}],
+            [],
+        )
+        raw["extracted_documents"].append({
+            "document_id": "identity_document_0",
+            "document_type": "identity_document",
+            "data": {
+                "individual_name": "JAMES WRIGHT",
+                "nric_passport": self._DIRECTOR_NRIC,
+                "id_type": doc_id_type,
+                "front_image_present": True,
+                "back_image_present": False,  # no IC back -- fine for a passport
+            },
+        })
+        return raw
+
+    def _front_and_back(self, raw: dict):
+        context = _context(raw)
+        pairs = dict(run_all_rules(context, BMMB_SME_POLICY_V1, ValidationBundle(**raw).metadata.system_date))
+        return pairs["identity_document.front_and_back"].result
+
+    def test_ssm_declared_passport_covers_a_document_that_doesnt_state_its_type(self):
+        assert self._front_and_back(self._raw("passport", None))["passed"] is True
+
+    def test_the_documents_own_id_type_wins_when_it_has_one(self):
+        # SSM says nothing, the document says passport -> passport rules.
+        assert self._front_and_back(self._raw(None, "passport"))["passed"] is True
+
+    def test_neither_source_stating_a_type_stays_on_the_strict_mykad_rule(self):
+        assert self._front_and_back(self._raw(None, None))["passed"] is False
+
+
 class TestBankStatementContinuityIsNeverGatedOnDocumentCount:
     """Continuity is a date/coverage question, not a document-count one --
     a single upload covering all 6 months in one document is exactly as

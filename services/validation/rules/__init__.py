@@ -9,12 +9,14 @@ from .date_logic import (
     months_between,
     verify_bank_statement_duration,
 )
+from ._utils import resolve_entity_type_key
 from .completeness import (
     check_ic_front_and_back,
     find_missing_ic_documents,
     verify_customer_information_completeness,
     verify_consent_signatures,
     verify_financial_sections_present,
+    verify_required_documents_present,
 )
 from .matching import (
     entity_similarity,
@@ -38,7 +40,9 @@ __all__ = [
     "check_bank_statement_bank_consistency",
     "check_bank_statement_currency",
     "verify_bank_statement_duration",
+    "resolve_entity_type_key",
     "months_between",
+    "verify_required_documents_present",
     "verify_financial_sections_present",
     "find_missing_ic_documents",
     "check_ic_front_and_back",

@@ -5,7 +5,7 @@ Deterministic checks run by the validation service. Source of truth is
 [`domain/policies.py`](../domain/policies.py) (`BMMB_SME_POLICY_V1`).
 
 - **Policy:** `bmmb-sme-2026-01`
-- **Active rules:** 15
+- **Active rules:** 16
 - **Live catalog:** `GET /rules` on a running server returns this same list as JSON.
 
 Each rule returns one of three outcomes:
@@ -16,6 +16,34 @@ Each rule returns one of three outcomes:
 | **FAIL** | Check ran and the requirement is not met. |
 | **NEEDS REVIEW** | Ran but the data was inconclusive (e.g. an unconfirmed signature). |
 | **N/A (skipped)** | The document this rule needs isn't in the bundle. A skip never fails the bundle on its own. |
+
+---
+
+## Package Completeness
+
+| Rule ID | Check | What it verifies |
+|---|---|---|
+| `package.completeness` | `verify_required_documents_present` | The submitted package contains every mandatory document type for the entity. |
+
+This is the one rule that **never returns N/A**. Every other rule skips when the
+document it reads is absent, so without this gate a package with nothing in it
+produces nothing but skips and reads as a clean pass.
+
+Mandatory document types (all of them required):
+
+| Slot | Sdn Bhd / default | Sole Prop / Partnership |
+|---|---|---|
+| SSM | `ssm_corporate_form` | `ssm_corporate_form` |
+| Financials | `financial_statement` | `financial_statement` **or** `tax_declaration` |
+| Bank | `bank_statement` | `bank_statement` |
+| Identity | `identity_document` | `identity_document` |
+| Consent | `consent_form` | `consent_form` |
+| Customer info | `customer_information` | `customer_information` |
+
+Only a Sole Prop / Partnership may satisfy the financials slot with Borang B
+(`tax_declaration`); a Sdn Bhd must produce audited financial statements. The
+entity type is resolved through the same alias/fuzzy table the bank-statement
+minimum uses, so "Perniagaan Tunggal" or "Enterprise" get the sole-prop slots.
 
 ---
 
@@ -70,8 +98,26 @@ to the tax-declaration (Borang B) documents.
 
 | Rule ID | Check | What it verifies |
 |---|---|---|
-| `identity_document.front_and_back` | `check_ic_front_and_back` | Each IC has both front and back images. |
-| `identity_document.coverage` | `find_missing_ic_documents` | Every required party (director/shareholder) has a corresponding IC document. |
+| `identity_document.front_and_back` | `check_ic_front_and_back` | Each identity document carries the images its type requires. |
+| `identity_document.coverage` | `find_missing_ic_documents` | Every required party (director/shareholder) has a corresponding identity document. |
+
+A director may hold **either** a Malaysian MyKad **or** a passport; both are
+accepted identity documents. What counts as a complete document differs by type:
+
+| ID type | Required images |
+|---|---|
+| MyKad | front **and** back |
+| Passport | bio-data page only (a passport has no IC-style back) |
+| Not stated / unrecognized | held to the stricter MyKad requirement |
+
+The type comes from the `ID Type` attribute, read from the identity document
+itself first and falling back to the SSM form's declaration for that person
+(joined by NRIC/passport) when the document doesn't state one. An `ID Type`
+that extraction returned but this service doesn't recognize is recorded as an
+`AdapterWarning` and treated as not stated.
+
+Each image is tri-state: confirmed present (**PASS**), confirmed missing
+(**FAIL**), or unreadable/undetermined (**NEEDS REVIEW** — never a pass).
 
 ---
 
@@ -110,4 +156,4 @@ SSM form as the source of truth.
 | Rule ID | Check | What it verifies |
 |---|---|---|
 | `entity_name.match` | `strict_match_entity_names` | The entity name matches across documents (bank statement, financial statement, tax declaration, consent form) against the SSM form. Falls back to fuzzy match if strict fails. |
-| `identity_document.number_match` | `strict_match_ic_numbers` | Each party's NRIC/passport on their IC document matches the number recorded on the SSM form. |
+| `identity_document.number_match` | `strict_match_ic_numbers` | Each party's NRIC/passport on their identity document matches the number recorded on the SSM form. Applies to passport numbers exactly as it does to NRICs. |

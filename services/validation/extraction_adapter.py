@@ -70,7 +70,7 @@ from .bundle import (
     TaxDeclarationDoc,
     ValidationBundle,
 )
-from .rules._utils import NOT_AVAILABLE
+from .rules._utils import NOT_AVAILABLE, normalize_id_type
 
 
 class AdapterDataGapError(ValueError):
@@ -137,6 +137,30 @@ def _optional_str(
         ))
         return None
     return str(value)
+
+
+def _safe_id_type(
+    value: Any, *, warnings: list[AdapterWarning], document_type: str, document_id: str, field: str,
+) -> Optional[str]:
+    """Resolve an "ID Type" attribute to "mykad" / "passport", or None.
+
+    None is safe by construction -- an unknown ID Type is held to the stricter
+    MyKad requirement downstream (see IdentityDocumentData.id_type), so it can
+    never let a document through. A *null* ID Type is therefore routine and
+    doesn't warn. A non-null value that resolves to nothing is different: it
+    means extraction read something real off the document that this service
+    doesn't recognize, and a reviewer should see the string it couldn't place.
+    """
+    resolved = normalize_id_type(value)
+    if resolved is None and value is not None and str(value).strip():
+        warnings.append(AdapterWarning(
+            document_type=document_type, document_id=document_id, field=field,
+            message=f"{field} was not a recognized identity-document type; "
+                    f"defaulting to the stricter MyKad requirement.",
+            current_state=f"{value!r} (unrecognized)",
+            expected_state="a MyKad or passport identity-document type",
+        ))
+    return resolved
 
 
 def _safe_bool(
@@ -300,6 +324,13 @@ def _build_ssm_doc(
                 nric_passport=_safe_str((row or {}).get("Director NRIC or Passport Number"), warnings=warnings,
                                          document_type="ssm_corporate_form", document_id=document_id,
                                          field=f"Directors[{i}].Director NRIC or Passport Number"),
+                # Says which identity document this director must produce
+                # (MyKad vs passport) -- the SSM form is the authoritative
+                # declaration, used to fill the gap when the identity document
+                # itself doesn't state its own type.
+                id_type=_safe_id_type((row or {}).get("ID Type"), warnings=warnings,
+                                       document_type="ssm_corporate_form", document_id=document_id,
+                                       field=f"Directors[{i}].ID Type"),
             )
             for i, row in enumerate(director_rows)
         ]
@@ -646,6 +677,11 @@ def build_identity_documents(
     Front Side IC Present/Back Side IC Present/ID Type, so a name can't drift onto
     another director's NRIC or IC-present flags.
 
+    "ID Type" resolves to "mykad" or "passport" (or None when absent /
+    unrecognized), which is what tells the identity rules whether to require a
+    front+back pair or a single passport bio-data page -- see
+    IdentityDocumentData.id_type.
+
     GAP: no "expiry_date" attribute exists on the MyKad template --
     IdentityDocumentData.expiry_date is always None until one is added.
     """
@@ -667,6 +703,8 @@ def build_identity_documents(
                                            document_id=f"identity_document_{i}", field=f"Directors[{i}].Director Name"),
                 nric_passport=_safe_str((row or {}).get("Director NRIC or Passport Number"), warnings=warnings, document_type="identity_document",
                                          document_id=f"identity_document_{i}", field=f"Directors[{i}].Director NRIC or Passport Number"),
+                id_type=_safe_id_type((row or {}).get("ID Type"), warnings=warnings, document_type="identity_document",
+                                       document_id=f"identity_document_{i}", field=f"Directors[{i}].ID Type"),
                 front_image_present=_safe_bool((row or {}).get("Front Side IC Present"), warnings=warnings, document_type="identity_document",
                                                 document_id=f"identity_document_{i}", field=f"Directors[{i}].Front Side IC Present",
                                                 default=None),

@@ -20,33 +20,15 @@ description verbatim; per-argument text lives here, not in a separate
 schema field.
 """
 
-import difflib
 from datetime import date
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from dateutil.relativedelta import relativedelta
 
-from ._utils import to_date
+from ._utils import best_fuzzy_match, resolve_entity_type_key, to_date
 from ..domain.policies import BMMB_SME_POLICY_V1, ValidationPolicy
 
 MonthKey = Tuple[int, int]  # (year, month)
-
-
-def _best_fuzzy_match(normalized: str, candidates: Iterable[str]) -> Tuple[Optional[str], float]:
-    """Best difflib similarity match for `normalized` among `candidates`, with its score.
-
-    Shared by the bank-name and entity-type alias resolvers below -- same
-    "normalize, then score every known candidate, keep the best" shape, just
-    against different candidate sets.
-    """
-    best_candidate = None
-    best_score = 0.0
-    for candidate in candidates:
-        score = difflib.SequenceMatcher(None, normalized, candidate).ratio()
-        if score > best_score:
-            best_score = score
-            best_candidate = candidate
-    return best_candidate, best_score
 
 
 def _month_key_str(month: MonthKey) -> str:
@@ -252,33 +234,6 @@ def check_bank_statement_continuity(statements: List[Dict[str, object]]) -> Dict
     }
 
 
-def _resolve_entity_type_key(entity_type: str, policy: ValidationPolicy, threshold: float = 0.85) -> Optional[str]:
-    """Resolve a raw entity_type string to one of policy's own
-    minimum_bank_statement_months_by_entity keys, tolerating typos and
-    Malay-language variants (e.g. "Perniagaan Tunggal", "Enterprise",
-    "Perkongsian", "llp") via policy.entity_type_aliases, then a conservative
-    fuzzy-match fallback for variants that table hasn't seen yet -- so an
-    unrecognized spelling of a real sole-prop/partnership entity doesn't
-    silently resolve to the lenient Sdn-Bhd-shaped default. Returns None
-    (falls through to the default) only when nothing -- exact, alias, or
-    fuzzy -- resolves confidently; a genuinely blank/unknown entity_type is
-    a distinct, deliberately out-of-scope problem (TICKET-9/D6).
-    """
-    normalized = entity_type.strip().lower()
-    if not normalized:
-        return None
-    if normalized in policy.minimum_bank_statement_months_by_entity:
-        return normalized
-    if normalized in policy.entity_type_aliases:
-        return policy.entity_type_aliases[normalized]
-
-    known_keys = set(policy.minimum_bank_statement_months_by_entity) | set(policy.entity_type_aliases.values())
-    best_key, best_score = _best_fuzzy_match(normalized, known_keys)
-    if best_key is not None and best_score >= threshold:
-        return best_key
-    return None
-
-
 def verify_bank_statement_duration(
     statements: List[Dict[str, object]],
     entity_type: str,
@@ -318,7 +273,7 @@ def verify_bank_statement_duration(
     # (e.g. Jan 31 -> Jun 30 has a zero day-remainder) used to undercount by one.
     months_covered = len(continuity["details"]["covered_months"])
 
-    resolved_key = _resolve_entity_type_key(entity_type, policy)
+    resolved_key = resolve_entity_type_key(entity_type, policy)
     min_required = (
         policy.minimum_bank_statement_months_by_entity[resolved_key]
         if resolved_key is not None
@@ -488,7 +443,7 @@ def _canonical_bank_name(raw: str, threshold: float = 0.85) -> str:
     if alias_hit is not None:
         return alias_hit
 
-    best_alias, best_score = _best_fuzzy_match(normalized, _BANK_NAME_ALIASES)
+    best_alias, best_score = best_fuzzy_match(normalized, _BANK_NAME_ALIASES)
     if best_alias is not None and best_score >= threshold:
         return _BANK_NAME_ALIASES[best_alias]
     return normalized
