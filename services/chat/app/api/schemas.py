@@ -76,6 +76,11 @@ class IntentBlock(BaseModel):
     primary: Optional[str] = None
     confidence: float = 0.0
     secondary: Optional[str] = None
+    # Human-readable taxonomy detail for `primary` (from intents.yaml), so the UI
+    # can show what a cat_id means instead of just the code.
+    category: Optional[str] = None      # short label, e.g. "General knowledge / chit-chat"
+    definition: Optional[str] = None    # one-line meaning of the intent
+    type: Optional[str] = None          # in_scope | out_of_scope | adversarial | ambiguous | social
 
 
 class UiAction(BaseModel):

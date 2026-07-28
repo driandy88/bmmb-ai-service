@@ -104,6 +104,13 @@ _KEYWORDS: dict[str, list[str]] = {
     "AMB-03": ["need money for my business", "i need funding", "need financing for my business",
                "need money"],
     "AMB-05": ["beer", "alcohol", "liquor", "gambling", "casino", "pork", "nightclub", "conventional loan"],
+    # Social pleasantries. Keywords are kept specific (no bare "hi"/"bye") since
+    # the stub matches substrings. A greeting bundled with a real request loses
+    # on hit-count to the in-scope intent, which is the intended behaviour.
+    "SOC-01": ["hello", "assalamualaikum", "salam", "good morning", "good afternoon",
+               "good evening", "selamat pagi", "selamat petang", "selamat datang"],
+    "SOC-02": ["thank you", "thanks", "terima kasih", "appreciate it", "much appreciated",
+               "that's all for now", "goodbye"],
 }
 
 _MONEY_RE = re.compile(r"(?:rm\s*)?(\d[\d,]*(?:\.\d+)?)\s*(juta|million|mil|m|k|ribu|thousand)?\b", re.I)

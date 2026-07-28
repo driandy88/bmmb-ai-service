@@ -11,6 +11,7 @@ cache so the notebook can re-score after an edit.
 """
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -86,10 +87,12 @@ class ResponseStrategy:
     terminal: bool = True          # R8 (clarification) is non-terminal
 
     def wording(self, **fmt: Any) -> str:
-        """Deterministically pick the first approved variant (business can
-        reorder in YAML). `.format(**fmt)` fills placeholders like
-        {financing_product}; missing keys are left literal, never raised."""
-        text = self.variants[0] if self.variants else ""
+        """Pick a RANDOM approved variant so canned replies vary between turns
+        instead of always repeating the first (business owns the list in YAML —
+        every variant is pre-approved, so any is safe to send; refusals R6/R7 are
+        deliberately generic, never attack-tailored). `.format(**fmt)` fills
+        placeholders like {financing_product}; missing keys stay literal."""
+        text = random.choice(self.variants) if self.variants else ""
         try:
             return text.format(**fmt)
         except (KeyError, IndexError):

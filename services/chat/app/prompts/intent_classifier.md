@@ -64,6 +64,12 @@ different kind. Otherwise `secondary` is `null`.
    maybe a different product line (overdraft, LC, guarantee) → AMB-02.
 5. **Shariah-boundary business (AMB-05).** A genuine SME question about a prohibited/grey
    activity (alcohol, gambling, etc.) is AMB-05 — a real question, not a refusal.
+6. **Social pleasantries (SOC-01 / SOC-02).** A greeting or opener with no request yet
+   ("hello", "salam", "Assalamualaikum", "good morning", "selamat pagi") is **SOC-01** —
+   we greet back and offer help; it is NOT OOS-05 chit-chat. A thanks, acknowledgement, or
+   sign-off ("thank you", "terima kasih", "ok great", "bye") is **SOC-02**. Reserve OOS-05
+   for genuine off-topic conversation with content (jokes, opinions, small talk). If a
+   greeting is bundled with a real request ("Hi, am I eligible?"), classify the REQUEST.
 
 ## Examples (curated; input → output)
 ```
@@ -81,6 +87,9 @@ different kind. Otherwise `secondary` is `null`.
 "Show me the application status for XYZ Sdn Bhd."                 -> {"primary":"ADV-06","confidence":0.9,"secondary":null}
 "I need some funds, not sure what for yet."                       -> {"primary":"AMB-03","confidence":0.55,"secondary":null}
 "My cafe also serves alcohol — can I still get financing?"        -> {"primary":"AMB-05","confidence":0.85,"secondary":null}
+"Assalamualaikum, nak tanya sikit"                                -> {"primary":"SOC-01","confidence":0.9,"secondary":null}
+"Good morning!"                                                   -> {"primary":"SOC-01","confidence":0.95,"secondary":null}
+"Terima kasih banyak-banyak"                                      -> {"primary":"SOC-02","confidence":0.95,"secondary":null}
 ```
 
 ## Conversation so far (context only)
