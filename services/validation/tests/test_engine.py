@@ -227,6 +227,90 @@ class TestCrossDocumentMatching:
         assert any(r.passed is False for r in mismatch_checks)
         assert report.overall_passed is False
 
+    def test_changed_ic_number_is_caught_not_dropped(self, passing_bundle_raw):
+        # Regression for the fail-open bug: a director's identity_document
+        # NRIC no longer matching the SSM record must surface as a FAILED
+        # strict_match_ic_numbers[...] result, not silently disappear from
+        # the report (the join is by name now, not by the NRIC being compared).
+        raw = passing_bundle_raw.copy()
+        raw["extracted_documents"] = [
+            dict(doc, data=dict(doc["data"], nric_passport="990101-01-9999"))
+            if doc["document_id"] == "doc_005"
+            else doc
+            for doc in raw["extracted_documents"]
+        ]
+        report = _run(raw)
+        ic_number_checks = [r for r in report.results if r.check.startswith("strict_match_ic_numbers[")]
+        assert len(ic_number_checks) == 2
+        aiman_check = next(r for r in ic_number_checks if "MOHD AIMAN" in r.check)
+        assert aiman_check.passed is False
+        assert aiman_check.status is ValidationStatus.FAILED
+        assert report.overall_passed is False
+
+    def test_unmatched_identity_document_needs_review_not_silence(self, passing_bundle_raw):
+        # If no identity document's name plausibly belongs to a director at
+        # all, that director must still get a result (NEEDS_REVIEW), not be
+        # skipped as if nothing needed comparing.
+        raw = passing_bundle_raw.copy()
+        raw["extracted_documents"] = [
+            dict(doc, data=dict(doc["data"], individual_name="ZAINAL BIN ABU BAKAR"))
+            if doc["document_id"] == "doc_005"
+            else doc
+            for doc in raw["extracted_documents"]
+        ]
+        report = _run(raw)
+        ic_number_checks = [r for r in report.results if r.check.startswith("strict_match_ic_numbers[")]
+        assert len(ic_number_checks) == 2
+        aiman_check = next(r for r in ic_number_checks if "MOHD AIMAN" in r.check)
+        assert aiman_check.passed is None
+        assert aiman_check.status is ValidationStatus.NEEDS_REVIEW
+        # The other director's own document is untouched and still matches.
+        ain_check = next(r for r in ic_number_checks if "NURUL AIN" in r.check)
+        assert ain_check.passed is True
+        assert report.overall_passed is True  # NEEDS_REVIEW never flips overall_passed
+
+    def test_ocr_name_variant_still_matches_via_fuzzy_join(self, passing_bundle_raw):
+        # A minor OCR-style name variant on the identity document (dropped
+        # "BIN") should still join to the right director by name and then
+        # correctly compare NRIC, rather than failing to join at all.
+        raw = passing_bundle_raw.copy()
+        raw["extracted_documents"] = [
+            dict(doc, data=dict(doc["data"], individual_name="MOHD AIMAN ZULKIFLI"))
+            if doc["document_id"] == "doc_005"
+            else doc
+            for doc in raw["extracted_documents"]
+        ]
+        report = _run(raw)
+        ic_number_checks = [r for r in report.results if r.check.startswith("strict_match_ic_numbers[")]
+        aiman_check = next(r for r in ic_number_checks if "MOHD AIMAN" in r.check)
+        assert aiman_check.passed is True
+        assert report.overall_passed is True
+
+    def test_shareholder_with_no_ic_is_silently_skipped_not_flagged(self, passing_bundle_raw):
+        # Shareholders aren't required to submit an IC at all (unlike
+        # directors) -- a shareholder with no identity document in the bundle
+        # must produce no strict_match_ic_numbers result for them, not a
+        # NEEDS_REVIEW "no confident match" warning. Regression caught by the
+        # live-pipeline empirical check: the fix's greedy name-join initially
+        # flagged every unmatched person, including shareholders who were
+        # never expected to have a document at all.
+        raw = passing_bundle_raw.copy()
+        raw["extracted_documents"] = [
+            dict(doc, data=dict(
+                doc["data"],
+                shareholders=(doc["data"].get("shareholders") or []) + [
+                    {"name": "TENGKU IDRIS BIN ISMAIL", "nric_passport": "700101-14-5555"}
+                ],
+            ))
+            if doc["document_type"] == "ssm_corporate_form" and doc["data"].get("shareholders")
+            else doc
+            for doc in raw["extracted_documents"]
+        ]
+        report = _run(raw)
+        ic_number_checks = [r for r in report.results if r.check.startswith("strict_match_ic_numbers[")]
+        assert not any("TENGKU IDRIS" in r.check for r in ic_number_checks)
+        assert report.overall_passed is True
+
 
 class TestNewRulesWiring:
     def test_overdraft_is_caught(self, passing_bundle_raw):

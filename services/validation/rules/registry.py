@@ -42,7 +42,12 @@ from .date_logic import (
     check_financial_consecutive_years,
     verify_bank_statement_duration,
 )
-from .matching import fuzzy_match_entity_names, strict_match_entity_names, strict_match_ic_numbers
+from .matching import (
+    fuzzy_match_entity_names,
+    match_people_by_name,
+    strict_match_entity_names,
+    strict_match_ic_numbers,
+)
 
 
 @dataclass(frozen=True)
@@ -257,14 +262,39 @@ def _run_entity_name_match(ctx: RuleRunContext) -> list[RuleOutcome]:
 
 
 def _run_ic_number_match(ctx: RuleRunContext) -> list[RuleOutcome]:
+    # Joining people to identity documents by NRIC/passport doesn't work here
+    # -- that's the very field being compared, so a changed number would just
+    # fail to key at all and the person would silently vanish (the bug this
+    # rule exists to fix). Join by name instead (match_people_by_name), then
+    # compare NRIC/passport on the matched pair.
     bc = ctx.bundle_context
-    ic_by_nric = {d.data.nric_passport: d for d in bc.identity_docs}
+    if not bc.identity_docs:
+        return []
+    people = list(bc.ssm_people_by_nric.values())
+    docs_by_id = {d.document_id: d for d in bc.identity_docs}
+    assignment = match_people_by_name(
+        ssm_people=[(person.nric_passport, person.name) for person in people],
+        candidates=[(doc.document_id, doc.data.individual_name) for doc in bc.identity_docs],
+    )
     outcomes = []
-    for person in bc.ssm_people_by_nric.values():
-        ic_doc = ic_by_nric.get(person.nric_passport)
-        if ic_doc is None:
-            continue
+    for person in people:
         check_name = f"strict_match_ic_numbers[{person.name}]"
+        matched_doc_id = assignment[person.nric_passport]
+        if matched_doc_id is None:
+            # Shareholders aren't required to submit an IC at all (same policy
+            # find_missing_ic_documents/verify_consent_signatures apply) -- no
+            # plausible document for one of them is normal, not a gap worth
+            # flagging. A director with no confidently-matched document is a
+            # genuine gap this rule should surface as NEEDS_REVIEW.
+            if person.nric_passport not in bc.ssm_directors_by_nric:
+                continue
+            outcomes.append(RuleOutcome(check_name, result={
+                "passed": None,
+                "message": f"No identity document could be confidently matched to '{person.name}' by name.",
+                "details": {"person_name": person.name, "person_nric_passport": person.nric_passport},
+            }))
+            continue
+        ic_doc = docs_by_id[matched_doc_id]
         result = strict_match_ic_numbers(person.nric_passport, ic_doc.data.nric_passport)
         outcomes.append(RuleOutcome(check_name, result=result))
     return outcomes

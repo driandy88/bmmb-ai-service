@@ -17,6 +17,7 @@ from services.validation.rules import (
     find_missing_ic_documents,
     fuzzy_match_entity_names,
     fuzzy_match_person_names,
+    match_people_by_name,
     months_between,
     person_similarity,
     strict_match_entity_names,
@@ -347,6 +348,41 @@ class TestEntityAndPersonMatching:
 
     def test_person_similarity_is_1_for_aliased_names(self):
         assert person_similarity("MOHD AIMAN", "MUHAMMAD AIMAN") == 1.0
+
+
+class TestMatchPeopleByName:
+    def test_exact_names_pair_up_correctly(self):
+        assignment = match_people_by_name(
+            ssm_people=[("nric_a", "AHMAD BIN ALI"), ("nric_b", "SITI BINTI HASSAN")],
+            candidates=[("doc_x", "AHMAD BIN ALI"), ("doc_y", "SITI BINTI HASSAN")],
+        )
+        assert assignment == {"nric_a": "doc_x", "nric_b": "doc_y"}
+
+    def test_no_candidate_above_threshold_maps_to_none(self):
+        assignment = match_people_by_name(
+            ssm_people=[("nric_a", "AHMAD BIN ALI")],
+            candidates=[("doc_x", "A COMPLETELY UNRELATED NAME")],
+        )
+        assert assignment == {"nric_a": None}
+
+    def test_no_candidates_at_all_maps_every_person_to_none(self):
+        assignment = match_people_by_name(
+            ssm_people=[("nric_a", "AHMAD BIN ALI"), ("nric_b", "SITI BINTI HASSAN")],
+            candidates=[],
+        )
+        assert assignment == {"nric_a": None, "nric_b": None}
+
+    def test_greedy_assignment_does_not_double_claim_a_candidate(self):
+        # Two people with the identical declared name and two candidates with
+        # that same name: both people score 1.0 against both candidates, so a
+        # naive "first match wins" join could hand both people the same
+        # candidate. Assignment must be 1:1.
+        assignment = match_people_by_name(
+            ssm_people=[("nric_a", "AHMAD BIN ALI"), ("nric_b", "AHMAD BIN ALI")],
+            candidates=[("doc_x", "AHMAD BIN ALI"), ("doc_y", "AHMAD BIN ALI")],
+        )
+        assert set(assignment.values()) == {"doc_x", "doc_y"}
+        assert None not in assignment.values()
 
 
 class TestCheckBankStatementFreshness:

@@ -16,7 +16,7 @@ schema field.
 """
 
 import difflib
-from typing import Dict
+from typing import Dict, List, Optional, Tuple
 
 from ._utils import normalize_id
 
@@ -161,6 +161,56 @@ def strict_match_ic_numbers(ssm_nric: str, target_nric: str) -> Dict:
             "normalized_target_nric": normalized_target,
         },
     }
+
+
+def match_people_by_name(
+    ssm_people: List[Tuple[str, str]], candidates: List[Tuple[str, str]], threshold: float = 0.85
+) -> Dict[str, Optional[str]]:
+    """Greedily pair each SSM person to their best-matching candidate document by name.
+
+    Used to join an SSM-declared person to their identity_document (or other
+    per-person document) *before* comparing a field like NRIC/passport
+    between the two. Joining on that field directly doesn't work: it's the
+    very value the caller wants to compare, so a changed/mismatched number
+    would simply fail to key at all and the person would silently vanish
+    from the comparison instead of producing a mismatch result.
+
+    Scores every (person, candidate) pair by name similarity and assigns the
+    highest-scoring pairs first, so one candidate can't be claimed by two
+    people and a person can't be matched to two candidates.
+
+    Args:
+        ssm_people: (person_key, name) pairs -- person_key is an opaque
+            identifier the caller uses to look up the result (e.g. the
+            person's NRIC), name is their SSM-declared name.
+        candidates: (candidate_key, name) pairs -- candidate_key is an opaque
+            identifier for the document (e.g. its document_id), name is the
+            individual name on that document.
+        threshold: minimum name-similarity score to accept a pairing as a
+            confident match; same default as fuzzy_match_person_names.
+
+    Returns:
+        Dict keyed by person_key, mapping to the matched candidate_key, or
+        None if no candidate scored above threshold.
+    """
+    scored = []
+    for person_key, person_name in ssm_people:
+        for candidate_key, candidate_name in candidates:
+            score = person_similarity(person_name, candidate_name)
+            if score >= threshold:
+                scored.append((score, person_key, candidate_key))
+    scored.sort(key=lambda t: t[0], reverse=True)
+
+    assignment: Dict[str, Optional[str]] = {person_key: None for person_key, _ in ssm_people}
+    claimed_people = set()
+    claimed_candidates = set()
+    for score, person_key, candidate_key in scored:
+        if person_key in claimed_people or candidate_key in claimed_candidates:
+            continue
+        assignment[person_key] = candidate_key
+        claimed_people.add(person_key)
+        claimed_candidates.add(candidate_key)
+    return assignment
 
 
 def fuzzy_match_person_names(ssm_name: str, target_name: str, threshold: float = 0.85) -> Dict:
