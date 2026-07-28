@@ -172,15 +172,20 @@ def _handoff(block: Optional[dict]) -> HandoffBlock:
     return HandoffBlock(required=bool(block.get("required")), reason=block.get("reason"), contact=hc)
 
 
-def _assemble(final: dict) -> ChatResponse:
+def _assemble(final: dict, taxonomy=None) -> ChatResponse:
     intent = final.get("intent", {}) or {}
     guard = final.get("guardrail", {}) or {}
+    primary_id = intent.get("primary")
+    row = taxonomy.get(primary_id) if (taxonomy and primary_id) else None
     return ChatResponse(
         session_id=final["session_id"],
         reply=final.get("reply", ""),
-        intent=IntentBlock(primary=intent.get("primary"),
+        intent=IntentBlock(primary=primary_id,
                            confidence=float(intent.get("confidence") or 0.0),
-                           secondary=intent.get("secondary")),
+                           secondary=intent.get("secondary"),
+                           category=(row.category if row else None),
+                           definition=(row.definition if row else None),
+                           type=(row.type if row else None)),
         ui_action=_ui(final.get("ui_action")),
         citations=[Citation(**c) for c in final.get("citations", [])],
         handoff=_handoff(final.get("handoff")),
@@ -249,7 +254,7 @@ class Orchestrator:
         # default stateless config there is nothing to key or persist.
         config = {"configurable": {"thread_id": state["session_id"]}} if self.deps.checkpointer else None
         final = self.graph.invoke(state, config=config)
-        return _assemble(final)
+        return _assemble(final, self.deps.config.taxonomy)
 
     def handle_document(
         self,

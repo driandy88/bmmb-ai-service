@@ -198,8 +198,11 @@ def decide(
             primary_handler=handler, secondary=secondary,
         )
 
-    # Primary is a terminal canned OOS redirect (R1–R5).
+    # Primary is a terminal canned response (OOS redirect R1–R5, or social R9/R10).
+    # Label uses the strategy name so e.g. a greeting reads "Greet back (R9)".
+    strat = responses.get(primary_row.response_ref)
+    label = f"{strat.strategy} ({primary_row.response_ref})" if strat and strat.strategy else f"Redirect ({primary_row.response_ref})"
     return RoutingDecision(
-        action=CANNED, route_label=f"Redirect ({primary_row.response_ref})",
+        action=CANNED, route_label=label,
         primary_cat_id=primary_id, primary_ref=primary_row.response_ref, secondary=secondary,
     )

@@ -2,9 +2,9 @@
 # "1. Redirect non-related query", block 1.3. Wording is BMMB-owned and edited
 # to tone here, NOT in code (brief §4.3, §12).
 #
-# `variants` holds the approved alternates from the sheet. The composer uses
-# variants[0] deterministically (deterministic-where-it-matters); business can
-# reorder to change the default. Refusal strategies (R6/R7) must NEVER be
+# `variants` holds the approved alternates from the sheet. The composer picks
+# one at RANDOM per turn so replies don't always repeat — every variant is
+# pre-approved, so any is safe to send. Refusal strategies (R6/R7) must NEVER be
 # tailored to the specific attack and must never reveal internals.
 #
 # {financing_product} in R8 is filled by the composer (defaults to
@@ -92,3 +92,23 @@
     - "Let me make sure I point you the right way — are you referring to {financing_product}?"
     - "To help you properly, could you clarify — is this related to {financing_product}?"
     - "Just want to confirm first — are we talking about {financing_product} here?"
+
+- ref: R9
+  strategy: Greet back
+  applies_to: Greetings / social openers (SOC-01)
+  variants:
+    - "Wa'alaikumussalam, and welcome! I'm here to help with SME financing — what can I do for you today?"
+    - "Hello! I can help you explore SME financing, check preliminary eligibility, or start an application. What would you like to do?"
+    - "Hi there! How can I help you with your SME financing today?"
+    - "Salam and good day! Are you looking to explore financing options, check eligibility, or track an application?"
+    - "Hello, and thanks for reaching out! What would you like to know about SME financing?"
+
+- ref: R10
+  strategy: Acknowledge
+  applies_to: Thanks / sign-off / acknowledgement (SOC-02)
+  variants:
+    - "You're welcome! Is there anything else about SME financing I can help with?"
+    - "Happy to help! Let me know if you have any other SME financing questions."
+    - "Anytime! I'm here if you need anything else on your SME financing."
+    - "My pleasure. Feel free to ask if anything else comes up about financing."
+    - "Glad I could help! Reach out any time about your SME financing."

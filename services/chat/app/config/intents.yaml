@@ -202,3 +202,18 @@
   definition: Mixed BM/English — must NOT be misread as OOS due to language.
   response_ref: R8
   type: ambiguous
+
+# ── Social (SOC) — greetings & acknowledgements. Not in the original Sheet 1.1;
+#    added so pleasantries get a warm reply + offer to help, instead of the
+#    OOS-05 chit-chat refocus. Canned (R9/R10), randomized, terminal. ──────────
+- cat_id: SOC-01
+  category: Greeting
+  definition: A greeting or social opener (hi, hello, salam, good morning) with no specific request yet.
+  response_ref: R9
+  type: social
+
+- cat_id: SOC-02
+  category: Thanks / closing
+  definition: Thanks, acknowledgement, or sign-off (thank you, ok great, bye) — no new request.
+  response_ref: R10
+  type: social
