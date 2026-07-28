@@ -1,0 +1,21 @@
+# Runtime deps. Pinned by major to match the other services in this repo
+# (see services/extraction/requirements.txt). google-genai is imported lazily
+# and only needed when LLM_BACKEND=vertex; the default stub path needs none of
+# the GCP packages.
+fastapi[standard]==0.115.*
+uvicorn[standard]==0.32.*
+pydantic==2.*
+python-dotenv==1.0.*
+PyYAML==6.*
+
+# Orchestration (brief §3 — LangGraph state machine).
+langgraph==0.2.*
+langchain-core==0.3.*
+
+# Vertex AI (Gemini) — used only by LLM_BACKEND=vertex.
+google-genai==0.3.*
+
+# Cloud SQL — used only by the Postgres checkpointer / audit durability layer
+# (SESSION_STORE_BACKEND=postgres, AUDIT_BACKEND=cloudsql).
+cloud-sql-python-connector[pg8000]==1.*
+SQLAlchemy==2.*

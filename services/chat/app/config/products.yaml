@@ -1,0 +1,78 @@
+# SME financing programs + recommender funnel.
+#   quantum  <- Master tab "Chatbot Intent Classifier" product quantum table.
+#   funnel   <- Sheet "3. Program queries" (3-question recommender).
+#
+# The recommender (agents/program_advisor) is deterministic: the requested
+# amount is matched against each program's [min, max] quantum range; `funnel`
+# text drives the questions. Program RAG (Sheet 3.1–3.3) enriches the answer
+# via the Retriever interface only.
+
+# ── Program financing-quantum table (RM) — Master tab ────────────────────────
+# min/max = null means "no stated bound" in the sheet.
+quantum:
+  - program: SRF
+    full_name: Skim Rehabilitasi Francais (SRF)
+    min: null
+    max: 750000
+  - program: CGC
+    full_name: Business Credit Card (CGC)
+    min: 10000
+    max: 100000
+  - program: MHP
+    full_name: Micro Hire Purchasing Financing (MHP)
+    min: 20000
+    max: 5000000
+  - program: MIHP
+    full_name: Micro Islamic Hire Financing (MIHP)
+    min: 20000
+    max: 5000000
+  - program: GGSM
+    full_name: Government Guarantee Scheme Madani (GGSM)
+    min: null
+    max: 10000000
+  - program: BIZJAMIN
+    full_name: BIZJAMIN
+    min: 0
+    max: 1000000
+  - program: TERAJU
+    full_name: TERAJU Bumiputera Enterprise Credit Facility (BECF)
+    min: null
+    max: 10000000
+  - program: SJUM
+    full_name: Skim Jaminan Usahawan Madani (SJUM)
+    min: null
+    max: 2000000
+
+# ── Recommender funnel — Sheet 3 ─────────────────────────────────────────────
+funnel:
+  purpose_prompt: "What are you looking to finance?"
+  amount_prompt: "Roughly how much are you looking to finance?"
+  product_intro: "Based on that, these are Muamalat's SME financing options applicable to you:"
+
+  # Sheet 3, column 1 (Purpose)
+  purpose_options:
+    - { id: 1, label: "Business Expansion / Capital Expenditure" }
+    - { id: 2, label: "Working Capital / Cash-flow Gaps" }
+    - { id: 3, label: "Paying Suppliers / Trade & Import" }
+    - { id: 4, label: "Machinery, Vehicles & Equipment" }
+    - { id: 5, label: "Project / Contract Working Capital" }
+
+  # Sheet 3, column 2 (Amount) — parsed into numeric bounds for matching.
+  amount_bands:
+    - { id: 1, label: "< RM100,000",                 min: 0,       max: 100000 }
+    - { id: 2, label: "RM100,001 – RM500,000",       min: 100001,  max: 500000 }
+    - { id: 3, label: "RM500,001 – RM2,000,000",     min: 500001,  max: 2000000 }
+    - { id: 4, label: "> RM2,000,001",               min: 2000001, max: null }
+
+  # Purpose -> preferred programs, used ONLY to order the amount-eligible
+  # candidates. NOTE (brief §0.1 flag): Sheet 3 lists Purpose and Product as
+  # separate columns with NO explicit purpose×amount grid. This affinity map is
+  # a best-effort default for BMMB to confirm — the amount/quantum match above
+  # is the deterministic source of truth; purpose never *adds* an ineligible
+  # product, it only re-orders eligible ones.
+  purpose_affinity:
+    1: [MHP, MIHP, TERAJU, GGSM]     # expansion / capex
+    2: [BIZJAMIN, GGSM, SJUM, CGC]   # working capital / cash-flow
+    3: [BIZJAMIN, CGC]               # paying suppliers / trade & import
+    4: [MHP, MIHP]                   # machinery, vehicles & equipment
+    5: [TERAJU, GGSM, BIZJAMIN]      # project / contract working capital

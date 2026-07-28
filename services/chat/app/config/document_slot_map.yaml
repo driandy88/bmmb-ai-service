@@ -1,0 +1,56 @@
+# Maps document-extraction fields → the six Tier-1 eligibility slots (brief §4.4).
+#
+# Only Tier-1 figures are listed. Tier-2 fields present in the same documents
+# (ebitda_net_profit, pbt, advances_due_to_director, and anything CTOS / CCRIS /
+# DSCR / gearing) are DELIBERATELY absent — the bot never reads them off a
+# document, so document-fed eligibility stays inside the Tier-1 boundary.
+#
+# Each slot entry:
+#   template        which extraction template the field comes from
+#   field           the extracted field name
+#   fallback_field  optional second field to try if `field` is null
+#   group: true     the field lives in a repeating array (multi-year AFS /
+#                   multi-month bank statement); the MOST-RECENT row is used.
+#                   The array is located by CONTENT (first list of objects that
+#                   contains `field`), so this is robust to the Cloud SQL
+#                   template's row_group key name.
+#   recency_key     the row field that carries the period, used to pick the most
+#                   recent row (a 4-digit year is parsed out of it)
+#   transform       date_to_years → parse a date string to whole years since today
+#
+# NOTE: field names come from the Cloud SQL templates (managed by the platform
+# admin backend), not this file. Verify them against a real /extract response;
+# adjusting a name here is a one-line change.
+
+version: 1
+
+slots:
+  business_age_years:
+    template: business_registration_ssm
+    field: incorporation_date
+    transform: date_to_years
+
+  working_capital_limit:
+    template: customer_information_details
+    field: financing_request_volume
+
+  revenue:
+    template: audited_financial_statements
+    field: revenue_turnover_gross_profit
+    group: true
+    recency_key: financial_year
+
+  total_equity_or_net_worth:
+    template: audited_financial_statements
+    field: total_equity
+    fallback_field: net_worth
+    group: true
+    recency_key: financial_year
+
+  end_balance:
+    template: bank_statements
+    field: monthly_end_balance
+    group: true
+    recency_key: month
+
+# staff_count: not captured by any document template → always self-declared in chat.

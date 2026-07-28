@@ -1,0 +1,204 @@
+# Intent taxonomy — Customer Service workbook, Sheet "1. Redirect non-related
+# query", block 1.1. This file is the SINGLE source of truth for the router AND
+# the classifier prompt (brief §4.2). No cat_id / category / definition /
+# response_ref may be duplicated in Python.
+#
+# response_ref is one of:
+#   ROUTE-*  (in_scope)  -> name of the handler the router dispatches to.
+#   R1..R8   (oos/adv/amb) -> canned response strategy in responses.yaml.
+# Add a row -> new intent. Change response_ref -> re-route it. Delete a row ->
+# it's gone. status: tbd -> entry exists but falls back to a safe default until
+# BMMB supplies wording.
+#
+# ROUTE-* -> handler node wiring lives in orchestrator/routing.py (ROUTE_TABLE).
+
+# ── In-scope (INS) — Sheet 1.1 ───────────────────────────────────────────────
+- cat_id: INS-01
+  category: Branch/Sales Team info
+  definition: Desire to talk directly to the Sales Team or visit a branch.
+  response_ref: ROUTE-BRANCH
+  type: in_scope
+
+- cat_id: INS-02
+  category: Program info
+  definition: Questions about specific SME financing programs, terms, features.
+  response_ref: ROUTE-PROGRAM
+  type: in_scope
+
+- cat_id: INS-03
+  category: Guidelines / Shariah
+  definition: Questions about BMMB/SME/Shariah policy in general (not a specific eligibility check).
+  response_ref: ROUTE-GUIDELINES
+  type: in_scope
+
+- cat_id: INS-04
+  category: Eligibility
+  definition: Asking whether they qualify for SME financing.
+  response_ref: ROUTE-ELIGIBILITY
+  type: in_scope
+
+- cat_id: INS-05
+  category: Initiate application
+  definition: Ready to start a new application.
+  response_ref: ROUTE-INITIATE
+  type: in_scope
+
+- cat_id: INS-06
+  category: Continue draft
+  definition: Returning to resume a saved/incomplete application.
+  response_ref: ROUTE-CONTINUE
+  type: in_scope
+
+- cat_id: INS-07
+  category: Track application
+  definition: Checking status of an already-submitted application.
+  response_ref: ROUTE-TRACK
+  type: in_scope
+
+# ── Out-of-scope (OOS) — Sheet 1.1 ───────────────────────────────────────────
+- cat_id: OOS-01
+  category: Other bank products
+  definition: Retail/deposit products unrelated to SME financing (savings, FD, cards, current a/c).
+  response_ref: R1
+  type: out_of_scope
+
+- cat_id: OOS-02
+  category: Non-SME financing
+  definition: Consumer financing outside SME scope (personal loan, mortgage, car, education).
+  response_ref: R1
+  type: out_of_scope
+
+- cat_id: OOS-03
+  category: Competitor comparison
+  definition: Asking the bot to compare BMMB against other banks.
+  response_ref: R2
+  type: out_of_scope
+  status: tbd            # Sheet 1.1 note: sales-script wording pending (Mazuri)
+
+- cat_id: OOS-04
+  category: General financial / investment advice
+  definition: Advisory outside the bot's function (stocks, property, what to invest in).
+  response_ref: R3
+  type: out_of_scope
+
+- cat_id: OOS-05
+  category: General knowledge / chit-chat
+  definition: Off-topic conversation, jokes, opinions.
+  response_ref: R4
+  type: out_of_scope
+
+- cat_id: OOS-06
+  category: News / weather / time / trivia
+  definition: Real-time or trivia info unrelated to financing.
+  response_ref: R4
+  type: out_of_scope
+
+- cat_id: OOS-07
+  category: Personal / unrelated tasks
+  definition: Resume writing, homework, coding, life advice.
+  response_ref: R4
+  type: out_of_scope
+
+- cat_id: OOS-08
+  category: App / website tech support
+  definition: Login or technical faults with the app/site.
+  response_ref: R5
+  type: out_of_scope
+
+- cat_id: OOS-09
+  category: Complaint about staff / service
+  definition: Grievance about a person or branch experience.
+  response_ref: R5
+  type: out_of_scope
+
+- cat_id: OOS-10
+  category: Post-approval / financing servicing
+  definition: Anything after submission (disbursement, repayment) — bot ends at submission.
+  response_ref: R5
+  type: out_of_scope
+
+# ── Adversarial (ADV) — Sheet 1.1. Treat as security events; log all. ─────────
+- cat_id: ADV-01
+  category: Prompt injection / override
+  definition: Attempts to override or ignore the bot's instructions.
+  response_ref: R6
+  type: adversarial
+
+- cat_id: ADV-02
+  category: System / prompt extraction
+  definition: Trying to reveal the system prompt, config, model, or rules.
+  response_ref: R6
+  type: adversarial
+
+- cat_id: ADV-03
+  category: Jailbreak roleplay
+  definition: Roleplay/hypothetical framing to bypass rules (act as officer, pretend to approve).
+  response_ref: R6
+  type: adversarial
+
+- cat_id: ADV-04
+  category: Eligibility manipulation / coaching
+  definition: Asking the bot to coach how to fake inputs to get approved.
+  response_ref: R7
+  type: adversarial
+
+- cat_id: ADV-05
+  category: Threshold probing
+  definition: Fishing for exact internal cut-offs to game them.
+  response_ref: R7
+  type: adversarial
+
+- cat_id: ADV-06
+  category: Social engineering (others' data)
+  definition: Requesting another customer's application/data.
+  response_ref: R6
+  type: adversarial
+
+- cat_id: ADV-07
+  category: Data exfiltration
+  definition: Dump all records / internal data.
+  response_ref: R6
+  type: adversarial
+
+- cat_id: ADV-08
+  category: Obfuscation / encoding
+  definition: Encoded/split payloads to evade filters.
+  response_ref: R6
+  type: adversarial
+
+# ── Ambiguous (AMB) — Sheet 1.1 ──────────────────────────────────────────────
+- cat_id: AMB-01
+  category: Mixed intent (in + out)
+  definition: Genuine in-scope request bundled with an out-of-scope one. Answer in-scope part, fire R1 for the rest in the same reply.
+  response_ref: R1                 # secondary redirect; primary in-scope route handled by multi-intent logic
+  type: ambiguous
+
+- cat_id: AMB-02
+  category: Financing-adjacent product
+  definition: Mentions financing but may be a different product line than SME term financing.
+  response_ref: R8
+  type: ambiguous
+
+- cat_id: AMB-03
+  category: Vague / underspecified
+  definition: Too vague to tell if application intent or general advice.
+  response_ref: R8
+  type: ambiguous
+
+- cat_id: AMB-04
+  category: Multi-turn topic drift
+  definition: Conversation starts in-scope, drifts off-topic mid-thread. Re-classified every turn.
+  response_ref: R3                 # once drift confirmed
+  type: ambiguous
+
+- cat_id: AMB-05
+  category: Shariah-boundary business type
+  definition: Legitimate SME question but touches a Shariah-prohibited/grey category — needs a real answer, not generic deflection.
+  response_ref: ROUTE-SHARIAH      # routes to guidelines RAG (Sheet 4) + business-type exclusion narrative
+  type: ambiguous
+
+- cat_id: AMB-06
+  category: Code-switching mid-sentence
+  definition: Mixed BM/English — must NOT be misread as OOS due to language.
+  response_ref: R8
+  type: ambiguous
