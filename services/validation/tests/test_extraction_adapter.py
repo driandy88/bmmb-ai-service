@@ -24,6 +24,7 @@ from services.validation.extraction_adapter import (
     build_validation_bundle,
 )
 from services.validation.engine import ValidationEngine
+from services.validation.rules._utils import NOT_AVAILABLE
 
 EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
 
@@ -362,11 +363,13 @@ class TestBuildCustomerInformationDoc:
         assert [d.name for d in doc.data.directors] == ["AIMAN", "NURUL"]
         assert [d.email for d in doc.data.directors] == ["aiman@x.my", "nurul@x.my"]
 
-    def test_null_fields_coerced_to_blank_not_warned_per_field(self, extracted_by_template):
+    def test_null_fields_coerced_to_not_available_not_warned_per_field(self, extracted_by_template):
         extracted_by_template["Customer Information Form"]["Company Office Status"] = None
         warnings = []
         doc = build_customer_information_doc(extracted_by_template, warnings=warnings)
-        assert doc.data.company_office_status == ""  # completeness rule reports it, adapter doesn't warn
+        # TICKET-2: "Not Available", not "", so it reads unambiguously in the
+        # report rather than looking like an empty cell.
+        assert doc.data.company_office_status == NOT_AVAILABLE
         assert not any(w.field == "Company Office Status" for w in warnings)
 
     def test_missing_template_returns_none(self):

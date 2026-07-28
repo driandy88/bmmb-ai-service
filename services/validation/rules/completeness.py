@@ -21,7 +21,7 @@ schema field.
 
 from typing import Dict, List
 
-from ._utils import normalize_id
+from ._utils import is_blank, normalize_id
 
 # NOTE: nested-object parameters are typed as `List[Dict[str, object]]`, not
 # `List[SomeTypedDict]` or `List[Dict[str, Any]]`. Gemini's automatic
@@ -218,7 +218,7 @@ def verify_customer_information_completeness(customer_information: Dict[str, obj
     missing_fields = [
         label
         for field, label in _CUSTOMER_INFO_COMPANY_LABELS.items()
-        if not customer_information.get(field)
+        if is_blank(customer_information.get(field))
     ]
 
     directors = customer_information.get("directors") or []
@@ -226,7 +226,7 @@ def verify_customer_information_completeness(customer_information: Dict[str, obj
         missing_fields.append("Directors (no director particulars provided)")
     for i, director in enumerate(directors):
         for field, label in _CUSTOMER_INFO_DIRECTOR_LABELS.items():
-            if not director.get(field):
+            if is_blank(director.get(field)):
                 missing_fields.append(f"Director[{i}] {label}")
 
     passed = len(missing_fields) == 0

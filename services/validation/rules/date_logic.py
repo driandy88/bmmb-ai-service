@@ -20,8 +20,9 @@ description verbatim; per-argument text lives here, not in a separate
 schema field.
 """
 
+import difflib
 from datetime import date
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from dateutil.relativedelta import relativedelta
 
@@ -29,6 +30,23 @@ from ._utils import to_date
 from ..domain.policies import BMMB_SME_POLICY_V1, ValidationPolicy
 
 MonthKey = Tuple[int, int]  # (year, month)
+
+
+def _best_fuzzy_match(normalized: str, candidates: Iterable[str]) -> Tuple[Optional[str], float]:
+    """Best difflib similarity match for `normalized` among `candidates`, with its score.
+
+    Shared by the bank-name and entity-type alias resolvers below -- same
+    "normalize, then score every known candidate, keep the best" shape, just
+    against different candidate sets.
+    """
+    best_candidate = None
+    best_score = 0.0
+    for candidate in candidates:
+        score = difflib.SequenceMatcher(None, normalized, candidate).ratio()
+        if score > best_score:
+            best_score = score
+            best_candidate = candidate
+    return best_candidate, best_score
 
 
 def _month_key_str(month: MonthKey) -> str:
@@ -234,6 +252,33 @@ def check_bank_statement_continuity(statements: List[Dict[str, object]]) -> Dict
     }
 
 
+def _resolve_entity_type_key(entity_type: str, policy: ValidationPolicy, threshold: float = 0.85) -> Optional[str]:
+    """Resolve a raw entity_type string to one of policy's own
+    minimum_bank_statement_months_by_entity keys, tolerating typos and
+    Malay-language variants (e.g. "Perniagaan Tunggal", "Enterprise",
+    "Perkongsian", "llp") via policy.entity_type_aliases, then a conservative
+    fuzzy-match fallback for variants that table hasn't seen yet -- so an
+    unrecognized spelling of a real sole-prop/partnership entity doesn't
+    silently resolve to the lenient Sdn-Bhd-shaped default. Returns None
+    (falls through to the default) only when nothing -- exact, alias, or
+    fuzzy -- resolves confidently; a genuinely blank/unknown entity_type is
+    a distinct, deliberately out-of-scope problem (TICKET-9/D6).
+    """
+    normalized = entity_type.strip().lower()
+    if not normalized:
+        return None
+    if normalized in policy.minimum_bank_statement_months_by_entity:
+        return normalized
+    if normalized in policy.entity_type_aliases:
+        return policy.entity_type_aliases[normalized]
+
+    known_keys = set(policy.minimum_bank_statement_months_by_entity) | set(policy.entity_type_aliases.values())
+    best_key, best_score = _best_fuzzy_match(normalized, known_keys)
+    if best_key is not None and best_score >= threshold:
+        return best_key
+    return None
+
+
 def verify_bank_statement_duration(
     statements: List[Dict[str, object]],
     entity_type: str,
@@ -250,7 +295,11 @@ def verify_bank_statement_duration(
         statements: One entry per bank_statement document, each with
             start_date and end_date as ISO 'YYYY-MM-DD' dates.
         entity_type: The entity type from the SSM corporate form, e.g.
-            "Sdn Bhd" or "Sole Proprietor".
+            "Sdn Bhd" or "Sole Proprietor". Typos, alternate spellings, and
+            Malay terms (e.g. "Perniagaan Tunggal", "Enterprise",
+            "Perkongsian", "llp") are resolved to the correct requirement via
+            an alias table and a conservative fuzzy-match fallback, rather
+            than silently defaulting to the Sdn-Bhd-shaped minimum.
     """
     continuity = check_bank_statement_continuity(statements)
     if not continuity["passed"]:
@@ -269,8 +318,11 @@ def verify_bank_statement_duration(
     # (e.g. Jan 31 -> Jun 30 has a zero day-remainder) used to undercount by one.
     months_covered = len(continuity["details"]["covered_months"])
 
-    min_required = policy.minimum_bank_statement_months_by_entity.get(
-        entity_type.strip().lower(), policy.default_minimum_bank_statement_months
+    resolved_key = _resolve_entity_type_key(entity_type, policy)
+    min_required = (
+        policy.minimum_bank_statement_months_by_entity[resolved_key]
+        if resolved_key is not None
+        else policy.default_minimum_bank_statement_months
     )
     passed = months_covered >= min_required
 
@@ -282,6 +334,7 @@ def verify_bank_statement_duration(
         ),
         "details": {
             "entity_type": entity_type,
+            "resolved_entity_type_key": resolved_key,
             "months_covered": months_covered,
             "minimum_required_months": min_required,
             "earliest_start": earliest_start.isoformat(),
@@ -367,35 +420,114 @@ def check_bank_statement_overdraft(monthly_balances: List[Dict[str, object]]) ->
     }
 
 
+# Legal/jurisdiction words Malaysian banks routinely append and that carry no
+# distinguishing identity on their own (e.g. "Maybank Berhad", "Maybank Bhd",
+# "AmBank (M) Berhad", "HSBC Bank Malaysia Berhad" are all one bank). Stripped
+# before both the alias lookup and the fuzzy fallback below.
+_BANK_LEGAL_SUFFIX_WORDS = {"BERHAD", "BHD", "MALAYSIA", "M"}
+
+# Known Malaysian bank name variants (full legal name minus the legal-suffix
+# words above, common abbreviations), normalized-form -> canonical identity.
+# Extend this table first when a new variant shows up; it's the
+# predictable, auditable path. Fuzzy matching (_canonical_bank_name) is only
+# a fallback for spelling variants this table hasn't seen yet.
+_BANK_NAME_ALIASES: Dict[str, str] = {
+    "MAYBANK": "MAYBANK",
+    "MALAYAN BANKING": "MAYBANK",
+    "CIMB": "CIMB BANK",
+    "CIMB BANK": "CIMB BANK",
+    "PUBLIC BANK": "PUBLIC BANK",
+    "RHB": "RHB BANK",
+    "RHB BANK": "RHB BANK",
+    "HONG LEONG BANK": "HONG LEONG BANK",
+    "AMBANK": "AMBANK",
+    "AM BANK": "AMBANK",
+    "BANK ISLAM": "BANK ISLAM",
+    "BANK RAKYAT": "BANK RAKYAT",
+    "BANK KERJASAMA RAKYAT": "BANK RAKYAT",
+    "BANK MUAMALAT": "BANK MUAMALAT",
+    "OCBC": "OCBC BANK",
+    "OCBC BANK": "OCBC BANK",
+    "HSBC": "HSBC BANK",
+    "HSBC BANK": "HSBC BANK",
+    "STANDARD CHARTERED": "STANDARD CHARTERED",
+    "STANDARD CHARTERED BANK": "STANDARD CHARTERED",
+    "UOB": "UOB BANK",
+    "UOB BANK": "UOB BANK",
+    "UNITED OVERSEAS BANK": "UOB BANK",
+    "AFFIN BANK": "AFFIN BANK",
+    "ALLIANCE BANK": "ALLIANCE BANK",
+    "BSN": "BANK SIMPANAN NASIONAL",
+    "BANK SIMPANAN NASIONAL": "BANK SIMPANAN NASIONAL",
+}
+
+
+def _normalize_bank_name(raw: str) -> str:
+    stripped = "".join(ch for ch in raw if ch.isalnum() or ch.isspace())
+    tokens = stripped.upper().split()
+    core_tokens = [t for t in tokens if t not in _BANK_LEGAL_SUFFIX_WORDS]
+    # Keep the unstripped form if every token was a "suffix" word (a name
+    # that's somehow *only* "Berhad" isn't real, but don't reduce it to "").
+    return " ".join(core_tokens) if core_tokens else " ".join(tokens)
+
+
+def _canonical_bank_name(raw: str, threshold: float = 0.85) -> str:
+    """Resolve a raw bank name to a canonical identity for consistency comparison.
+
+    Tries the alias table first (exact match after stripping punctuation and
+    case-folding) since it's predictable and auditable; falls back to a
+    conservative fuzzy match against known canonical names only when no
+    alias hits, so an unseen legal-name variant of a known bank ("Maybank
+    Bhd" instead of "Maybank Berhad") doesn't read as a different bank. Two
+    genuinely different banks are never folded together: an unrecognized
+    name with no high-similarity match is returned normalized but otherwise
+    untouched, so it still differs from every other bank's canonical form.
+    """
+    normalized = _normalize_bank_name(raw)
+    alias_hit = _BANK_NAME_ALIASES.get(normalized)
+    if alias_hit is not None:
+        return alias_hit
+
+    best_alias, best_score = _best_fuzzy_match(normalized, _BANK_NAME_ALIASES)
+    if best_alias is not None and best_score >= threshold:
+        return _BANK_NAME_ALIASES[best_alias]
+    return normalized
+
+
 def check_bank_statement_bank_consistency(bank_names: List[Optional[str]]) -> Dict:
     """Check that every bank statement in the set is from the same bank.
 
     Use this for the bank_name of every bank_statement document in the
-    bundle. A null bank_name (extraction had no reliable source for it on
-    that document) can't confirm consistency one way or the other, so it
-    needs_review rather than fails; two or more distinct non-null bank
-    names is a confirmed fail.
+    bundle. Names are resolved to a canonical bank identity before
+    comparing -- via a known-bank alias table first, then a conservative
+    fuzzy match for unseen legal-name variants -- so "Maybank", "Maybank
+    Berhad", and "Malayan Banking Berhad" are recognized as one bank rather
+    than three. A null bank_name (extraction had no reliable source for it
+    on that document) can't confirm consistency one way or the other, so it
+    needs_review rather than fails; two or more distinct canonical bank
+    identities is a confirmed fail.
 
     Args:
         bank_names: One entry per bank_statement document -- its bank_name,
             or null if not available for that document.
     """
     known_names = [name for name in bank_names if name is not None]
-    distinct_known = sorted(set(known_names))
+    distinct_raw = sorted(set(known_names))
+    distinct_canonical = sorted({_canonical_bank_name(name) for name in known_names})
     unknown_count = len(bank_names) - len(known_names)
 
-    if len(distinct_known) > 1:
+    if len(distinct_canonical) > 1:
         passed = False
-        message = f"Bank statements come from {len(distinct_known)} different banks: {', '.join(distinct_known)}."
+        message = f"Bank statements come from {len(distinct_canonical)} different banks: {', '.join(distinct_canonical)}."
     elif unknown_count > 0:
         passed = None
         message = (
             "At least one bank statement has no confirmed bank name -- cannot "
             "confirm all statements are from the same bank."
         )
-    elif distinct_known:
+    elif distinct_canonical:
         passed = True
-        message = f"All bank statements are from {distinct_known[0]}."
+        message = f"All bank statements are from {distinct_canonical[0]}."
     else:
         passed = None
         message = "No bank name data available on any bank statement."
@@ -405,7 +537,8 @@ def check_bank_statement_bank_consistency(bank_names: List[Optional[str]]) -> Di
         "message": message,
         "details": {
             "documents_checked": len(bank_names),
-            "distinct_banks": distinct_known,
+            "distinct_banks": distinct_canonical,
+            "raw_bank_names": distinct_raw,
             "documents_with_unknown_bank": unknown_count,
         },
     }

@@ -227,6 +227,35 @@ class TestCrossDocumentMatching:
         assert any(r.passed is False for r in mismatch_checks)
         assert report.overall_passed is False
 
+    def test_entity_name_mismatch_does_not_suppress_other_checks(self, passing_bundle_raw):
+        # TICKET-8: confirm a genuine entity_name mismatch fails its own check
+        # and nothing else -- run_all_rules never short-circuits (registry.py
+        # always runs every catalog rule regardless of prior outcomes), so an
+        # unrelated rule must still report its own independent status rather
+        # than being skipped or masked because another check failed.
+        raw = passing_bundle_raw.copy()
+        raw["extracted_documents"] = [
+            dict(doc, data=dict(doc["data"], entity_name="A COMPLETELY DIFFERENT ENTITY BHD"))
+            if doc["document_type"] == "bank_statement"
+            else doc
+            for doc in raw["extracted_documents"]
+        ]
+        report = _run(raw)
+        assert report.overall_passed is False
+
+        unrelated_checks = {
+            "calculate_financial_18_month_rule": ValidationStatus.PASSED,
+            "check_bank_statement_freshness": ValidationStatus.PASSED,
+            "verify_bank_statement_duration": ValidationStatus.PASSED,
+            "verify_customer_information_completeness": ValidationStatus.PASSED,
+        }
+        for check_name, expected_status in unrelated_checks.items():
+            result = next(r for r in report.results if r.check == check_name)
+            assert result.status is expected_status, (
+                f"{check_name} should be unaffected by the entity_name mismatch, "
+                f"got {result.status}"
+            )
+
     def test_changed_ic_number_is_caught_not_dropped(self, passing_bundle_raw):
         # Regression for the fail-open bug: a director's identity_document
         # NRIC no longer matching the SSM record must surface as a FAILED

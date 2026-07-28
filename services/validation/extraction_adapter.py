@@ -70,6 +70,7 @@ from .bundle import (
     TaxDeclarationDoc,
     ValidationBundle,
 )
+from .rules._utils import NOT_AVAILABLE
 
 
 class AdapterDataGapError(ValueError):
@@ -778,7 +779,7 @@ def build_customer_information_doc(
     """CustomerInfoDoc built from the "Customer Information Form" template --
     director personal particulars (one row per director) plus company info.
 
-    Null fields are coerced to "" here (not warned per-field): the
+    Null fields are coerced to NOT_AVAILABLE here (not warned per-field): the
     verify_customer_information_completeness rule is the single place that
     reports which fields are unfilled, so the adapter doesn't also flood
     adapter_warnings with one entry per blank cell.
@@ -790,7 +791,7 @@ def build_customer_information_doc(
     document_id = "customer_information"
 
     def blank(value: object) -> str:
-        return "" if value is None else str(value)
+        return NOT_AVAILABLE if value is None else str(value)
 
     director_rows = _safe_list(extracted.get("Directors"), warnings=warnings,
                                document_type="customer_information", document_id=document_id, field="Directors")

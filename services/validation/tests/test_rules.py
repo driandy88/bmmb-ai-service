@@ -27,6 +27,7 @@ from services.validation.rules import (
     verify_consent_signatures,
     verify_financial_sections_present,
 )
+from services.validation.rules._utils import NOT_AVAILABLE
 
 
 class TestVerifyFinancialSectionsPresent:
@@ -302,6 +303,54 @@ class TestVerifyBankStatementDuration:
         assert result["passed"] is False
         assert "not continuous" in result["message"]
 
+    def test_malay_sole_prop_term_resolves_to_12_months(self):
+        # TICKET-7: "Perniagaan Tunggal" (Malay for sole proprietorship) must
+        # resolve to the 12-month sole-prop requirement via the alias table,
+        # not silently fall through to the lenient 6-month default.
+        statements = [{"start_date": "2025-01-01", "end_date": "2025-06-30"}]
+        result = verify_bank_statement_duration(statements, "Perniagaan Tunggal")
+        assert result["details"]["resolved_entity_type_key"] == "sole prop"
+        assert result["details"]["minimum_required_months"] == 12
+        assert result["passed"] is False  # only 6 months on file
+
+    def test_enterprise_suffix_resolves_to_sole_prop(self):
+        statements = [{"start_date": "2024-07-01", "end_date": "2025-06-30"}]
+        result = verify_bank_statement_duration(statements, "Enterprise")
+        assert result["details"]["resolved_entity_type_key"] == "sole prop"
+        assert result["details"]["minimum_required_months"] == 12
+        assert result["passed"] is True  # 12 months on file
+
+    def test_llp_resolves_to_partnership(self):
+        statements = [{"start_date": "2025-01-01", "end_date": "2025-06-30"}]
+        result = verify_bank_statement_duration(statements, "LLP")
+        assert result["details"]["resolved_entity_type_key"] == "partnership"
+        assert result["details"]["minimum_required_months"] == 12
+
+    def test_typo_variant_falls_back_to_fuzzy_match(self):
+        # Not a literal alias-table entry -- close enough to "sole
+        # proprietor" to resolve via the conservative fuzzy fallback.
+        statements = [{"start_date": "2025-01-01", "end_date": "2025-06-30"}]
+        result = verify_bank_statement_duration(statements, "Sole Propietor")
+        assert result["details"]["resolved_entity_type_key"] == "sole proprietor"
+        assert result["details"]["minimum_required_months"] == 12
+
+    def test_sdn_bhd_does_not_resolve_to_any_alias(self):
+        # Sanity check: Sdn Bhd must not be swept up by the fuzzy fallback --
+        # it stays on the (correct, for it) unresolved/default path.
+        statements = [{"start_date": "2026-01-01", "end_date": "2026-06-30"}]
+        result = verify_bank_statement_duration(statements, "Sdn Bhd")
+        assert result["details"]["resolved_entity_type_key"] is None
+        assert result["details"]["minimum_required_months"] == 6
+
+    def test_unrecognized_entity_type_still_falls_through_to_default(self):
+        # Genuinely unrecognized/blank strings are an explicitly deferred,
+        # separate problem (TICKET-9) -- this ticket only extends the alias
+        # table, it doesn't change the fallback's existence.
+        statements = [{"start_date": "2026-01-01", "end_date": "2026-06-30"}]
+        result = verify_bank_statement_duration(statements, "")
+        assert result["details"]["resolved_entity_type_key"] is None
+        assert result["details"]["minimum_required_months"] == 6
+
 
 class TestMonthsBetween:
     def test_computes_whole_months_and_extra_days(self):
@@ -428,7 +477,7 @@ class TestCheckBankStatementBankConsistency:
     def test_mixed_banks_fails(self):
         result = check_bank_statement_bank_consistency(["MAYBANK BERHAD", "CIMB BANK BERHAD"])
         assert result["passed"] is False
-        assert result["details"]["distinct_banks"] == ["CIMB BANK BERHAD", "MAYBANK BERHAD"]
+        assert result["details"]["distinct_banks"] == ["CIMB BANK", "MAYBANK"]
 
     def test_any_unknown_bank_name_needs_review(self):
         result = check_bank_statement_bank_consistency(["MAYBANK BERHAD", None])
@@ -438,6 +487,32 @@ class TestCheckBankStatementBankConsistency:
     def test_all_unknown_needs_review(self):
         result = check_bank_statement_bank_consistency([None, None])
         assert result["passed"] is None
+
+    def test_legal_name_variants_recognised_as_one_bank(self):
+        # TICKET-3: "Maybank", "Maybank Berhad", and "Malayan Banking Berhad"
+        # must all resolve to the same bank via the alias table.
+        result = check_bank_statement_bank_consistency(
+            ["Maybank", "Maybank Berhad", "Malayan Banking Berhad"]
+        )
+        assert result["passed"] is True
+        assert result["details"]["distinct_banks"] == ["MAYBANK"]
+        assert result["details"]["raw_bank_names"] == [
+            "Malayan Banking Berhad", "Maybank", "Maybank Berhad",
+        ]
+
+    def test_unseen_typo_variant_falls_back_to_fuzzy_match(self):
+        # Not a literal alias-table entry (nor resolvable via legal-suffix
+        # stripping alone) -- a one-off OCR typo close enough to "Maybank" to
+        # resolve via the conservative fuzzy fallback rather than being read
+        # as a different bank.
+        result = check_bank_statement_bank_consistency(["Mayabnk Berhad", "Maybank Berhad"])
+        assert result["passed"] is True
+        assert result["details"]["distinct_banks"] == ["MAYBANK"]
+
+    def test_genuinely_different_banks_are_not_conflated_by_fuzzy_match(self):
+        result = check_bank_statement_bank_consistency(["Public Bank Berhad", "Hong Leong Bank Berhad"])
+        assert result["passed"] is False
+        assert result["details"]["distinct_banks"] == ["HONG LEONG BANK", "PUBLIC BANK"]
 
 
 class TestCheckBankStatementCurrency:
@@ -490,6 +565,18 @@ class TestVerifyCustomerInformationCompleteness:
         result = verify_customer_information_completeness(data)
         assert result["passed"] is False
         assert "Company Office Status" in result["details"]["missing_fields"]
+
+    def test_not_available_sentinel_still_flagged_as_missing(self):
+        # TICKET-2: the adapter now substitutes "Not Available" instead of ""
+        # for a missing field -- the completeness rule must still flag it,
+        # not read it as a genuinely-filled value.
+        data = _full_customer_info()
+        data["company_office_status"] = NOT_AVAILABLE
+        data["directors"][0]["spouse_name"] = NOT_AVAILABLE
+        result = verify_customer_information_completeness(data)
+        assert result["passed"] is False
+        assert "Company Office Status" in result["details"]["missing_fields"]
+        assert "Director[0] Director Spouse Name" in result["details"]["missing_fields"]
 
     def test_missing_director_field_fails(self):
         data = _full_customer_info()
