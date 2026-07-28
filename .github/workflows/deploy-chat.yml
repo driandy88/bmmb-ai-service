@@ -1,0 +1,93 @@
+name: Test, Build & Deploy — Chat
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ["services/chat/**"]
+  push:
+    branches: [main]
+    paths: ["services/chat/**"]
+  # Adding this workflow file alone doesn't touch services/chat/**, so the first
+  # deploy won't auto-trigger — run it manually from the Actions tab (or
+  # `gh workflow run deploy-chat.yml`).
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: asia-southeast1
+  SERVICE_NAME: chat-service
+  REPO_NAME: bmmb-ai-service             # shared Artifact Registry repo across all services in this monorepo
+  WORKDIR: services/chat
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: ${{ env.WORKDIR }}
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      # Tests are hermetic: the LLM/RAG/audit/session backends default to offline
+      # stubs (LLM_BACKEND=stub), so nothing calls Vertex/Gemini. No credentials
+      # needed -- same as the MCP/Validation jobs.
+      - name: Run tests
+        working-directory: ${{ env.WORKDIR }}
+        run: pytest tests/ -v
+
+  # Only after tests pass, and only on pushes to main (not on PRs) or a manual run
+  deploy:
+    needs: test
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # required for keyless auth if you switch to Workload Identity later
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      # Chat is self-contained -- its Dockerfile COPYs requirements.txt + app/ from
+      # this dir, with no libs/ dependency -- so the build context is $WORKDIR, not
+      # the repo root (unlike Validation/MCP).
+      - name: Build image
+        run: |
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} ${{ env.WORKDIR }}
+
+      - name: Push image
+        run: |
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+
+      # Stateless by design: no Cloud SQL, no secrets. RAG/audit/session are
+      # stub/memory/none; the only egress is message text -> Vertex Gemini via ADC
+      # (the runtime SA). chat-service-sa needs roles/aiplatform.user -- one-time
+      # setup, see services/chat/README.md.
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} \
+            --region=${{ env.REGION }} \
+            --platform=managed \
+            --allow-unauthenticated \
+            --memory=1Gi --cpu=1 \
+            --service-account=chat-service-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+            --set-env-vars=LLM_BACKEND=vertex,GCP_PROJECT_ID=${{ env.PROJECT_ID }},VERTEX_LOCATION=${{ env.REGION }},MODEL_ID=gemini-2.5-flash,RAG_BACKEND=stub,AUDIT_BACKEND=memory,SESSION_STORE_BACKEND=none,EXTRACTION_BACKEND=stub,ALLOWED_ORIGINS='*'
+
+      - name: Show deployed URL
+        run: gcloud run services describe ${{ env.SERVICE_NAME }} --region=${{ env.REGION }} --format="value(status.url)"
