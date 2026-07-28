@@ -1,0 +1,94 @@
+# Canned response strategies R1–R8 — Customer Service workbook, Sheet
+# "1. Redirect non-related query", block 1.3. Wording is BMMB-owned and edited
+# to tone here, NOT in code (brief §4.3, §12).
+#
+# `variants` holds the approved alternates from the sheet. The composer uses
+# variants[0] deterministically (deterministic-where-it-matters); business can
+# reorder to change the default. Refusal strategies (R6/R7) must NEVER be
+# tailored to the specific attack and must never reveal internals.
+#
+# {financing_product} in R8 is filled by the composer (defaults to
+# "SME financing").
+
+- ref: R1
+  strategy: Redirect
+  applies_to: Other products / non-SME financing (OOS-01, OOS-02) + secondary intent (AMB-01)
+  variants:
+    - "I can only help with SME financing applications. For savings, deposits, cards or personal financing, our branch team will be glad to assist — I can share their contact details."
+    - "That's outside what I handle — I'm focused on SME financing here. Our branch team can help with that one; want their contact info?"
+    - "I'm not the right channel for that, unfortunately — I only cover SME financing. Let me point you to the team who can help."
+    - "Good question, just not one I can answer — I specialize in SME financing applications only. I can connect you with the right team for that."
+    - "That falls under a different product line than what I handle. I focus on SME financing, but I can get you in touch with the team that covers this."
+
+- ref: R2
+  strategy: Decline + refocus
+  applies_to: Competitor comparison (OOS-03)
+  notes: Sheet 1.1 marks OOS-03 status TBD (sales script pending).
+  variants:
+    - "I'm not able to compare other banks, but I'd be happy to explain BMMB's SME financing options and how eligibility works."
+    - "I can't speak to what other banks offer, but I can walk you through BMMB's SME financing programs if that helps."
+    - "That's not something I can weigh in on, but happy to go over what BMMB offers for SME financing instead."
+    - "I'll leave comparisons to you — what I can do is give you the full picture of BMMB's own SME financing options."
+    - "I don't have visibility into other banks' offerings, but let's talk through BMMB's SME financing if that's useful."
+
+- ref: R3
+  strategy: Decline + refocus (advice)
+  applies_to: Financial / investment advice (OOS-04); also fires for AMB-04 once drift confirmed
+  variants:
+    - "I'm not able to give investment or financial advice. I can help you with your SME financing application though."
+    - "That's outside what I can advise on — but if it's about your SME financing application, I'm here for that."
+    - "I'll have to sit this one out, investment advice isn't something I can offer. Happy to help with your financing application instead."
+    - "That's a bit beyond my scope — I can't advise on investments. Let's focus on your SME financing needs if that works."
+    - "I'm not able to weigh in on that kind of decision. What I can do is help with your SME financing application."
+
+- ref: R4
+  strategy: Refocus
+  applies_to: Chit-chat / off-topic (OOS-05, OOS-06, OOS-07)
+  variants:
+    - "I'm here specifically to help with SME financing — is there anything about that I can help you with?"
+    - "Ha, I'll stick to what I know best — SME financing. Anything on that front I can help with?"
+    - "That's a bit outside my lane! I'm best at SME financing questions — happy to help there."
+    - "I'm all about SME financing here — let me know if there's anything on that I can help with."
+    - "Not my department, I'm afraid — but if you've got SME financing questions, fire away."
+
+- ref: R5
+  strategy: Apologetic + redirect
+  applies_to: Complaint / tech / servicing (OOS-08, OOS-09, OOS-10)
+  notes: Pair with a Sales/branch contact card so the customer has somewhere to go.
+  variants:
+    - "I'm sorry about that. This is best handled by our team directly — here's how you can reach them."
+    - "Sorry to hear that. Let me point you to the right team who can actually help resolve this."
+    - "That's frustrating, and I want to make sure it gets properly looked at — our team can help directly here."
+    - "I hear you, and this deserves proper attention from our team rather than me. Here's how to reach them."
+    - "Apologies for the trouble. This needs to go to our team directly so it's handled properly — here's their contact."
+
+- ref: R6
+  strategy: Refusal + refocus (adversarial)
+  applies_to: Injection / extraction / roleplay / social eng. / exfiltration (ADV-01,02,03,06,07,08)
+  notes: NEVER tailor wording to the specific attack; NEVER reveal internals, model, config, or detection logic (§12).
+  variants:
+    - "Sorry, I can't help with that. I can assist with SME financing questions or your application."
+    - "I'm not able to do that. Happy to help with SME financing questions or your application instead."
+    - "That's not something I can do. Let me know if you have SME financing questions I can help with."
+
+- ref: R7
+  strategy: Refusal + redirect (eligibility gaming)
+  applies_to: Eligibility gaming / threshold probing (ADV-04, ADV-05)
+  notes: Refuse the gaming, but it's fine to point to the *general* criteria — never the exact cut-offs.
+  variants:
+    - "I can't advise on how to influence the outcome, but I can explain the general eligibility criteria and what documents you'll need."
+    - "That's not something I can help with, but I'm happy to walk you through the eligibility criteria in general terms."
+    - "I won't be able to help there, but I can share what the general eligibility requirements look like."
+    - "I can't get into specifics like that, but I can explain the eligibility criteria at a high level."
+    - "That's outside what I can advise on, but let's go over the general eligibility requirements instead."
+
+- ref: R8
+  strategy: Clarification
+  applies_to: Ambiguous / underspecified (AMB-02, AMB-03, AMB-06)
+  terminal: false            # not terminal — re-classify the reply; if still unclear, hand off (Sheet 9.4)
+  variants:
+    - "Just to make sure I help with the right thing — are you asking about {financing_product}, or something else?"
+    - "Quick check before I answer — is this about {financing_product}, or a different product?"
+    - "Let me make sure I point you the right way — are you referring to {financing_product}?"
+    - "To help you properly, could you clarify — is this related to {financing_product}?"
+    - "Just want to confirm first — are we talking about {financing_product} here?"
