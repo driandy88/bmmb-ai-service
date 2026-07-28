@@ -194,6 +194,22 @@ def _parse_ddmmyyyy(value: str) -> date:
     return date(int(year), int(month), int(day))
 
 
+def _parse_transaction_date(raw: Any) -> Optional[date]:
+    """Bank Statements' Transaction Date is normally ISO 'YYYY-MM-DD', but
+    tolerate 'DD-MM-YYYY' too (the format the rest of extraction uses --
+    see _parse_ddmmyyyy) rather than dropping an otherwise-good row just
+    because the two conventions disagree on this one template."""
+    text = str(raw)
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        pass
+    try:
+        return _parse_ddmmyyyy(text)
+    except (ValueError, TypeError):
+        return None
+
+
 # ── SSM corporate forms ──────────────────────────────────────────────────────
 
 _SSM_SUBTYPE_BY_TEMPLATE = {
@@ -547,9 +563,8 @@ def build_bank_statement_doc(
     by_month: dict[tuple[int, int], list] = {}
     for i, row in enumerate(txns):
         raw_date = (row or {}).get("Transaction Date")
-        try:
-            d = date.fromisoformat(str(raw_date))
-        except (TypeError, ValueError):
+        d = _parse_transaction_date(raw_date) if raw_date else None
+        if d is None:
             if raw_date:
                 warnings.append(AdapterWarning(
                     document_type="bank_statement", document_id=document_id,
@@ -583,14 +598,8 @@ def build_bank_statement_doc(
             current_state=currency, expected_state="MYR",
         ))
 
-    # Account Type still has no source attribute on the Bank Statements
-    # template -- keep it explicitly unknown and surface the integration gap.
-    warnings.append(AdapterWarning(
-        document_type="bank_statement", document_id=document_id, field="Account Type",
-        message="Account Type has no source attribute in the current Bank Statements template.",
-        current_state="no signal available (left as null)",
-        expected_state="an account type, e.g. current or savings",
-    ))
+    # Account Type has no source attribute on the Bank Statements template
+    # and is no longer a field anything depends on -- left null, no warning.
 
     monthly_balances = []
     all_dates: list[date] = []
@@ -618,6 +627,7 @@ def build_bank_statement_doc(
             statement_start_date=min(all_dates),
             statement_end_date=max(all_dates),
             monthly_balances=monthly_balances,
+            covered_months=[f"{year:04d}-{month:02d}" for (year, month) in sorted(by_month)],
         ),
         provenance=DocumentProvenance(source_template="Bank Statements"),
     )

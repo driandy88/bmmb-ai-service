@@ -132,3 +132,54 @@ class TestRegistryOutcomeShape:
         )
         entity_match_outcomes = [outcome for rule_id, outcome in pairs if rule_id == "entity_name.match"]
         assert len(entity_match_outcomes) == len(expected_docs)
+
+
+class TestBankStatementContinuityIsNeverGatedOnDocumentCount:
+    """Continuity is a date/coverage question, not a document-count one --
+    a single upload covering all 6 months in one document is exactly as
+    checkable as 6 separate monthly documents.
+    """
+
+    def _single_doc_raw(self, *, covered_months=None) -> dict:
+        data = {
+            "entity_name": "ALPHA TECH SOLUTIONS SDN BHD",
+            "bank_name": "MAYBANK BERHAD",
+            "statement_start_date": "2026-01-01",
+            "statement_end_date": "2026-06-30",
+        }
+        if covered_months is not None:
+            data["covered_months"] = covered_months
+        return {
+            "bundle_id": "BUNDLE-SINGLE-BANK-DOC",
+            "metadata": {
+                "total_documents_received": 1,
+                "system_date": "2026-07-08",
+                "document_types_present": ["bank_statement"],
+            },
+            "extracted_documents": [
+                {"document_id": "bank_all", "document_type": "bank_statement", "data": data},
+            ],
+        }
+
+    def test_single_document_with_no_covered_months_still_runs_and_passes(self):
+        # No per-month detail at all -- still must not skip; the document's
+        # own date range is trusted as one unbroken block.
+        raw = self._single_doc_raw()
+        context = _context(raw)
+        system_date = ValidationBundle(**raw).metadata.system_date
+        pairs = dict(run_all_rules(context, BMMB_SME_POLICY_V1, system_date))
+
+        continuity = pairs["bank_statement.continuity"]
+        assert continuity.skip_reason is None
+        assert continuity.result is not None
+        assert continuity.result["passed"] is True
+
+    def test_single_document_with_covered_months_gap_still_runs_and_fails(self):
+        raw = self._single_doc_raw(covered_months=["2026-01", "2026-02", "2026-04", "2026-05", "2026-06"])
+        context = _context(raw)
+        system_date = ValidationBundle(**raw).metadata.system_date
+        pairs = dict(run_all_rules(context, BMMB_SME_POLICY_V1, system_date))
+
+        continuity = pairs["bank_statement.continuity"]
+        assert continuity.skip_reason is None
+        assert continuity.result["passed"] is False

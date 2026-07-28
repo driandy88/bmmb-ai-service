@@ -20,13 +20,52 @@ description verbatim; per-argument text lives here, not in a separate
 schema field.
 """
 
-from datetime import timedelta
-from typing import Dict, List, Optional
+from datetime import date
+from typing import Dict, List, Optional, Tuple
 
 from dateutil.relativedelta import relativedelta
 
 from ._utils import to_date
 from ..domain.policies import BMMB_SME_POLICY_V1, ValidationPolicy
+
+MonthKey = Tuple[int, int]  # (year, month)
+
+
+def _month_key_str(month: MonthKey) -> str:
+    year, mon = month
+    return f"{year:04d}-{mon:02d}"
+
+
+def _next_month(month: MonthKey) -> MonthKey:
+    year, mon = month
+    return (year + 1, 1) if mon == 12 else (year, mon + 1)
+
+
+def _months_in_range(start: date, end: date) -> List[MonthKey]:
+    """Every (year, month) from start's month to end's month, inclusive."""
+    months = []
+    current = (start.year, start.month)
+    last = (end.year, end.month)
+    while current <= last:
+        months.append(current)
+        current = _next_month(current)
+    return months
+
+
+def _covered_months_for_statement(statement: Dict[str, object]) -> List[MonthKey]:
+    """The (year, month) values a statement actually has data for.
+
+    Uses the statement's own `covered_months` (ISO 'YYYY-MM' strings) when
+    given -- this is the only way to see a gap *inside* one consolidated
+    document. Otherwise falls back to expanding start_date..end_date, which
+    is exactly right for a single physical statement (its own period can't
+    have an internal gap) but would hide one for a document that's actually
+    a merge of several files.
+    """
+    raw_months = statement.get("covered_months")
+    if raw_months:
+        return [tuple(int(part) for part in str(m).split("-")) for m in raw_months]
+    return _months_in_range(to_date(statement["start_date"]), to_date(statement["end_date"]))
 
 # NOTE: date parameters are typed as `str` (ISO 'YYYY-MM-DD'), not
 # `datetime.date`, and nested objects as `Dict[str, object]`, not TypedDict
@@ -146,49 +185,38 @@ def check_financial_consecutive_years(fye_dates: List[str]) -> Dict:
 
 
 def check_bank_statement_continuity(statements: List[Dict[str, object]]) -> Dict:
-    """Sort bank statements by date and check there are no missing or overlapping days between them.
+    """Check that the calendar months covered by all bank statements have no gaps or overlaps.
 
-    Use this whenever the bundle contains 2 or more bank_statement documents,
-    before trusting their combined date range for anything else (e.g. before
-    calling verify_bank_statement_duration).
+    Use this whenever the bundle contains bank_statement document(s), before
+    trusting their combined coverage for anything else (e.g. before calling
+    verify_bank_statement_duration). Works whether the statements arrived as
+    several separate documents or one already-consolidated document -- see
+    covered_months below.
 
     Args:
         statements: One entry per bank_statement document, each with
             start_date and end_date as ISO 'YYYY-MM-DD' dates covering that
-            statement's period.
+            statement's period, and optionally covered_months (a list of
+            ISO 'YYYY-MM' strings for the calendar months it actually has
+            transaction data for -- needed to catch a gap *inside* a single
+            consolidated document; without it, the document's own date range
+            is trusted as one unbroken block).
     """
-    parsed = sorted(
-        (
-            {
-                "start_date": to_date(s["start_date"]),
-                "end_date": to_date(s["end_date"]),
-            }
-            for s in statements
-        ),
-        key=lambda s: s["start_date"],
-    )
+    month_occurrences: Dict[MonthKey, int] = {}
+    for statement in statements:
+        for month in set(_covered_months_for_statement(statement)):
+            month_occurrences[month] = month_occurrences.get(month, 0) + 1
+
+    covered = sorted(month_occurrences)
+    expected = _months_in_range(date(*covered[0], 1), date(*covered[-1], 1)) if covered else []
 
     issues = []
-    for prev, curr in zip(parsed, parsed[1:]):
-        expected_start = prev["end_date"] + timedelta(days=1)
-        if curr["start_date"] > expected_start:
-            gap_days = (curr["start_date"] - expected_start).days
-            issues.append(
-                {
-                    "type": "gap",
-                    "between": [prev["end_date"].isoformat(), curr["start_date"].isoformat()],
-                    "missing_days": gap_days,
-                }
-            )
-        elif curr["start_date"] < expected_start:
-            overlap_days = (expected_start - curr["start_date"]).days
-            issues.append(
-                {
-                    "type": "overlap",
-                    "between": [prev["end_date"].isoformat(), curr["start_date"].isoformat()],
-                    "overlap_days": overlap_days,
-                }
-            )
+    missing = [m for m in expected if m not in month_occurrences]
+    if missing:
+        issues.append({"type": "gap", "missing_months": [_month_key_str(m) for m in missing]})
+    overlapping = sorted(m for m, count in month_occurrences.items() if count > 1)
+    if overlapping:
+        issues.append({"type": "overlap", "overlapping_months": [_month_key_str(m) for m in overlapping]})
 
     passed = len(issues) == 0
 
@@ -200,10 +228,7 @@ def check_bank_statement_continuity(statements: List[Dict[str, object]]) -> Dict
             else f"Found {len(issues)} continuity issue(s) in bank statements."
         ),
         "details": {
-            "statements_sorted": [
-                {"start_date": s["start_date"].isoformat(), "end_date": s["end_date"].isoformat()}
-                for s in parsed
-            ],
+            "covered_months": [_month_key_str(m) for m in covered],
             "issues": issues,
         },
     }
@@ -235,15 +260,14 @@ def verify_bank_statement_duration(
             "details": continuity["details"],
         }
 
-    sorted_statements = continuity["details"]["statements_sorted"]
-    earliest_start = to_date(sorted_statements[0]["start_date"])
-    latest_end = to_date(sorted_statements[-1]["end_date"])
+    earliest_start = to_date(min(s["start_date"] for s in statements))
+    latest_end = to_date(max(s["end_date"] for s in statements))
 
-    rd = relativedelta(latest_end, earliest_start)
-    months_covered = rd.years * 12 + rd.months
-    if rd.days > 0:
-        # A partial trailing month still counts as a covered month.
-        months_covered += 1
+    # continuity has already confirmed covered_months forms one unbroken run,
+    # so its size is exactly the number of calendar months covered --
+    # immune to the day-of-month alignment that relativedelta arithmetic
+    # (e.g. Jan 31 -> Jun 30 has a zero day-remainder) used to undercount by one.
+    months_covered = len(continuity["details"]["covered_months"])
 
     min_required = policy.minimum_bank_statement_months_by_entity.get(
         entity_type.strip().lower(), policy.default_minimum_bank_statement_months

@@ -222,6 +222,38 @@ class TestCheckBankStatementContinuity:
         )
         assert result["passed"] is True
 
+    def test_single_consolidated_document_with_covered_months_gap_fails(self):
+        # One BankStatementDoc (e.g. from extraction_adapter's from-extraction
+        # path) spanning Jan-Jun but with no transactions in March -- the
+        # start/end date range alone can't reveal this, only covered_months.
+        result = check_bank_statement_continuity(
+            [{
+                "start_date": "2026-01-01", "end_date": "2026-06-30",
+                "covered_months": ["2026-01", "2026-02", "2026-04", "2026-05", "2026-06"],
+            }]
+        )
+        assert result["passed"] is False
+        assert result["details"]["issues"][0]["type"] == "gap"
+        assert "2026-03" in result["details"]["issues"][0]["missing_months"]
+
+    def test_single_consolidated_document_with_full_covered_months_passes(self):
+        result = check_bank_statement_continuity(
+            [{
+                "start_date": "2026-01-01", "end_date": "2026-06-30",
+                "covered_months": ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"],
+            }]
+        )
+        assert result["passed"] is True
+
+    def test_two_documents_sharing_a_month_via_covered_months_is_an_overlap(self):
+        result = check_bank_statement_continuity(
+            [{"start_date": "2026-01-01", "end_date": "2026-03-31", "covered_months": ["2026-01", "2026-02", "2026-03"]},
+             {"start_date": "2026-03-01", "end_date": "2026-04-30", "covered_months": ["2026-03", "2026-04"]}]
+        )
+        assert result["passed"] is False
+        assert result["details"]["issues"][0]["type"] == "overlap"
+        assert "2026-03" in result["details"]["issues"][0]["overlapping_months"]
+
 
 class TestVerifyBankStatementDuration:
     def test_sdn_bhd_needs_6_months(self):
@@ -244,6 +276,27 @@ class TestVerifyBankStatementDuration:
             {"start_date": "2026-01-01", "end_date": "2026-01-31"},
             {"start_date": "2026-06-01", "end_date": "2026-06-30"},
         ]
+        result = verify_bank_statement_duration(statements, "Sdn Bhd")
+        assert result["passed"] is False
+        assert "not continuous" in result["message"]
+
+    def test_day_of_month_alignment_no_longer_causes_an_off_by_one_undercount(self):
+        # Regression for the bug where relativedelta(2026-06-30, 2026-01-31)
+        # has a zero day-remainder, so the old "+1 only if rd.days > 0" logic
+        # undercounted this ordinary 6-month span as 5.
+        statements = [{"start_date": "2026-01-31", "end_date": "2026-06-30"}]
+        result = verify_bank_statement_duration(statements, "Sdn Bhd")
+        assert result["details"]["months_covered"] == 6
+        assert result["passed"] is True
+
+    def test_months_covered_uses_covered_months_when_present(self):
+        # A single consolidated document missing March: months_covered must
+        # reflect the true 5 distinct months, and continuity must catch the
+        # gap rather than duration silently computing 6 from the date range.
+        statements = [{
+            "start_date": "2026-01-01", "end_date": "2026-06-30",
+            "covered_months": ["2026-01", "2026-02", "2026-04", "2026-05", "2026-06"],
+        }]
         result = verify_bank_statement_duration(statements, "Sdn Bhd")
         assert result["passed"] is False
         assert "not continuous" in result["message"]

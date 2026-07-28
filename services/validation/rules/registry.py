@@ -71,7 +71,11 @@ RuleRunner = Callable[[RuleRunContext], list[RuleOutcome]]
 
 def _bank_statement_periods(docs) -> list[dict]:
     return [
-        {"start_date": d.data.statement_start_date.isoformat(), "end_date": d.data.statement_end_date.isoformat()}
+        {
+            "start_date": d.data.statement_start_date.isoformat(),
+            "end_date": d.data.statement_end_date.isoformat(),
+            "covered_months": d.data.covered_months,
+        }
         for d in docs
     ]
 
@@ -128,14 +132,13 @@ def _run_financial_sections_present(ctx: RuleRunContext) -> list[RuleOutcome]:
 
 
 def _run_bank_statement_continuity(ctx: RuleRunContext) -> list[RuleOutcome]:
+    # Continuity is a question about which dates/months are covered, not how
+    # many documents that coverage arrived in -- a single upload spanning all
+    # 6 months in one document is exactly as checkable as 6 separate ones
+    # (via covered_months when available, else the document's own date range).
     bc = ctx.bundle_context
     if not bc.bank_statement_docs:
         return [RuleOutcome("check_bank_statement_continuity", skip_reason="No bank_statement document in bundle.")]
-    if len(bc.bank_statement_docs) < 2:
-        return [RuleOutcome(
-            "check_bank_statement_continuity",
-            skip_reason="Only 1 bank_statement document; continuity needs 2+.",
-        )]
     statements = _bank_statement_periods(bc.bank_statement_docs)
     return [RuleOutcome("check_bank_statement_continuity", result=check_bank_statement_continuity(statements))]
 

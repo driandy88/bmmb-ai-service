@@ -182,13 +182,14 @@ class TestBuildBankStatementDoc:
 
     def test_maps_available_bank_name_and_preserves_unknown_fields(self, extracted_by_template):
         # This fixture's Bank Statements has no Currency attribute -> null,
-        # warned; Account Type has no source attribute at all.
+        # warned. Account Type also has no source attribute, but it's no
+        # longer a relevant field, so it degrades silently -- no warning.
         warnings = []
         doc = build_bank_statement_doc(extracted_by_template, entity_name="X", warnings=warnings)
         assert doc.data.bank_name == "MAYBANK BERHAD"
         assert doc.data.currency is None
         assert doc.data.account_type is None
-        assert {w.field for w in warnings} >= {"Currency", "Account Type"}
+        assert {w.field for w in warnings} == {"Currency"}
 
     def test_reads_myr_currency_without_warning(self, extracted_by_template):
         extracted_by_template["Bank Statements"]["Currency"] = "MYR"
@@ -219,6 +220,52 @@ class TestBuildBankStatementDoc:
 
     def test_missing_template_returns_none(self):
         assert build_bank_statement_doc({}, entity_name="X") is None
+
+    def test_covered_months_reflects_distinct_transaction_months(self, extracted_by_template):
+        doc = build_bank_statement_doc(extracted_by_template, entity_name="X")
+        assert doc.data.covered_months == [
+            "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06",
+        ]
+
+    def test_covered_months_reveals_a_gap_the_date_range_alone_would_hide(self, extracted_by_template):
+        # Drop every March transaction -- statement_start/end_date still span
+        # Jan-Jun (they only look at min/max), but covered_months must not
+        # claim March, so continuity can catch the gap.
+        txns = extracted_by_template["Bank Statements"]["Transactions"]
+        extracted_by_template["Bank Statements"]["Transactions"] = [
+            t for t in txns if not t["Transaction Date"].startswith("2026-03")
+        ]
+        doc = build_bank_statement_doc(extracted_by_template, entity_name="X")
+        assert doc.data.statement_start_date == date(2026, 1, 1)
+        assert doc.data.statement_end_date == date(2026, 6, 30)
+        assert "2026-03" not in doc.data.covered_months
+
+    def test_ddmmyyyy_transaction_date_is_parsed_not_dropped(self, extracted_by_template):
+        # Extraction's normal convention elsewhere in the codebase is
+        # 'DD-MM-YYYY' (see _parse_ddmmyyyy) -- a row in that format should
+        # still be counted, not silently excluded as unparseable.
+        txns = extracted_by_template["Bank Statements"]["Transactions"]
+        txns.append({
+            "Transaction Date": "15-07-2026", "Transaction Description": "TEST",
+            "Transaction Debit": None, "Transaction Credit": 100.0, "Transaction Balance": 100.0,
+        })
+        warnings = []
+        doc = build_bank_statement_doc(extracted_by_template, entity_name="X", warnings=warnings)
+        assert "2026-07" in doc.data.covered_months
+        assert not any("unparseable transaction date" in w.message for w in warnings)
+
+    def test_genuinely_unparseable_transaction_date_still_warns_and_excludes(self, extracted_by_template):
+        txns = extracted_by_template["Bank Statements"]["Transactions"]
+        txns.append({
+            "Transaction Date": "not a date", "Transaction Description": "TEST",
+            "Transaction Debit": None, "Transaction Credit": 100.0, "Transaction Balance": 100.0,
+        })
+        warnings = []
+        doc = build_bank_statement_doc(extracted_by_template, entity_name="X", warnings=warnings)
+        assert any("unparseable transaction date" in w.message for w in warnings)
+        assert doc.data.covered_months == [
+            "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06",
+        ]
 
 
 class TestBuildIdentityDocuments:
@@ -377,8 +424,9 @@ class TestBuildValidationBundle:
         # The example fixture is otherwise complete -- the only warnings
         # should be the pre-documented extraction schema gaps: no
         # Shareholder NRIC attribute on SSM Form 24, no Business Registration
-        # Number attribute on SSM Form 44, and no currency/account-type
-        # attributes on Bank Statements.
+        # Number attribute on SSM Form 44, and no currency attribute on Bank
+        # Statements. Account Type has no source attribute either, but it's
+        # no longer a relevant field, so it doesn't warn.
         # signature_present is supplied explicitly here, so no warning for it.
         result = build_validation_bundle(
             extracted_by_template,
@@ -387,7 +435,7 @@ class TestBuildValidationBundle:
         )
         fields = {w.field for w in result.warnings}
         assert fields == {
-            "Shareholders", "Business Registration Number", "Currency", "Account Type",
+            "Shareholders", "Business Registration Number", "Currency",
             "audited",
         }
 

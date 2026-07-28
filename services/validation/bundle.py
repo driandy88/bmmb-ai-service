@@ -113,6 +113,15 @@ class BankStatementData(BaseModel):
     # overdraft check (Rule 3c): a negative end balance on a debit
     # (current/savings) account indicates an overdraft.
     monthly_balances: Optional[List[MonthlyBankBalance]] = None
+    # Which calendar months this document actually has transaction data for,
+    # as ISO 'YYYY-MM' strings. Unlike statement_start_date/end_date (which
+    # only bound the range), this can reveal a gap *inside* a single document
+    # -- e.g. one BankStatementDoc consolidated from several uploaded files
+    # with a missing month in between. Optional because it's only populated
+    # by extraction_adapter.py today; when absent, continuity/duration rules
+    # fall back to treating the document's own start/end range as one
+    # unbroken block (true by construction for a single physical statement).
+    covered_months: Optional[List[str]] = None
 
 class IdentityDocumentData(BaseModel):
     individual_name: str
