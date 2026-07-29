@@ -25,7 +25,13 @@ from typing import Dict, List, Optional, Tuple
 
 from dateutil.relativedelta import relativedelta
 
-from ._utils import best_fuzzy_match, resolve_entity_type_key, to_date
+from ._utils import (
+    best_fuzzy_match,
+    normalize_currency,
+    resolve_entity_type_key,
+    summarize_items,
+    to_date,
+)
 from ..domain.policies import BMMB_SME_POLICY_V1, ValidationPolicy
 
 MonthKey = Tuple[int, int]  # (year, month)
@@ -279,7 +285,12 @@ def check_bank_statement_continuity(statements: List[Dict[str, object]]) -> Dict
         "message": (
             "Bank statements are continuous with no gaps or overlaps."
             if passed
-            else f"Found {len(issues)} continuity issue(s) in bank statements."
+            else "Bank statement coverage is not continuous -- " + "; ".join(
+                f"missing month(s): {summarize_items(issue['missing_months'])}"
+                if issue["type"] == "gap"
+                else f"overlapping month(s): {summarize_items(issue['overlapping_months'])}"
+                for issue in issues
+            ) + "."
         ),
         "details": {
             "covered_months": [_month_key_str(m) for m in covered],
@@ -420,7 +431,10 @@ def check_bank_statement_overdraft(monthly_balances: List[Dict[str, object]]) ->
         "message": (
             "No overdrawn months found across the bank statements."
             if passed
-            else f"{len(overdrawn)} month(s) show a negative (overdrawn) end balance."
+            else f"{len(overdrawn)} month(s) show a negative (overdrawn) end balance: "
+                 + summarize_items(
+                     f"{m['month']} ({m['end_balance']})" for m in overdrawn
+                 ) + "."
         ),
         "details": {
             "months_checked": len(monthly_balances),
@@ -574,34 +588,60 @@ def check_bank_statement_currency(
         accepted_currency: The currency code statements are expected to be
             in, e.g. "MYR".
     """
-    normalized_accepted = accepted_currency.strip().upper()
-    unknown_count = sum(1 for c in currencies if c is None)
-    mismatched = sorted({c for c in currencies if c is not None and c.strip().upper() != normalized_accepted})
+    normalized_accepted = normalize_currency(accepted_currency)
+    total = len(currencies)
+
+    # Counted per document, not per distinct code: three SGD statements are
+    # three documents to convert, and a message that says "1 currency" reads
+    # as one document. Both numbers matter, so both are reported. Codes are
+    # normalized first ("RM" and "MYR" are one currency, in any casing).
+    currency_counts: Dict[str, int] = {}
+    unknown_count = 0
+    for currency in currencies:
+        code = normalize_currency(currency)
+        if code is None:
+            unknown_count += 1
+            continue
+        currency_counts[code] = currency_counts.get(code, 0) + 1
+
+    mismatched = sorted(code for code in currency_counts if code != normalized_accepted)
+    mismatched_document_count = sum(currency_counts[code] for code in mismatched)
+    detected_summary = ", ".join(f"{code} ({currency_counts[code]})" for code in mismatched)
 
     if mismatched:
         passed = None
         message = (
-            f"{len(mismatched)} bank statement currency/currencies ({', '.join(mismatched)}) "
-            f"do not match the accepted currency ({normalized_accepted}) -- needs conversion "
-            "and manual review."
+            f"{mismatched_document_count} bank statement(s) are not in the accepted "
+            f"currency ({normalized_accepted}) -- detected {detected_summary} "
+            "-- needs conversion and manual review."
         )
-    elif unknown_count > 0:
+        if unknown_count:
+            message += f" A further {unknown_count} statement(s) have no confirmed currency."
+    elif unknown_count:
         passed = None
         message = (
-            "At least one bank statement has no confirmed currency -- cannot "
-            f"confirm it matches the accepted currency ({normalized_accepted})."
+            f"{unknown_count} of {total} bank statement(s) have no confirmed currency "
+            f"-- cannot confirm they match the accepted currency ({normalized_accepted})."
         )
     else:
         passed = True
-        message = f"All bank statements are in the accepted currency ({normalized_accepted})."
+        message = (
+            f"All {total} bank statement(s) are in the accepted currency "
+            f"({normalized_accepted})."
+        )
 
     return {
         "passed": passed,
         "message": message,
         "details": {
-            "documents_checked": len(currencies),
+            "documents_checked": total,
             "accepted_currency": normalized_accepted,
+            # Every currency detected across the set, with how many documents
+            # carry each -- the accepted one included, so the split is visible
+            # when only some statements are foreign.
+            "currency_counts": currency_counts,
             "mismatched_currencies": mismatched,
+            "mismatched_document_count": mismatched_document_count,
             "documents_with_unknown_currency": unknown_count,
         },
     }

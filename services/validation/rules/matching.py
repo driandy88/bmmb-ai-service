@@ -60,7 +60,14 @@ def person_similarity(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, _normalize_name(a), _normalize_name(b)).ratio()
 
 
-def strict_match_entity_names(ssm_entity_name: str, target_entity_name: str) -> Dict:
+def _on_document(document_label: Optional[str]) -> str:
+    """" on <document>" for a message, or "" when the caller didn't name one."""
+    return f" on {document_label}" if document_label else ""
+
+
+def strict_match_entity_names(
+    ssm_entity_name: str, target_entity_name: str, document_label: Optional[str] = None,
+) -> Dict:
     """Check that an entity name on a target document exactly matches the SSM entity name.
 
     Use this to confirm the entity named on a bank statement, financial
@@ -74,6 +81,9 @@ def strict_match_entity_names(ssm_entity_name: str, target_entity_name: str) -> 
             (source of truth).
         target_entity_name: The entity_name from the document being
             checked (bank statement, financial statement, or consent form).
+        document_label: Which document is being checked (e.g. its
+            document_id), so the message says where the mismatch is rather
+            than leaving the reader to infer it from the check name.
     """
     normalized_ssm = _normalize_text(ssm_entity_name)
     normalized_target = _normalize_text(target_entity_name)
@@ -82,11 +92,14 @@ def strict_match_entity_names(ssm_entity_name: str, target_entity_name: str) -> 
     return {
         "passed": passed,
         "message": (
-            "Entity names match."
+            f"Entity name{_on_document(document_label)} matches the SSM form "
+            f"('{ssm_entity_name}')."
             if passed
-            else f"Entity name mismatch: SSM has '{ssm_entity_name}', document has '{target_entity_name}'."
+            else f"Entity name mismatch{_on_document(document_label)}: SSM has "
+                 f"'{ssm_entity_name}', document has '{target_entity_name}'."
         ),
         "details": {
+            "document_label": document_label,
             "ssm_entity_name": ssm_entity_name,
             "target_entity_name": target_entity_name,
             "normalized_ssm_entity_name": normalized_ssm,
@@ -96,7 +109,8 @@ def strict_match_entity_names(ssm_entity_name: str, target_entity_name: str) -> 
 
 
 def fuzzy_match_entity_names(
-    ssm_entity_name: str, target_entity_name: str, threshold: float = 0.95
+    ssm_entity_name: str, target_entity_name: str, threshold: float = 0.95,
+    document_label: Optional[str] = None,
 ) -> Dict:
     """Check whether two entity names are highly likely to be the same entity.
 
@@ -104,6 +118,15 @@ def fuzzy_match_entity_names(
     due to punctuation/formatting noise (e.g. "SDN. BHD." vs "SDN BHD"). Uses
     a higher default threshold than fuzzy_match_person_names since entity
     names should stay close to an exact match.
+
+    Args:
+        ssm_entity_name: The entity_name from the SSM corporate form.
+        target_entity_name: The entity_name from the document being checked.
+        threshold: Minimum similarity to accept as the same entity.
+        document_label: Which document is being checked (e.g. its
+            document_id), named in the message alongside both names -- this
+            is the result that reaches the report when the strict match
+            fails, so it has to carry the full picture on its own.
     """
     normalized_ssm = _normalize_entity_name(ssm_entity_name)
     normalized_target = _normalize_entity_name(target_entity_name)
@@ -114,11 +137,15 @@ def fuzzy_match_entity_names(
     return {
         "passed": passed,
         "message": (
-            f"Entity names are highly likely to match (similarity {similarity_score:.2f})."
+            f"Entity name{_on_document(document_label)} ('{target_entity_name}') is highly "
+            f"likely to be the SSM entity '{ssm_entity_name}' (similarity {similarity_score:.2f})."
             if passed
-            else f"Entity names do not appear to match (similarity {similarity_score:.2f})."
+            else f"Entity name mismatch{_on_document(document_label)}: SSM has "
+                 f"'{ssm_entity_name}', document has '{target_entity_name}' "
+                 f"(similarity {similarity_score:.2f}, below {threshold:.2f})."
         ),
         "details": {
+            "document_label": document_label,
             "ssm_entity_name": ssm_entity_name,
             "target_entity_name": target_entity_name,
             "normalized_ssm_entity_name": normalized_ssm,
@@ -129,7 +156,9 @@ def fuzzy_match_entity_names(
     }
 
 
-def strict_match_ic_numbers(ssm_nric: str, target_nric: str) -> Dict:
+def strict_match_ic_numbers(
+    ssm_nric: str, target_nric: str, person_label: Optional[str] = None,
+) -> Dict:
     """Check that an NRIC/passport number on a target document exactly matches the SSM record.
 
     Use this to confirm the NRIC/passport on an identity_document or
@@ -142,19 +171,24 @@ def strict_match_ic_numbers(ssm_nric: str, target_nric: str) -> Dict:
             truth) for this person.
         target_nric: The nric_passport from the document being checked
             (identity_document or consent_form).
+        person_label: Whose number is being compared, so the message names
+            the person rather than leaving two bare numbers to be traced back.
     """
     normalized_ssm = normalize_id(ssm_nric)
     normalized_target = normalize_id(target_nric)
     passed = normalized_ssm == normalized_target
+    whose = f" for {person_label}" if person_label else ""
 
     return {
         "passed": passed,
         "message": (
-            "NRIC/passport numbers match."
+            f"NRIC/passport{whose} matches the SSM record ('{ssm_nric}')."
             if passed
-            else f"NRIC/passport mismatch: SSM has '{ssm_nric}', document has '{target_nric}'."
+            else f"NRIC/passport mismatch{whose}: SSM has '{ssm_nric}', "
+                 f"document has '{target_nric}'."
         ),
         "details": {
+            "person_label": person_label,
             "ssm_nric": ssm_nric,
             "target_nric": target_nric,
             "normalized_ssm_nric": normalized_ssm,

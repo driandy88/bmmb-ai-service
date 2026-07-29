@@ -70,7 +70,8 @@ from .bundle import (
     TaxDeclarationDoc,
     ValidationBundle,
 )
-from .rules._utils import NOT_AVAILABLE, normalize_id_type
+from .domain.policies import BMMB_SME_POLICY_V1, ValidationPolicy
+from .rules._utils import NOT_AVAILABLE, normalize_currency, normalize_id_type
 
 
 class AdapterDataGapError(ValueError):
@@ -580,6 +581,7 @@ def build_bank_statement_doc(
     *,
     entity_name: str,
     warnings: Optional[list[AdapterWarning]] = None,
+    policy: ValidationPolicy = BMMB_SME_POLICY_V1,
 ) -> Optional[BankStatementDoc]:
     """One consolidated BankStatementDoc built from the "Bank Statements"
     template's daily Transactions row_group. The monthly end balance is the
@@ -627,20 +629,31 @@ def build_bank_statement_doc(
         document_type="bank_statement", document_id=document_id, field="Bank Name",
     )
 
-    # Currency is read from the template's "Currency" attribute. For now a
-    # non-MYR statement is only warned (the check_bank_statement_currency rule
-    # already treats a mismatch as needs-review, not a hard fail -- it needs
-    # manual conversion before balances compare like-for-like).
+    # Currency is read from the template's "Currency" attribute. A foreign
+    # currency is only warned, never blocked here (check_bank_statement_currency
+    # treats a mismatch as needs-review, not a hard fail -- it needs manual
+    # conversion before balances compare like-for-like). The accepted currency
+    # comes from the policy rather than a hardcoded "MYR" so the warning can't
+    # drift from the rule that acts on it.
+    accepted_currency = normalize_currency(policy.accepted_bank_currency)
     currency = _optional_str(
         extracted.get("Currency"), warnings=warnings,
         document_type="bank_statement", document_id=document_id, field="Currency",
     )
-    if currency is not None and currency.strip().upper() != "MYR":
-        warnings.append(AdapterWarning(
-            document_type="bank_statement", document_id=document_id, field="Currency",
-            message=f"Bank statement currency is {currency!r}, not MYR -- needs conversion and manual review.",
-            current_state=currency, expected_state="MYR",
-        ))
+    if currency is not None:
+        # "RM" and "MYR" are the same currency -- normalize before judging, or
+        # a perfectly ordinary Malaysian statement gets flagged for conversion
+        # into its own currency.
+        detected_currency = normalize_currency(currency)
+        if detected_currency is not None and detected_currency != accepted_currency:
+            warnings.append(AdapterWarning(
+                document_type="bank_statement", document_id=document_id, field="Currency",
+                message=f"Bank statement currency detected as {detected_currency}, not the "
+                        f"accepted {accepted_currency} -- balances need conversion before "
+                        "they compare like-for-like; flagged for manual review.",
+                current_state=f"{detected_currency} (as extracted: {currency!r})",
+                expected_state=accepted_currency,
+            ))
 
     # Account Type has no source attribute on the Bank Statements template
     # and is no longer a field anything depends on -- left null, no warning.

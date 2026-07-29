@@ -292,8 +292,10 @@ def _run_entity_name_match(ctx: RuleRunContext) -> list[RuleOutcome]:
     for doc in docs:
         target_name = doc.data.entity_name
         check_name = f"strict_match_entity_names[{doc.document_id}]"
-        strict = strict_match_entity_names(bc.entity_name, target_name)
-        result = strict if strict["passed"] else fuzzy_match_entity_names(bc.entity_name, target_name)
+        strict = strict_match_entity_names(bc.entity_name, target_name, document_label=doc.document_id)
+        result = strict if strict["passed"] else fuzzy_match_entity_names(
+            bc.entity_name, target_name, document_label=doc.document_id,
+        )
         outcomes.append(RuleOutcome(check_name, result=result))
     return outcomes
 
@@ -332,7 +334,9 @@ def _run_ic_number_match(ctx: RuleRunContext) -> list[RuleOutcome]:
             }))
             continue
         ic_doc = docs_by_id[matched_doc_id]
-        result = strict_match_ic_numbers(person.nric_passport, ic_doc.data.nric_passport)
+        result = strict_match_ic_numbers(
+            person.nric_passport, ic_doc.data.nric_passport, person_label=person.name,
+        )
         outcomes.append(RuleOutcome(check_name, result=result))
     return outcomes
 

@@ -24,10 +24,13 @@ from typing import Dict, List, Optional, Tuple
 from ._utils import (
     ID_TYPE_MYKAD,
     ID_TYPE_PASSPORT,
+    MARITAL_STATUS_UNMARRIED,
     is_blank,
     normalize_id,
     normalize_id_type,
+    normalize_marital_status,
     resolve_entity_type_key,
+    summarize_items,
 )
 from ..domain.policies import BMMB_SME_POLICY_V1, ValidationPolicy
 
@@ -135,9 +138,22 @@ def verify_financial_sections_present(financial_statement_data: List[Dict[str, o
     passed = False if incomplete_documents else (None if needs_review_documents else True)
 
     if incomplete_documents:
-        message = f"{len(incomplete_documents)} financial statement(s) are missing required sections."
+        message = (
+            f"{len(incomplete_documents)} financial statement(s) are missing required sections: "
+            + summarize_items(
+                f"{doc['financial_year_end']} missing {', '.join(doc['missing_sections'])}"
+                for doc in incomplete_documents
+            ) + "."
+        )
     elif needs_review_documents:
-        message = f"{len(needs_review_documents)} financial statement(s) have unconfirmed sections -- needs review."
+        message = (
+            f"{len(needs_review_documents)} financial statement(s) have unconfirmed sections "
+            "-- needs review: "
+            + summarize_items(
+                f"{doc['financial_year_end']} unconfirmed {', '.join(doc['unconfirmed_sections'])}"
+                for doc in needs_review_documents
+            ) + "."
+        )
     else:
         message = "All financial statements include the required sections."
 
@@ -258,9 +274,22 @@ def check_ic_front_and_back(ic_documents: List[Dict[str, object]]) -> Dict:
     passed = False if incomplete else (None if needs_review else True)
 
     if incomplete:
-        message = f"{len(incomplete)} identity document(s) are missing required image(s)."
+        message = (
+            f"{len(incomplete)} identity document(s) are missing required image(s): "
+            + summarize_items(
+                f"{doc['individual_name']} missing {', '.join(doc['missing_sides'])}"
+                for doc in incomplete
+            ) + "."
+        )
     elif needs_review:
-        message = f"{len(needs_review)} identity document(s) have unconfirmed image(s) -- needs review."
+        message = (
+            f"{len(needs_review)} identity document(s) have unconfirmed image(s) "
+            "-- needs review: "
+            + summarize_items(
+                f"{doc['individual_name']} unconfirmed {', '.join(doc['unconfirmed_sides'])}"
+                for doc in needs_review
+            ) + "."
+        )
     else:
         message = "All identity documents carry the images their type requires."
 
@@ -304,11 +333,27 @@ _CUSTOMER_INFO_COMPANY_LABELS = {
 }
 
 
+# Spouse details only exist for a director who has a spouse, so they're
+# required conditionally rather than unconditionally -- an unmarried director
+# writing "N/A" has completed the form correctly, and failing them for it is
+# a false rejection.
+_SPOUSE_FIELDS = ("spouse_name", "spouse_contact_number")
+
+
 def verify_customer_information_completeness(customer_information: Dict[str, object]) -> Dict:
-    """Check that EVERY field on the Customer Information Form is filled in.
+    """Check that every applicable field on the Customer Information Form is filled in.
 
     Use this once the customer_information document has been extracted, to
     confirm no company field or director-particulars field was left blank.
+    Values meaning "nothing here" -- "N/A", "-", "Not Available" -- count as
+    blank, not as filled in.
+
+    Spouse Name and Spouse Contact Number are the one exception to "every
+    field is mandatory": they're required only when the director's marital
+    status says they have a spouse. For an unmarried director they're waived
+    and reported under not_applicable_fields. When the marital status can't be
+    read at all, the spouse fields are left undecided (needs review) rather
+    than guessed either way.
 
     Args:
         customer_information: The customer_information document's data --
@@ -320,26 +365,55 @@ def verify_customer_information_completeness(customer_information: Dict[str, obj
         for field, label in _CUSTOMER_INFO_COMPANY_LABELS.items()
         if is_blank(customer_information.get(field))
     ]
+    not_applicable_fields = []
+    unconfirmed_marital_status = []
 
     directors = customer_information.get("directors") or []
     if not directors:
         missing_fields.append("Directors (no director particulars provided)")
     for i, director in enumerate(directors):
+        marital_status = normalize_marital_status(director.get("marital_status"))
         for field, label in _CUSTOMER_INFO_DIRECTOR_LABELS.items():
+            qualified_label = f"Director[{i}] {label}"
+            if field in _SPOUSE_FIELDS:
+                if marital_status == MARITAL_STATUS_UNMARRIED:
+                    not_applicable_fields.append(qualified_label)
+                    continue
+                if marital_status is None:
+                    # Can't tell whether a spouse was expected. The marital
+                    # status field is either already flagged blank below, or
+                    # holds a value we don't recognize -- either way, one root
+                    # cause, reported once.
+                    continue
             if is_blank(director.get(field)):
-                missing_fields.append(f"Director[{i}] {label}")
+                missing_fields.append(qualified_label)
+        if marital_status is None and not is_blank(director.get("marital_status")):
+            unconfirmed_marital_status.append(
+                f"Director[{i}] {_CUSTOMER_INFO_DIRECTOR_LABELS['marital_status']}"
+            )
 
-    passed = len(missing_fields) == 0
+    passed = False if missing_fields else (None if unconfirmed_marital_status else True)
+
+    if missing_fields:
+        message = (
+            f"Missing {len(missing_fields)} Customer Information Form field(s): "
+            f"{summarize_items(missing_fields)}."
+        )
+    elif unconfirmed_marital_status:
+        message = (
+            "Marital status could not be read, so spouse details could not be "
+            f"checked -- needs review: {summarize_items(unconfirmed_marital_status)}."
+        )
+    else:
+        message = "All applicable Customer Information Form fields are completed."
+
     return {
         "passed": passed,
-        "message": (
-            "All Customer Information Form fields are completed."
-            if passed
-            else f"Missing {len(missing_fields)} Customer Information Form field(s): "
-                 f"{', '.join(missing_fields)}."
-        ),
+        "message": message,
         "details": {
             "missing_fields": missing_fields,
+            "not_applicable_fields": not_applicable_fields,
+            "unconfirmed_marital_status": unconfirmed_marital_status,
         },
     }
 
@@ -382,12 +456,22 @@ def verify_consent_signatures(ssm_people: List[Dict[str, object]], consent_forms
     )
 
     if missing_consent or unsigned_consent:
-        message = (
-            f"{len(missing_consent)} missing Consent Form(s), "
-            f"{len(unsigned_consent)} confirmed-unsigned Consent Form(s)."
-        )
+        parts = []
+        if missing_consent:
+            parts.append(
+                f"No Consent Form for {summarize_items(p['name'] for p in missing_consent)}"
+            )
+        if unsigned_consent:
+            parts.append(
+                f"Consent Form is unsigned for "
+                f"{summarize_items(p['name'] for p in unsigned_consent)}"
+            )
+        message = "; ".join(parts) + "."
     elif unconfirmed_consent:
-        message = f"{len(unconfirmed_consent)} Consent Form(s) have an unconfirmed signature -- needs review."
+        message = (
+            f"{len(unconfirmed_consent)} Consent Form(s) have an unconfirmed signature "
+            f"-- needs review: {summarize_items(p['name'] for p in unconfirmed_consent)}."
+        )
     else:
         message = "All required parties have a signed Consent Form."
 

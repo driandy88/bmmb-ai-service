@@ -326,7 +326,45 @@ class TestBuildBankStatementDoc:
         warnings = []
         doc = build_bank_statement_doc(extracted_by_template, entity_name="X", warnings=warnings)
         assert doc.data.currency == "SGD"
-        assert any(w.field == "Currency" and "not MYR" in w.message for w in warnings)
+        assert any(
+            w.field == "Currency" and "SGD" in w.message and "MYR" in w.message
+            for w in warnings
+        )
+
+    def test_currency_warning_names_the_detected_and_expected_currency(self, extracted_by_template):
+        extracted_by_template["Bank Statements"]["Currency"] = "sgd"
+        warnings = []
+        build_bank_statement_doc(extracted_by_template, entity_name="X", warnings=warnings)
+        warning = next(w for w in warnings if w.field == "Currency")
+        assert "SGD" in warning.current_state
+        assert warning.expected_state == "MYR"
+        assert "SGD" in warning.message and "MYR" in warning.message
+
+    def test_currency_warning_follows_the_policy_not_a_hardcoded_myr(self, extracted_by_template):
+        # The accepted currency is a policy value; the warning must not drift
+        # from it by hardcoding MYR.
+        from services.validation.domain.policies import ValidationPolicy
+
+        sgd_policy = ValidationPolicy(
+            policy_id="test-sgd",
+            minimum_bank_statement_months_by_entity={},
+            default_minimum_bank_statement_months=6,
+            accepted_bank_currency="SGD",
+        )
+        extracted_by_template["Bank Statements"]["Currency"] = "MYR"
+        warnings = []
+        build_bank_statement_doc(
+            extracted_by_template, entity_name="X", warnings=warnings, policy=sgd_policy,
+        )
+        warning = next(w for w in warnings if w.field == "Currency")
+        assert warning.expected_state == "SGD"
+        assert "MYR" in warning.current_state
+
+    def test_matching_currency_raises_no_warning(self, extracted_by_template):
+        extracted_by_template["Bank Statements"]["Currency"] = " myr "
+        warnings = []
+        build_bank_statement_doc(extracted_by_template, entity_name="X", warnings=warnings)
+        assert not any(w.field == "Currency" for w in warnings)
 
     def test_records_source_template_provenance(self, extracted_by_template):
         result = build_validation_bundle(

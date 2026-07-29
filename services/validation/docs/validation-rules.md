@@ -170,7 +170,30 @@ default.
 
 **Currency never hard-fails by design** — a foreign-currency statement needs
 manual conversion before its balances are comparable, which is a review task,
-not a confirmed compliance failure.
+not a confirmed compliance failure. Both the rule and the adapter warning name
+the **currency detected and how many statements carry it**, since that's what
+decides the conversion:
+
+> 3 bank statement(s) are not in the accepted currency (MYR) — detected SGD (1),
+> USD (2) — needs conversion and manual review.
+
+`details.currency_counts` gives every currency found across the set with its
+document count, the accepted one included, so a partly-foreign set is visible.
+The accepted currency comes from `policy.accepted_bank_currency` in both places,
+so the adapter warning can't drift from the rule that acts on it.
+
+**Currency renderings are normalized before comparison.** Malaysian statements
+print the local currency as "RM" as often as "MYR", so `RM`, `rm`, `RM.`,
+`Ringgit`, `Ringgit Malaysia` and `MYR (RM)` all resolve to **MYR** — without
+this an ordinary Malaysian statement gets flagged for conversion into its own
+currency. `S$` → SGD and `US$` → USD are covered too. A real code with no alias
+(`GBP`) passes through uppercased so it still registers as a mismatch to
+convert, rather than collapsing into "no currency found". A bare `$` is
+**deliberately not resolved** — it could be USD, SGD or AUD, and guessing means
+converting at the wrong rate silently, so it fails the match and gets looked at.
+
+The bundle stores the currency exactly as extracted; normalization happens at
+comparison time, so the report still shows what the document actually said.
 
 ---
 
@@ -219,11 +242,32 @@ form (**FAIL**), or unconfirmed (**NEEDS REVIEW**).
 | `customer_information.completeness` | `verify_customer_information_completeness` | Every field on the Customer Information Form is filled in. |
 
 Sourced from the `Customer Information Form` template (which replaced the old
-Application Details source). **Every field is mandatory:** each director's
-particulars (name, address, email, religion, marital status, estimated monthly
-income, experience, higher education, emergency contact name/number/relationship,
-spouse name/contact) plus the company fields (age, number of staff, office
-address/status/monthly rent/telephone, email, auditor firm/contact person/number).
+Application Details source). **Every applicable field is mandatory:** each
+director's particulars (name, address, email, religion, marital status, estimated
+monthly income, experience, higher education, emergency contact
+name/number/relationship, spouse name/contact) plus the company fields (age,
+number of staff, office address/status/monthly rent/telephone, email, auditor
+firm/contact person/number).
+
+A cell reading **"N/A", "-", "nil", "tiada" or "Not Available" counts as blank**,
+not as filled in — otherwise an empty cell passes just by having something typed
+in it.
+
+### Spouse details are conditional
+
+Spouse Name and Spouse Contact Number are the one exception to "every field is
+mandatory" — an unmarried director has no spouse, and failing them for writing
+"N/A" is a false rejection.
+
+| Marital status | Spouse fields |
+|---|---|
+| Married / Berkahwin / Kahwin | **Required** — blank or "N/A" fails |
+| Single, Divorced, Widowed, Separated (+ Bujang, Bercerai, Balu, Janda, Duda) | **Waived** — listed under `not_applicable_fields` |
+| Blank | Not decided — marital status itself is already reported missing |
+| Present but unrecognized | **NEEDS REVIEW** — `unconfirmed_marital_status` |
+
+A spouse name supplied by an unmarried director is kept, not flagged: extra
+information isn't an error.
 
 ---
 

@@ -28,7 +28,13 @@ from services.validation.rules import (
     verify_financial_sections_present,
     verify_required_documents_present,
 )
-from services.validation.rules._utils import NOT_AVAILABLE, normalize_id_type
+from services.validation.rules._utils import (
+    NOT_AVAILABLE,
+    is_blank,
+    normalize_currency,
+    normalize_id_type,
+    normalize_marital_status,
+)
 from services.validation.domain.policies import ValidationPolicy
 
 
@@ -266,6 +272,119 @@ class TestVerifyRequiredDocumentsPresent:
         result = self._check(["ssm_corporate_form", "bank_statement"], entity_type="")
         assert result["details"]["resolved_entity_type_key"] is None
         assert result["details"]["missing_document_slots"] == [["financial_statement"]]
+
+
+class TestMessagesNameWhatIsWrong:
+    """A failing check has to say *what* failed, not just how many did.
+
+    "1 identity document(s) are missing required image(s)" sends a reviewer
+    back to the raw JSON to find out who and which image. Every failure
+    message below names the specific offending items, capped so a bundle with
+    dozens of problems still produces a readable line.
+    """
+
+    def test_entity_name_strict_mismatch_names_both_sides_and_the_document(self):
+        result = strict_match_entity_names(
+            "ALPHA TECH SDN BHD", "BETA HOLDINGS SDN BHD", document_label="bank_statement",
+        )
+        assert "bank_statement" in result["message"]
+        assert "ALPHA TECH SDN BHD" in result["message"]
+        assert "BETA HOLDINGS SDN BHD" in result["message"]
+
+    def test_entity_name_fuzzy_mismatch_names_both_sides(self):
+        # The fuzzy fallback used to report only a similarity score -- the
+        # actual names never reached the message, so the reviewer couldn't see
+        # what didn't match without opening details.
+        result = fuzzy_match_entity_names(
+            "ALPHA TECH SDN BHD", "BETA HOLDINGS SDN BHD", document_label="consent_form_0",
+        )
+        assert result["passed"] is False
+        assert "ALPHA TECH SDN BHD" in result["message"]
+        assert "BETA HOLDINGS SDN BHD" in result["message"]
+        assert "consent_form_0" in result["message"]
+
+    def test_ic_number_mismatch_names_the_person(self):
+        result = strict_match_ic_numbers(
+            "880214-14-5123", "990101-01-9999", person_label="MOHD AIMAN BIN ZULKIFLI",
+        )
+        assert "MOHD AIMAN BIN ZULKIFLI" in result["message"]
+        assert "880214-14-5123" in result["message"]
+        assert "990101-01-9999" in result["message"]
+
+    def test_missing_consent_form_names_who(self):
+        result = verify_consent_signatures(
+            [{"name": "AIMAN", "nric_passport": "1"}, {"name": "NURUL", "nric_passport": "2"}],
+            [{"nric_passport": "2", "signature_present": True}],
+        )
+        assert "AIMAN" in result["message"]
+
+    def test_unsigned_consent_form_names_who(self):
+        result = verify_consent_signatures(
+            [{"name": "AIMAN", "nric_passport": "1"}],
+            [{"nric_passport": "1", "signature_present": False}],
+        )
+        assert "AIMAN" in result["message"]
+
+    def test_missing_financial_sections_names_the_statement_and_sections(self):
+        result = verify_financial_sections_present([{
+            "entity_name": "ALPHA TECH SDN BHD", "financial_year_end": "2025-12-31",
+            "balance_sheet_present": True, "profit_and_loss_present": False,
+            "cash_flow_present": False, "auditors_report_present": True,
+        }])
+        assert "2025-12-31" in result["message"]
+        assert "Profit & Loss" in result["message"]
+        assert "Cash Flow" in result["message"]
+
+    def test_incomplete_identity_document_names_the_person_and_image(self):
+        result = check_ic_front_and_back([{
+            "individual_name": "NURUL AIN", "nric_passport": "900101-10-1234",
+            "front_image_present": True, "back_image_present": False,
+        }])
+        assert "NURUL AIN" in result["message"]
+        assert "back" in result["message"]
+
+    def test_unreadable_identity_image_names_the_person_and_image(self):
+        result = check_ic_front_and_back([{
+            "individual_name": "NURUL AIN", "nric_passport": "900101-10-1234",
+            "front_image_present": None, "back_image_present": True,
+        }])
+        assert result["passed"] is None
+        assert "NURUL AIN" in result["message"]
+        assert "front" in result["message"]
+
+    def test_continuity_gap_names_the_missing_months(self):
+        result = check_bank_statement_continuity([
+            {"start_date": "2026-01-01", "end_date": "2026-01-31"},
+            {"start_date": "2026-04-01", "end_date": "2026-04-30"},
+        ])
+        assert result["passed"] is False
+        assert "2026-02" in result["message"]
+        assert "2026-03" in result["message"]
+
+    def test_continuity_overlap_names_the_overlapping_month(self):
+        result = check_bank_statement_continuity([
+            {"start_date": "2026-01-01", "end_date": "2026-01-31"},
+            {"start_date": "2026-01-15", "end_date": "2026-02-28"},
+        ])
+        assert result["passed"] is False
+        assert "2026-01" in result["message"]
+
+    def test_overdraft_names_the_overdrawn_months(self):
+        result = check_bank_statement_overdraft([
+            {"month": "January 2026", "end_balance": 500.0},
+            {"month": "February 2026", "end_balance": -120.5},
+        ])
+        assert result["passed"] is False
+        assert "February 2026" in result["message"]
+
+    def test_long_lists_are_capped_so_the_message_stays_readable(self):
+        result = check_bank_statement_overdraft([
+            {"month": f"Month {i}", "end_balance": -1.0} for i in range(12)
+        ])
+        assert "more" in result["message"]
+        assert len(result["message"]) < 300
+        # Nothing is lost -- details still carry every offending item.
+        assert len(result["details"]["overdrawn_months"]) == 12
 
 
 class TestVerifyConsentSignatures:
@@ -760,6 +879,96 @@ class TestCheckBankStatementCurrency:
         assert result["details"]["documents_with_unknown_currency"] == 1
 
 
+class TestNormalizeCurrency:
+    """Malaysian statements write the local currency as "RM" at least as often
+    as "MYR", in any casing. They're the same currency and must compare equal."""
+
+    def test_ringgit_renderings_all_resolve_to_myr(self):
+        for raw in ("MYR", "myr", " Myr ", "RM", "rm", " RM ", "RM.", "R.M.",
+                    "Ringgit", "RINGGIT MALAYSIA", "Malaysian Ringgit", "MYR (RM)"):
+            assert normalize_currency(raw) == "MYR", raw
+
+    def test_other_known_currencies_resolve_to_their_iso_code(self):
+        assert normalize_currency("s$") == "SGD"
+        assert normalize_currency("Singapore Dollar") == "SGD"
+        assert normalize_currency("us$") == "USD"
+
+    def test_unrecognized_but_real_code_passes_through_uppercased(self):
+        # "GBP" is a genuine currency we simply have no alias for -- it must
+        # stay a comparable code (and so get flagged as a mismatch), not
+        # collapse to "unknown" and be reported as a missing value.
+        assert normalize_currency("gbp") == "GBP"
+        assert normalize_currency("Yen") == "YEN"
+
+    def test_ambiguous_bare_dollar_is_not_guessed(self):
+        # "$" could be USD, SGD, AUD... guessing would silently convert at the
+        # wrong rate. Left as-is so it fails the match and gets looked at.
+        assert normalize_currency("$") == "$"
+
+    def test_blank_stays_unknown(self):
+        for raw in (None, "", "   ", 123):
+            assert normalize_currency(raw) is None, raw
+
+
+class TestCurrencyRuleUsesNormalization:
+    def test_rm_and_myr_are_the_same_currency(self):
+        result = check_bank_statement_currency(["RM", "MYR", "rm"], accepted_currency="MYR")
+        assert result["passed"] is True
+        assert result["details"]["currency_counts"] == {"MYR": 3}
+
+    def test_accepted_currency_is_normalized_too(self):
+        result = check_bank_statement_currency(["MYR", "RM"], accepted_currency="rm")
+        assert result["passed"] is True
+        assert result["details"]["accepted_currency"] == "MYR"
+
+    def test_a_genuinely_foreign_currency_still_needs_review(self):
+        result = check_bank_statement_currency(["RM", "SGD"], accepted_currency="MYR")
+        assert result["passed"] is None
+        assert result["details"]["currency_counts"] == {"MYR": 1, "SGD": 1}
+
+
+class TestCurrencyMessageStatesWhatWasDetected:
+    """A currency warning is only actionable if it says which currency was
+    found and on how many statements -- that's what decides the conversion."""
+
+    def test_detected_currency_and_document_count_are_both_named(self):
+        result = check_bank_statement_currency(["SGD", "SGD", "SGD"], accepted_currency="MYR")
+        assert result["passed"] is None
+        assert "SGD" in result["message"]
+        assert "3" in result["message"]
+        assert result["details"]["currency_counts"] == {"SGD": 3}
+
+    def test_document_count_is_not_confused_with_distinct_currency_count(self):
+        # Three SGD statements are 3 documents in 1 currency. The old message
+        # said "1 bank statement currency/currencies (SGD)", which reads as
+        # one document.
+        result = check_bank_statement_currency(["SGD", "SGD", "SGD"], accepted_currency="MYR")
+        assert "3 bank statement(s)" in result["message"]
+
+    def test_several_foreign_currencies_are_each_named_with_their_count(self):
+        result = check_bank_statement_currency(
+            ["SGD", "USD", "USD", "MYR"], accepted_currency="MYR",
+        )
+        assert "SGD (1)" in result["message"]
+        assert "USD (2)" in result["message"]
+        assert result["details"]["currency_counts"] == {"MYR": 1, "SGD": 1, "USD": 2}
+
+    def test_unknown_currency_states_how_many_of_how_many(self):
+        result = check_bank_statement_currency([None, None, "MYR"], accepted_currency="MYR")
+        assert result["passed"] is None
+        assert "2 of 3" in result["message"]
+
+    def test_passing_message_still_names_the_detected_currency(self):
+        result = check_bank_statement_currency(["MYR", "MYR"], accepted_currency="MYR")
+        assert result["passed"] is True
+        assert "MYR" in result["message"]
+        assert result["details"]["currency_counts"] == {"MYR": 2}
+
+    def test_detected_currency_is_normalized_for_counting(self):
+        result = check_bank_statement_currency([" sgd ", "SGD"], accepted_currency="MYR")
+        assert result["details"]["currency_counts"] == {"SGD": 2}
+
+
 def _full_customer_info():
     director = {
         "name": "AIMAN", "address": "ADDR", "email": "a@x.my", "religion": "Islam",
@@ -821,3 +1030,103 @@ class TestVerifyCustomerInformationCompleteness:
         assert result["passed"] is False
         # 10 company fields + the "no directors" entry
         assert len(result["details"]["missing_fields"]) == 11
+
+
+class TestNotAvailableSentinels:
+    """Extraction and the forms themselves write "not applicable" a dozen ways.
+    All of them mean the cell is empty, and none of them is a real value."""
+
+    def test_na_family_reads_as_blank(self):
+        for raw in ("N/A", "n/a", "NA", "na", "N.A.", "-", "--", "nil", "none",
+                    "not applicable", "Not Applicable", "tiada", NOT_AVAILABLE, "", None):
+            assert is_blank(raw) is True, raw
+
+    def test_real_values_are_not_blank(self):
+        for raw in ("SITI BINTI HASSAN", "+60123456780", "0", "Nana", "Nadia"):
+            assert is_blank(raw) is False, raw
+
+
+class TestMaritalStatusNormalization:
+    def test_married_variants(self):
+        for raw in ("Married", "married", "Berkahwin", "Kahwin", "MARRIED"):
+            assert normalize_marital_status(raw) == "married", raw
+
+    def test_unmarried_variants(self):
+        for raw in ("Single", "Bujang", "Divorced", "Bercerai", "Widowed",
+                    "Balu", "Janda", "Duda", "Separated"):
+            assert normalize_marital_status(raw) == "unmarried", raw
+
+    def test_unknown_stays_none(self):
+        for raw in (None, "", "   ", "Complicated"):
+            assert normalize_marital_status(raw) is None, raw
+
+
+class TestSpouseFieldsAreOnlyRequiredWhenMarried:
+    """An unmarried director has no spouse. Requiring a spouse name from them
+    fails a form that is genuinely complete, so the spouse fields are
+    conditional on marital status rather than unconditionally mandatory."""
+
+    def _with_director(self, **overrides):
+        data = _full_customer_info()
+        data["directors"][0].update(overrides)
+        return verify_customer_information_completeness(data)
+
+    _SPOUSE_LABELS = ("Director[0] Director Spouse Name", "Director[0] Director Spouse Contact Number")
+
+    def test_single_director_with_na_spouse_fields_passes(self):
+        result = self._with_director(
+            marital_status="Single", spouse_name="N/A", spouse_contact_number="N/A",
+        )
+        assert result["passed"] is True
+        assert not any(label in result["details"]["missing_fields"] for label in self._SPOUSE_LABELS)
+
+    def test_single_director_with_blank_spouse_fields_passes(self):
+        result = self._with_director(
+            marital_status="Single", spouse_name="", spouse_contact_number=None,
+        )
+        assert result["passed"] is True
+
+    def test_waived_fields_are_recorded_so_the_waiver_is_visible(self):
+        result = self._with_director(
+            marital_status="Single", spouse_name="N/A", spouse_contact_number="N/A",
+        )
+        assert set(result["details"]["not_applicable_fields"]) == set(self._SPOUSE_LABELS)
+
+    def test_married_director_with_blank_spouse_fields_still_fails(self):
+        result = self._with_director(
+            marital_status="Married", spouse_name="", spouse_contact_number="",
+        )
+        assert result["passed"] is False
+        for label in self._SPOUSE_LABELS:
+            assert label in result["details"]["missing_fields"]
+
+    def test_married_director_with_na_spouse_fields_still_fails(self):
+        # "N/A" from a married director is a gap, not a valid answer.
+        result = self._with_director(
+            marital_status="Married", spouse_name="N/A", spouse_contact_number="N/A",
+        )
+        assert result["passed"] is False
+
+    def test_unmarried_director_who_did_supply_a_spouse_name_is_not_flagged(self):
+        # e.g. a widow who kept the details on the form -- extra information is
+        # not an error.
+        result = self._with_director(marital_status="Widowed", spouse_name="SITI")
+        assert result["passed"] is True
+
+    def test_unrecognized_marital_status_is_needs_review_not_a_guess(self):
+        result = self._with_director(marital_status="It's complicated")
+        assert result["passed"] is None
+        assert result["details"]["unconfirmed_marital_status"] == [
+            "Director[0] Director Marital Status",
+        ]
+
+    def test_blank_marital_status_fails_on_that_field_without_double_reporting(self):
+        result = self._with_director(
+            marital_status="", spouse_name="", spouse_contact_number="",
+        )
+        assert result["passed"] is False
+        assert "Director[0] Director Marital Status" in result["details"]["missing_fields"]
+        # One root cause, one failure -- don't also claim the spouse fields are
+        # missing when we can't yet know whether they were required.
+        for label in self._SPOUSE_LABELS:
+            assert label not in result["details"]["missing_fields"]
