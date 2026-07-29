@@ -17,6 +17,27 @@ Each rule returns one of three outcomes:
 | **NEEDS REVIEW** | Ran but the data was inconclusive (e.g. an unconfirmed signature). |
 | **N/A (skipped)** | The document this rule needs isn't in the bundle. A skip never fails the bundle on its own. |
 
+**Aggregate status:** any FAIL → the report is `failed`; else any NEEDS REVIEW →
+`needs_review`; else `passed`. Note `overall_passed` (the older boolean) is
+`True` for a needs-review report — only a FAIL flips it. Read `overall_status`
+if you care about the difference.
+
+**Rules never short-circuit each other.** Every catalog rule runs against every
+bundle regardless of what any other rule concluded, so one failure can't mask or
+suppress another.
+
+### Who each rule applies to
+
+Directors and shareholders are **not** held to the same requirements. A
+shareholder is not required to submit an identity document or sign a consent
+form, so a shareholder-only party can never be the reason those rules fail.
+
+| Rule | Applies to |
+|---|---|
+| `identity_document.coverage` | directors only |
+| `consent.signature` | directors only |
+| `identity_document.number_match` | all SSM people, but only a **director** with no confidently-matched document is flagged |
+
 ---
 
 ## Package Completeness
@@ -124,6 +145,33 @@ a confirmed-missing auditor's report already fails
 - Freshness — latest statement no older than **2 months**
 - Accepted currency — **MYR**
 
+### Per-rule outcomes
+
+| Rule | PASS | FAIL | NEEDS REVIEW |
+|---|---|---|---|
+| `continuity` | covered months form one unbroken run | a gap or an overlap between covered months | — |
+| `duration` | months covered ≥ the entity minimum | below the minimum, **or** statements aren't continuous | — |
+| `freshness` | latest statement end date within 2 months | older than 2 months | — |
+| `overdraft` | no month ends negative | any month ends negative | — |
+| `bank_consistency` | one canonical bank across the set | 2+ distinct banks | any statement has no bank name |
+| `currency` | all MYR | — (never fails) | any non-MYR, or any unknown currency |
+
+Coverage is counted from the **distinct calendar months** the statements have
+transaction data for, not from a start/end date subtraction — so a gap inside a
+single consolidated document is visible, and month-end alignment can't
+undercount by one. Continuity works identically for 1 document or 6.
+
+Bank names resolve to a canonical identity before comparison (alias table first,
+then conservative fuzzy match), so "Maybank" / "Maybank Berhad" / "Malayan
+Banking Berhad" count as one bank. Entity type resolves through its own
+alias/fuzzy table, so "Perniagaan Tunggal", "Enterprise" or "llp" reach the
+correct minimum instead of silently falling through to the lenient 6-month
+default.
+
+**Currency never hard-fails by design** — a foreign-currency statement needs
+manual conversion before its balances are comparable, which is a review task,
+not a confirmed compliance failure.
+
 ---
 
 ## Identity Documents (MyKad / Passport)
@@ -131,7 +179,7 @@ a confirmed-missing auditor's report already fails
 | Rule ID | Check | What it verifies |
 |---|---|---|
 | `identity_document.front_and_back` | `check_ic_front_and_back` | Each identity document carries the images its type requires. |
-| `identity_document.coverage` | `find_missing_ic_documents` | Every required party (director/shareholder) has a corresponding identity document. |
+| `identity_document.coverage` | `find_missing_ic_documents` | Every **director** has a corresponding identity document, matched by NRIC/passport. |
 
 A director may hold **either** a Malaysian MyKad **or** a passport; both are
 accepted identity documents. What counts as a complete document differs by type:
@@ -189,3 +237,25 @@ SSM form as the source of truth.
 |---|---|---|
 | `entity_name.match` | `strict_match_entity_names` | The entity name matches across documents (bank statement, financial statement, tax declaration, consent form) against the SSM form. Falls back to fuzzy match if strict fails. |
 | `identity_document.number_match` | `strict_match_ic_numbers` | Each party's NRIC/passport on their identity document matches the number recorded on the SSM form. Applies to passport numbers exactly as it does to NRICs. |
+
+One result per document (`entity_name.match`) or per person
+(`identity_document.number_match`), named `strict_match_entity_names[doc_id]` /
+`strict_match_ic_numbers[person name]`.
+
+`identity_document.number_match` joins person → document **by name**, not by
+NRIC. Joining on the NRIC would key on the very field being compared, so a
+changed number would fail to key at all and the person would silently drop out
+of the report instead of failing. A director with no confidently name-matched
+document is NEEDS REVIEW; a shareholder without one is skipped silently.
+
+---
+
+## What is deliberately not checked
+
+| Not checked | Why |
+|---|---|
+| SSM form completeness | No rule counts distinct SSM forms — incomplete SSM fields surface as `AdapterWarning`s instead. |
+| `audited` as its own rule | A confirmed-missing auditor's report already fails `financial_statement.completeness`; a separate rule would report the same gap twice. |
+| ID type agreeing across documents | If SSM declares a passport but a MyKad was uploaded, coverage still passes — it asks whether *a* document exists for that number, not whether it's the right type. |
+| Entity name on the identity document or CIF | `entity_name.match` runs over bank statements, financial statements, tax declarations and consent forms only. |
+| Borang B freshness / count policy | Deferred (TICKET-9) — pending a business decision on 1 vs 2 years and which date drives freshness. |
