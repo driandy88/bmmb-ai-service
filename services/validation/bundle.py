@@ -85,9 +85,13 @@ class FinancialStatementData(BaseModel):
     profit_and_loss_present: Optional[bool] = None
     cash_flow_present: Optional[bool] = None
     auditors_report_present: Optional[bool] = None
-    # A visible auditor's-report section is not the same as an explicit
-    # confirmation that the statements are audited. Keep that distinction
-    # until the extraction template provides an audited-status field.
+    # Inferred from auditors_report_present by the extraction adapter, since
+    # no template attribute states it directly: accounts carrying an auditor's
+    # report are audited, accounts confirmed not to carry one aren't. Same
+    # tri-state as the section flags -- None is "couldn't determine", never
+    # "confirmed unaudited". It's an inference, not a confirmation from the
+    # document, which the adapter records as an AdapterWarning; swap it for a
+    # real audited-status attribute once the template has one.
     audited: Optional[bool] = None
 
 # Rule 2's alternate path to audited financial statements: a Sole

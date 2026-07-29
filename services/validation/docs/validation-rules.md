@@ -67,12 +67,44 @@ compatibility. SSM data still feeds the cross-document matching rules below.
 | Rule ID | Check | What it verifies |
 |---|---|---|
 | `financial_statement.freshness` | `calculate_financial_18_month_rule` | Latest financial year-end is within the allowed age. |
-| `financial_statement.consecutive_years` | `check_financial_consecutive_years` | Documents cover two consecutive years with no gap. |
+| `financial_statement.consecutive_years` | `check_financial_consecutive_years` | Documents cover **at least** two consecutive years, with no missing or duplicated year. |
 | `financial_statement.completeness` | `verify_financial_sections_present` | Each statement contains the required sections (balance sheet, P&L, cash flow, auditor's report). |
 
 **Threshold:** financial statements must be no older than **18 months**.
 For a Sole Prop / Partnership with no audited statements, these rules fall back
 to the tax-declaration (Borang B) documents.
+
+### Consecutive years
+
+Two years is the **minimum**, not the exact requirement — three or four
+consecutive years pass. Continuity is judged on the financial-year *label* (the
+calendar year each FYE falls in), not on an exact date delta, so ordinary
+year-to-year FYE drift doesn't read as a skipped year:
+
+| Situation | Outcome |
+|---|---|
+| Unbroken run of ≥2 years | **PASS** |
+| Fewer than 2 statements | **FAIL** |
+| A year missing from the run (2023, 2025) | **FAIL** — `missing_years` |
+| Two statements for the same year | **FAIL** — `duplicate_years` |
+| Consecutive years, interval materially ≠ 12 months | **NEEDS REVIEW** — `irregular_intervals` |
+
+The interval between consecutive statements is allowed to drift **±45 days**
+from the one-year anniversary, which absorbs month-end drift (31 Dec → 30 Dec),
+leap days (29 Feb → 28 Feb) and 52/53-week fiscal calendars. Beyond that it's a
+genuinely short or long accounting period — real, but a human should look at it,
+so it's needs-review rather than a hard fail. A missing year always outranks an
+irregular interval.
+
+### Audited status
+
+The template has no explicit audited-status attribute, so `audited` is
+**inferred from the Auditor's Report section**: present → audited, confirmed
+absent → not audited, unconfirmed → unknown (never "confirmed unaudited"). The
+inference is recorded as an `AdapterWarning` so a reviewer can see the value
+wasn't read off the document directly. No rule fails on `audited` on its own —
+a confirmed-missing auditor's report already fails
+`financial_statement.completeness`.
 
 ---
 

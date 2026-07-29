@@ -480,12 +480,28 @@ def build_financial_statement_docs(
     if not extracted:
         return []
 
+    # The 4 section-present flags are Unique (one value for the whole
+    # document), so read them once and share them across every fanned-out year
+    # rather than re-reading -- and re-warning -- per row.
+    section_flags = {
+        field: _safe_bool(extracted.get(attr), warnings=warnings, document_type="financial_statement",
+                          document_id="financial_statement", field=attr, default=None)
+        for field, attr in _FS_SECTION_FLAGS.items()
+    }
+
+    # No explicit audited-status attribute exists on this template, so infer
+    # it from whether an Auditor's Report section was found: a set of accounts
+    # carrying an auditor's report is audited, one confirmed not to isn't. The
+    # tri-state carries straight through -- null stays "couldn't determine",
+    # never "confirmed unaudited".
+    audited = section_flags["auditors_report_present"]
     if "Audited" not in extracted:
         warnings.append(AdapterWarning(
             document_type="financial_statement", document_id="financial_statement",
             field="audited",
-            message="No explicit audited-status attribute exists in the current financial-statement template.",
-            current_state="no signal available (left as null)",
+            message="No explicit audited-status attribute exists in the current financial-statement "
+                    "template; audited was inferred from the Auditor's Report section instead.",
+            current_state=f"inferred from Auditor's Report Present = {audited!r}",
             expected_state="true or false confirming whether the statements are audited",
         ))
 
@@ -511,12 +527,8 @@ def build_financial_statement_docs(
             data=FinancialStatementData(
                 entity_name=entity_name,
                 financial_year_end=_parse_ddmmyyyy(fye),
-                audited=None,
-                **{
-                    field: _safe_bool(extracted.get(attr), warnings=warnings, document_type="financial_statement",
-                                       document_id=document_id, field=attr, default=None)
-                    for field, attr in _FS_SECTION_FLAGS.items()
-                },
+                audited=audited,
+                **section_flags,
             ),
             provenance=DocumentProvenance(source_template="Financial Statements (Sdn Bhd)"),
         ))

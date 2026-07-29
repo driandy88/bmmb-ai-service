@@ -260,6 +260,37 @@ class TestBuildFinancialStatementDocs:
         assert build_financial_statement_docs({}, entity_name="X") == []
 
 
+class TestAuditedStatusDerivedFromAuditorsReport:
+    """The financial-statement template has no explicit audited-status
+    attribute, so audited is inferred from whether an Auditor's Report section
+    was found -- an unaudited set of accounts has no auditor's report."""
+
+    def _docs(self, auditors_report, extracted_by_template, warnings=None):
+        extracted_by_template["Financial Statements (Sdn Bhd)"]["Auditor's Report Present"] = auditors_report
+        return build_financial_statement_docs(
+            extracted_by_template, entity_name="X", warnings=warnings,
+        )
+
+    def test_auditors_report_present_means_audited(self, extracted_by_template):
+        assert all(d.data.audited is True for d in self._docs(True, extracted_by_template))
+
+    def test_confirmed_absent_auditors_report_means_not_audited(self, extracted_by_template):
+        assert all(d.data.audited is False for d in self._docs(False, extracted_by_template))
+
+    def test_unconfirmed_auditors_report_leaves_audited_unknown(self, extracted_by_template):
+        # null is "couldn't determine", not "confirmed unaudited" -- the
+        # inference has to preserve the tri-state, not collapse it to False.
+        assert all(d.data.audited is None for d in self._docs(None, extracted_by_template))
+
+    def test_the_inference_is_recorded_as_a_warning(self, extracted_by_template):
+        # It's an inference, not a confirmation from the document -- a
+        # reviewer should be able to see that audited wasn't read directly.
+        warnings = []
+        self._docs(True, extracted_by_template, warnings=warnings)
+        audited_warning = next(w for w in warnings if w.field == "audited")
+        assert "Auditor's Report Present" in audited_warning.current_state
+
+
 class TestBuildBankStatementDoc:
     def test_date_range_spans_min_to_max_month(self, extracted_by_template):
         doc = build_bank_statement_doc(extracted_by_template, entity_name="ALPHA TECH SOLUTIONS SDN BHD")

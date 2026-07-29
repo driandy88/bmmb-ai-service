@@ -333,13 +333,88 @@ class TestCheckFinancialConsecutiveYears:
     def test_gap_year_fails(self):
         result = check_financial_consecutive_years(["2023-12-31", "2025-12-31"])
         assert result["passed"] is False
+        assert result["details"]["missing_years"] == [2024]
 
     def test_duplicate_year_fails(self):
         result = check_financial_consecutive_years(["2025-12-31", "2025-12-31"])
         assert result["passed"] is False
+        assert result["details"]["duplicate_years"] == [2025]
 
-    def test_wrong_count_fails(self):
+    def test_single_statement_fails(self):
         result = check_financial_consecutive_years(["2025-12-31"])
+        assert result["passed"] is False
+
+    def test_no_statements_fails(self):
+        result = check_financial_consecutive_years([])
+        assert result["passed"] is False
+
+
+class TestFinancialConsecutiveYearsAcceptsMoreThanTwo:
+    """Two years is the minimum, not the exact requirement -- an applicant who
+    submits three or four years of statements is over-delivering, not wrong."""
+
+    def test_three_consecutive_years_pass(self):
+        result = check_financial_consecutive_years(
+            ["2023-12-31", "2024-12-31", "2025-12-31"],
+        )
+        assert result["passed"] is True
+        assert result["details"]["fye_years"] == [2023, 2024, 2025]
+
+    def test_four_consecutive_years_pass(self):
+        result = check_financial_consecutive_years(
+            ["2022-06-30", "2023-06-30", "2024-06-30", "2025-06-30"],
+        )
+        assert result["passed"] is True
+
+    def test_a_gap_anywhere_in_a_longer_run_still_fails(self):
+        result = check_financial_consecutive_years(
+            ["2022-12-31", "2023-12-31", "2025-12-31"],
+        )
+        assert result["passed"] is False
+        assert result["details"]["missing_years"] == [2024]
+
+    def test_input_order_does_not_matter(self):
+        result = check_financial_consecutive_years(
+            ["2025-12-31", "2023-12-31", "2024-12-31"],
+        )
+        assert result["passed"] is True
+
+
+class TestFinancialYearEndSpacingTolerance:
+    """A financial year is not always exactly 365 days: month-end drift, leap
+    days and 52/53-week fiscal calendars all move the FYE by a few days. Those
+    are normal and must pass. A materially different interval (a short or long
+    accounting period) is real but unusual -- needs review, not a hard fail."""
+
+    def test_month_end_drift_passes(self):
+        # 0y 11m 29d apart -- used to fail the exact-1-year equality check.
+        result = check_financial_consecutive_years(["2024-12-31", "2025-12-30"])
+        assert result["passed"] is True
+
+    def test_leap_day_year_end_passes(self):
+        result = check_financial_consecutive_years(["2024-02-29", "2025-02-28"])
+        assert result["passed"] is True
+
+    def test_52_week_fiscal_calendar_passes(self):
+        result = check_financial_consecutive_years(["2024-12-28", "2025-12-27"])
+        assert result["passed"] is True
+
+    def test_short_accounting_period_is_needs_review_not_failed(self):
+        # Consecutive year labels, but only ~6 months of trading between them.
+        result = check_financial_consecutive_years(["2024-12-31", "2025-06-30"])
+        assert result["passed"] is None
+        assert result["details"]["irregular_intervals"]
+        assert result["details"]["missing_years"] == []
+
+    def test_long_accounting_period_is_needs_review_not_failed(self):
+        result = check_financial_consecutive_years(["2024-01-31", "2025-12-31"])
+        assert result["passed"] is None
+        assert result["details"]["irregular_intervals"]
+
+    def test_a_real_missing_year_outranks_an_irregular_interval(self):
+        result = check_financial_consecutive_years(
+            ["2023-01-31", "2024-12-31", "2026-12-31"],
+        )
         assert result["passed"] is False
 
 

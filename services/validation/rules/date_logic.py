@@ -136,50 +136,104 @@ def calculate_financial_18_month_rule(
     }
 
 
+MINIMUM_FINANCIAL_YEARS = 2
+
+# A financial year is not reliably 365 days apart from the last one:
+# month-end drift ("31 Dec 2024" -> "30 Dec 2025"), leap days (29 Feb -> 28
+# Feb) and 52/53-week retail fiscal calendars all move the FYE by a handful
+# of days, and none of those mean a year was skipped. Anything inside this
+# window of the expected one-year anniversary counts as a normal annual
+# interval; outside it is a genuinely short or long accounting period, which
+# is a real thing companies do but wants a human to look at it.
+FYE_INTERVAL_TOLERANCE_DAYS = 45
+
+
 def check_financial_consecutive_years(fye_dates: List[str]) -> Dict:
-    """Check that exactly 2 financial statements are provided, covering 2 continuous years.
+    """Check that at least 2 financial statements are provided, covering continuous years.
 
     Use this when the bundle contains financial_statement documents and you
-    need to confirm they form an unbroken 2-year run (e.g. FYE 2024-12-31 and
-    FYE 2025-12-31), with no missing year and no duplicate year.
+    need to confirm they form an unbroken run of financial years (e.g. FYE
+    2024-12-31 and FYE 2025-12-31), with no missing year and no duplicate
+    year. Two years is the minimum, not the maximum -- an applicant who
+    submits three or four consecutive years passes.
+
+    Continuity is judged on the financial-year *labels* (the calendar year
+    each FYE falls in), so a statement set stays continuous even when the
+    exact FYE date drifts by a few days year to year. The spacing between
+    consecutive statements is checked separately, and a materially short or
+    long accounting period is reported as needs-review rather than as a
+    missing year.
 
     Args:
         fye_dates: Financial year end dates, one per financial statement
-            document, as ISO 'YYYY-MM-DD' dates. Must contain exactly 2
-            dates.
+            document, as ISO 'YYYY-MM-DD' dates. At least 2 are required.
     """
     dates = sorted(to_date(d) for d in fye_dates)
+    years = [d.year for d in dates]
+    detail_base = {
+        "fye_dates": [d.isoformat() for d in dates],
+        "fye_years": years,
+        "minimum_years_required": MINIMUM_FINANCIAL_YEARS,
+    }
 
-    if len(dates) != 2:
+    if len(dates) < MINIMUM_FINANCIAL_YEARS:
         return {
             "passed": False,
-            "message": f"Expected exactly 2 financial year end dates, got {len(dates)}.",
-            "details": {"fye_dates": [d.isoformat() for d in dates]},
+            "message": (
+                f"Expected at least {MINIMUM_FINANCIAL_YEARS} financial year end dates, "
+                f"got {len(dates)}."
+            ),
+            "details": {**detail_base, "missing_years": [], "duplicate_years": [], "irregular_intervals": []},
         }
 
-    earlier, later = dates
-    if earlier == later:
-        return {
-            "passed": False,
-            "message": "Duplicate financial year end date supplied.",
-            "details": {"fye_dates": [d.isoformat() for d in dates]},
-        }
+    duplicate_years = sorted({year for year in years if years.count(year) > 1})
+    missing_years = [year for year in range(years[0], years[-1]) if year not in years]
 
-    rd = relativedelta(later, earlier)
-    passed = rd.years == 1 and rd.months == 0 and rd.days == 0
+    # Only meaningful once the year labels themselves line up -- an interval
+    # spanning a skipped year isn't "irregular", it's a missing statement.
+    irregular_intervals = []
+    if not duplicate_years and not missing_years:
+        for earlier, later in zip(dates, dates[1:]):
+            expected = earlier + relativedelta(years=1)
+            drift_days = (later - expected).days
+            if abs(drift_days) > FYE_INTERVAL_TOLERANCE_DAYS:
+                irregular_intervals.append({
+                    "from_fye": earlier.isoformat(),
+                    "to_fye": later.isoformat(),
+                    "expected_fye": expected.isoformat(),
+                    "drift_days": drift_days,
+                })
+
+    if duplicate_years or missing_years:
+        passed = False
+        if missing_years:
+            message = (
+                f"Financial statements are not continuous: missing financial year(s) "
+                f"{', '.join(str(year) for year in missing_years)}."
+            )
+        else:
+            message = (
+                f"More than one financial statement supplied for financial year(s) "
+                f"{', '.join(str(year) for year in duplicate_years)}."
+            )
+    elif irregular_intervals:
+        passed = None
+        message = (
+            f"{len(irregular_intervals)} financial year(s) are not roughly 12 months "
+            "apart -- a short or long accounting period needs review."
+        )
+    else:
+        passed = True
+        message = f"Financial statements cover {len(years)} continuous financial years."
 
     return {
         "passed": passed,
-        "message": (
-            "Financial statements cover 2 continuous years."
-            if passed
-            else f"Gap detected between financial years: {rd.years}y {rd.months}m {rd.days}d apart."
-        ),
+        "message": message,
         "details": {
-            "fye_dates": [d.isoformat() for d in dates],
-            "gap_years": rd.years,
-            "gap_months": rd.months,
-            "gap_days": rd.days,
+            **detail_base,
+            "missing_years": missing_years,
+            "duplicate_years": duplicate_years,
+            "irregular_intervals": irregular_intervals,
         },
     }
 

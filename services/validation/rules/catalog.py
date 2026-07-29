@@ -24,7 +24,7 @@ RULE_CATALOG = (
     # package from reading as a clean pass.
     RuleDefinition("package.completeness", "verify_required_documents_present", "package", "The package contains every mandatory document type for the entity.", "PACKAGE"),
     RuleDefinition("financial_statement.freshness", "calculate_financial_18_month_rule", "financial", "Latest financial year is within the allowed age.", "FINANCIAL_STATEMENT"),
-    RuleDefinition("financial_statement.consecutive_years", "check_financial_consecutive_years", "financial", "Financial documents cover two consecutive years.", "FINANCIAL_STATEMENT"),
+    RuleDefinition("financial_statement.consecutive_years", "check_financial_consecutive_years", "financial", "Financial documents cover at least two consecutive years with no missing or duplicated year.", "FINANCIAL_STATEMENT"),
     RuleDefinition("financial_statement.completeness", "verify_financial_sections_present", "financial", "Each financial statement contains required sections.", "FINANCIAL_STATEMENT"),
     RuleDefinition("bank_statement.continuity", "check_bank_statement_continuity", "bank_statement", "Bank statement periods have no gaps or overlaps.", "BANK_STATEMENT"),
     RuleDefinition("bank_statement.duration", "verify_bank_statement_duration", "bank_statement", "Bank statements meet the required coverage duration.", "BANK_STATEMENT"),
