@@ -43,6 +43,13 @@ class EligibilityAgent:
                 return rule.get("prompt", f"Could you share your {rule['label'].lower()}?")
         return "Could you share a bit more so I can check?"
 
+    def _slot_options(self, key: str) -> list:
+        """Quick-reply answers for this slot (config-driven); [] if none."""
+        for rule in self._cfg.eligibility["tier1"]:
+            if rule["key"] == key:
+                return list(rule.get("options", []))
+        return []
+
     # -- fallback (offline) verdict phrasing -------------------------------
     def _explain(self, result: rules.EligibilityResult) -> str:
         d = result.disclaimer
@@ -139,7 +146,10 @@ class EligibilityAgent:
                 "stage": _SLOTFILL_STAGE,
                 "missing": result.missing,
                 "ui_action": {"type": "render_eligibility_form",
-                              "payload": {"next_slot": result.next_missing_slot, "collected": list(slots.keys())}},
+                              "payload": {"next_slot": result.next_missing_slot,
+                                          "question": self._slot_prompt(result.next_missing_slot),
+                                          "options": self._slot_options(result.next_missing_slot),
+                                          "collected": list(slots.keys())}},
                 "handoff": False,
                 "handoff_reason": None,
                 "decision_inputs": decision_inputs,
