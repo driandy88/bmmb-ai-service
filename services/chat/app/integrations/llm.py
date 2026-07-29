@@ -109,8 +109,11 @@ _KEYWORDS: dict[str, list[str]] = {
     # on hit-count to the in-scope intent, which is the intended behaviour.
     "SOC-01": ["hello", "assalamualaikum", "salam", "good morning", "good afternoon",
                "good evening", "selamat pagi", "selamat petang", "selamat datang"],
-    "SOC-02": ["thank you", "thanks", "terima kasih", "appreciate it", "much appreciated",
-               "that's all for now", "goodbye"],
+    "SOC-02": ["thank you", "thanks", "terima kasih", "appreciate it", "much appreciated"],
+    # Closing / decline. Bare "no"/"ok" are left to the real classifier (context)
+    # — as substrings they'd collide ("know", "book"), so the stub keys on phrases.
+    "SOC-03": ["no thanks", "no thank you", "that's all", "thats all", "nothing else",
+               "i'm good", "im good", "no more", "goodbye", "that's it", "thats it"],
 }
 
 _MONEY_RE = re.compile(r"(?:rm\s*)?(\d[\d,]*(?:\.\d+)?)\s*(juta|million|mil|m|k|ribu|thousand)?\b", re.I)

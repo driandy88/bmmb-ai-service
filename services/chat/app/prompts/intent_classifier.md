@@ -64,12 +64,18 @@ different kind. Otherwise `secondary` is `null`.
    maybe a different product line (overdraft, LC, guarantee) → AMB-02.
 5. **Shariah-boundary business (AMB-05).** A genuine SME question about a prohibited/grey
    activity (alcohol, gambling, etc.) is AMB-05 — a real question, not a refusal.
-6. **Social pleasantries (SOC-01 / SOC-02).** A greeting or opener with no request yet
-   ("hello", "salam", "Assalamualaikum", "good morning", "selamat pagi") is **SOC-01** —
-   we greet back and offer help; it is NOT OOS-05 chit-chat. A thanks, acknowledgement, or
-   sign-off ("thank you", "terima kasih", "ok great", "bye") is **SOC-02**. Reserve OOS-05
-   for genuine off-topic conversation with content (jokes, opinions, small talk). If a
-   greeting is bundled with a real request ("Hi, am I eligible?"), classify the REQUEST.
+6. **Social pleasantries (SOC-01 / SOC-02 / SOC-03).** Use the conversation context.
+   - **SOC-01 (greeting):** an opener with no request yet — "hello", "salam",
+     "Assalamualaikum", "good morning", "selamat pagi". We greet back and offer help.
+   - **SOC-02 (thanks):** genuine thanks or appreciation — "thank you", "terima kasih",
+     "appreciate it".
+   - **SOC-03 (closing / decline):** the customer is ending the exchange or declining more
+     help — "no", "no thanks", "that's all", "nothing else", "I'm good", "ok", "bye" —
+     ESPECIALLY a short reply right after we asked "anything else?". These get a warm
+     sign-off, so a bare "no"/"ok" that closes the chat is SOC-03, NOT SOC-02.
+   Reserve OOS-05 for genuine off-topic conversation with content (jokes, opinions, small
+   talk). If a greeting/thanks is bundled with a real request ("Hi, am I eligible?"),
+   classify the REQUEST, not the pleasantry.
 
 ## Examples (curated; input → output)
 ```
@@ -90,6 +96,9 @@ different kind. Otherwise `secondary` is `null`.
 "Assalamualaikum, nak tanya sikit"                                -> {"primary":"SOC-01","confidence":0.9,"secondary":null}
 "Good morning!"                                                   -> {"primary":"SOC-01","confidence":0.95,"secondary":null}
 "Terima kasih banyak-banyak"                                      -> {"primary":"SOC-02","confidence":0.95,"secondary":null}
+"No thanks, that's all"                                           -> {"primary":"SOC-03","confidence":0.92,"secondary":null}
+(after the assistant asked "anything else?") "no"                 -> {"primary":"SOC-03","confidence":0.85,"secondary":null}
+(after the assistant asked "anything else?") "ok"                 -> {"primary":"SOC-03","confidence":0.8,"secondary":null}
 ```
 
 ## Conversation so far (context only)

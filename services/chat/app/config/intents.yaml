@@ -213,7 +213,16 @@
   type: social
 
 - cat_id: SOC-02
-  category: Thanks / closing
-  definition: Thanks, acknowledgement, or sign-off (thank you, ok great, bye) — no new request.
+  category: Thanks
+  definition: Thanks or appreciation (thank you, terima kasih, appreciate it) — no new request.
   response_ref: R10
+  type: social
+
+- cat_id: SOC-03
+  category: Closing / decline
+  definition: >-
+    Ends the exchange — a decline, sign-off, or bare acknowledgement (no, no thanks,
+    that's all, nothing else, I'm good, ok, bye), typically after being asked "anything
+    else?". Reply with a warm sign-off; do NOT ask "anything else" again.
+  response_ref: R11
   type: social

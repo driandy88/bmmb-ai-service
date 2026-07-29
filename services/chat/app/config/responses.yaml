@@ -105,10 +105,21 @@
 
 - ref: R10
   strategy: Acknowledge
-  applies_to: Thanks / sign-off / acknowledgement (SOC-02)
+  applies_to: Thanks (SOC-02)
   variants:
     - "You're welcome! Is there anything else about SME financing I can help with?"
     - "Happy to help! Let me know if you have any other SME financing questions."
     - "Anytime! I'm here if you need anything else on your SME financing."
     - "My pleasure. Feel free to ask if anything else comes up about financing."
     - "Glad I could help! Reach out any time about your SME financing."
+
+- ref: R11
+  strategy: Sign off
+  applies_to: Closing / decline / end of chat (SOC-03)
+  notes: A warm close — must NOT ask "anything else?" (that's what loops on a "no").
+  variants:
+    - "Anytime! All the best with your business — reach out whenever you need SME financing help."
+    - "Alright! I'm here whenever you need anything on SME financing. Take care!"
+    - "No problem at all. Have a great day, and come back any time for SME financing help!"
+    - "Understood — thanks for chatting. I'm just a message away if anything comes up."
+    - "Glad I could help. Wishing you well, and reach out any time about SME financing!"
