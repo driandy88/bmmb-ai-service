@@ -1,0 +1,13 @@
+# Keep the Cloud Build upload small + clean. The Dockerfile only COPYs app/ +
+# requirements.txt anyway; this stops the venv/notebooks/secrets from uploading.
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+notebooks/
+tests/
+docs/
+*.egg-info/
+.DS_Store
+.git/
