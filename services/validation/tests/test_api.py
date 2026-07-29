@@ -87,7 +87,7 @@ class TestValidateDeterministicOnly:
         assert "results_by_document" not in body
         grouped = body["deterministic"]["results_by_document"]
         assert set(grouped) == {
-            "SSM_CORPORATE_FORM", "FINANCIAL_STATEMENT", "BANK_STATEMENT",
+            "PACKAGE", "SSM_CORPORATE_FORM", "FINANCIAL_STATEMENT", "BANK_STATEMENT",
             "IDENTITY_DOCUMENT", "CONSENT_FORM", "CUSTOMER_INFORMATION",
         }
 
@@ -236,3 +236,18 @@ class TestValidateFromExtraction:
         assert r.status_code == 200
         fields = {w["field"] for w in r.json()["adapter_warnings"]}
         assert "entity_type" not in fields
+
+    def test_empty_body_does_not_read_as_a_clean_pass(self):
+        # FINDINGS #1, exactly as reported: an empty `{}` used to come back as
+        # nothing but not_applicable results and zero failures -- a package
+        # with nothing in it reading as validated.
+        r = client.post(
+            "/validate/from-extraction",
+            params={"enable_ai_review": False},
+            json={},
+        )
+        assert r.status_code == 200
+        checks = _all_checks(r.json())
+        gate = next(c for c in checks if c["rule_id"] == "package.completeness")
+        assert gate["status"] == "failed"
+        assert any(c["status"] == "failed" for c in checks)

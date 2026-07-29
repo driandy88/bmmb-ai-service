@@ -24,6 +24,7 @@ from services.validation.extraction_adapter import (
     build_validation_bundle,
 )
 from services.validation.engine import ValidationEngine
+from services.validation.rules._utils import NOT_AVAILABLE
 
 EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
 
@@ -31,6 +32,18 @@ EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
 @pytest.fixture
 def extracted_by_template() -> dict:
     raw = json.loads((EXAMPLES_DIR / "extraction_results_example.json").read_text())
+    raw.pop("_comment", None)
+    return raw
+
+
+@pytest.fixture
+def deployed_extraction() -> dict:
+    """The shape the *deployed* extraction-service actually returns today:
+    one combined "SSM Business Registration" template (with per-director
+    "ID Type"), an "Applicants" consent row_group, and a Bank Statements
+    "Currency" attribute. Use this for anything that has to hold against
+    live output rather than the older per-form fixture above."""
+    raw = json.loads((EXAMPLES_DIR / "raw_extraction_example_2.json").read_text())
     raw.pop("_comment", None)
     return raw
 
@@ -149,6 +162,85 @@ class TestBuildSsmCorporateDocsCombinedTemplate:
         assert docs[0].data.directors == []
 
 
+class TestDirectorIdTypeOnTheCombinedSsmTemplate:
+    """TICKET-6: the deployed SSM template already declares each director's
+    "ID Type" -- that's what says whether a director is expected to produce a
+    MyKad or a passport, so it has to reach PersonInfo rather than being
+    dropped at the adapter."""
+
+    def test_director_id_type_is_read_and_normalized(self, deployed_extraction):
+        deployed_extraction["SSM Business Registration"]["Directors"][1]["ID Type"] = "Passport"
+        docs = build_ssm_corporate_docs(deployed_extraction, entity_type="Sdn Bhd")
+        assert [p.id_type for p in docs[0].data.directors] == ["mykad", "passport"]
+
+    def test_absent_director_id_type_stays_none(self, deployed_extraction):
+        for row in deployed_extraction["SSM Business Registration"]["Directors"]:
+            row.pop("ID Type")
+        docs = build_ssm_corporate_docs(deployed_extraction, entity_type="Sdn Bhd")
+        assert all(p.id_type is None for p in docs[0].data.directors)
+
+
+class TestPassportDirectorThroughTheDeployedPipeline:
+    """TICKET-6 end-to-end: raw deployed-shape extraction for a director who
+    holds a passport, not a MyKad -- through the adapter and the full rule
+    engine. Before the fix this reported "Missing 1 IC"."""
+
+    PASSPORT_NUMBER = "A12345678"
+
+    @pytest.fixture
+    def passport_extraction(self, deployed_extraction) -> dict:
+        """NURUL AIN holds a passport: passport number on every document, a
+        bio-data page instead of a front/back pair, and no IC back side."""
+        old_nric = "900101-10-1234"
+        for row in deployed_extraction["SSM Business Registration"]["Directors"]:
+            if row["Director NRIC or Passport Number"] == old_nric:
+                row["Director NRIC or Passport Number"] = self.PASSPORT_NUMBER
+                row["ID Type"] = "Passport"
+        for row in deployed_extraction["SSM Business Registration"]["Shareholders"]:
+            if row["Shareholder NRIC or Passport Number"] == old_nric:
+                row["Shareholder NRIC or Passport Number"] = self.PASSPORT_NUMBER
+        for row in deployed_extraction["MyKad (Director ID or Passport)"]["Directors"]:
+            if row["Director NRIC or Passport Number"] == old_nric:
+                row["Director NRIC or Passport Number"] = self.PASSPORT_NUMBER
+                row["ID Type"] = "Passport"
+                row["Back Side IC Present"] = False  # a passport has no IC back
+        for row in deployed_extraction["Consent Form"]["Applicants"]:
+            if row["Director NRIC or Passport Number"] == old_nric:
+                row["Director NRIC or Passport Number"] = self.PASSPORT_NUMBER
+        return deployed_extraction
+
+    def _report(self, extraction: dict):
+        result = build_validation_bundle(
+            extraction, bundle_id="BUNDLE-PASSPORT", system_date=date(2026, 7, 7),
+            entity_type="Sdn Bhd",
+        )
+        return ValidationEngine().run(result.bundle)
+
+    def test_passport_holder_is_not_reported_as_missing_an_ic(self, passport_extraction):
+        report = self._report(passport_extraction)
+        coverage = next(r for r in report.results if r.check == "find_missing_ic_documents")
+        assert coverage.details["missing_people"] == []
+        assert coverage.passed is True
+
+    def test_absent_ic_back_side_does_not_fail_a_passport_holder(self, passport_extraction):
+        report = self._report(passport_extraction)
+        sides = next(r for r in report.results if r.check == "check_ic_front_and_back")
+        assert sides.passed is True
+
+    def test_a_passport_with_no_bio_data_page_still_fails(self, passport_extraction):
+        for row in passport_extraction["MyKad (Director ID or Passport)"]["Directors"]:
+            if row["ID Type"] == "Passport":
+                row["Front Side IC Present"] = False
+        report = self._report(passport_extraction)
+        sides = next(r for r in report.results if r.check == "check_ic_front_and_back")
+        assert sides.passed is False
+
+    def test_the_whole_passport_package_still_passes_every_check(self, passport_extraction):
+        report = self._report(passport_extraction)
+        failed = [r.check for r in report.results if r.passed is False]
+        assert failed == []
+
+
 class TestBuildFinancialStatementDocs:
     def test_one_doc_per_year_column(self, extracted_by_template):
         docs = build_financial_statement_docs(extracted_by_template, entity_name="ALPHA TECH SOLUTIONS SDN BHD")
@@ -168,6 +260,37 @@ class TestBuildFinancialStatementDocs:
         assert build_financial_statement_docs({}, entity_name="X") == []
 
 
+class TestAuditedStatusDerivedFromAuditorsReport:
+    """The financial-statement template has no explicit audited-status
+    attribute, so audited is inferred from whether an Auditor's Report section
+    was found -- an unaudited set of accounts has no auditor's report."""
+
+    def _docs(self, auditors_report, extracted_by_template, warnings=None):
+        extracted_by_template["Financial Statements (Sdn Bhd)"]["Auditor's Report Present"] = auditors_report
+        return build_financial_statement_docs(
+            extracted_by_template, entity_name="X", warnings=warnings,
+        )
+
+    def test_auditors_report_present_means_audited(self, extracted_by_template):
+        assert all(d.data.audited is True for d in self._docs(True, extracted_by_template))
+
+    def test_confirmed_absent_auditors_report_means_not_audited(self, extracted_by_template):
+        assert all(d.data.audited is False for d in self._docs(False, extracted_by_template))
+
+    def test_unconfirmed_auditors_report_leaves_audited_unknown(self, extracted_by_template):
+        # null is "couldn't determine", not "confirmed unaudited" -- the
+        # inference has to preserve the tri-state, not collapse it to False.
+        assert all(d.data.audited is None for d in self._docs(None, extracted_by_template))
+
+    def test_the_inference_is_recorded_as_a_warning(self, extracted_by_template):
+        # It's an inference, not a confirmation from the document -- a
+        # reviewer should be able to see that audited wasn't read directly.
+        warnings = []
+        self._docs(True, extracted_by_template, warnings=warnings)
+        audited_warning = next(w for w in warnings if w.field == "audited")
+        assert "Auditor's Report Present" in audited_warning.current_state
+
+
 class TestBuildBankStatementDoc:
     def test_date_range_spans_min_to_max_month(self, extracted_by_template):
         doc = build_bank_statement_doc(extracted_by_template, entity_name="ALPHA TECH SOLUTIONS SDN BHD")
@@ -182,13 +305,14 @@ class TestBuildBankStatementDoc:
 
     def test_maps_available_bank_name_and_preserves_unknown_fields(self, extracted_by_template):
         # This fixture's Bank Statements has no Currency attribute -> null,
-        # warned; Account Type has no source attribute at all.
+        # warned. Account Type also has no source attribute, but it's no
+        # longer a relevant field, so it degrades silently -- no warning.
         warnings = []
         doc = build_bank_statement_doc(extracted_by_template, entity_name="X", warnings=warnings)
         assert doc.data.bank_name == "MAYBANK BERHAD"
         assert doc.data.currency is None
         assert doc.data.account_type is None
-        assert {w.field for w in warnings} >= {"Currency", "Account Type"}
+        assert {w.field for w in warnings} == {"Currency"}
 
     def test_reads_myr_currency_without_warning(self, extracted_by_template):
         extracted_by_template["Bank Statements"]["Currency"] = "MYR"
@@ -202,7 +326,45 @@ class TestBuildBankStatementDoc:
         warnings = []
         doc = build_bank_statement_doc(extracted_by_template, entity_name="X", warnings=warnings)
         assert doc.data.currency == "SGD"
-        assert any(w.field == "Currency" and "not MYR" in w.message for w in warnings)
+        assert any(
+            w.field == "Currency" and "SGD" in w.message and "MYR" in w.message
+            for w in warnings
+        )
+
+    def test_currency_warning_names_the_detected_and_expected_currency(self, extracted_by_template):
+        extracted_by_template["Bank Statements"]["Currency"] = "sgd"
+        warnings = []
+        build_bank_statement_doc(extracted_by_template, entity_name="X", warnings=warnings)
+        warning = next(w for w in warnings if w.field == "Currency")
+        assert "SGD" in warning.current_state
+        assert warning.expected_state == "MYR"
+        assert "SGD" in warning.message and "MYR" in warning.message
+
+    def test_currency_warning_follows_the_policy_not_a_hardcoded_myr(self, extracted_by_template):
+        # The accepted currency is a policy value; the warning must not drift
+        # from it by hardcoding MYR.
+        from services.validation.domain.policies import ValidationPolicy
+
+        sgd_policy = ValidationPolicy(
+            policy_id="test-sgd",
+            minimum_bank_statement_months_by_entity={},
+            default_minimum_bank_statement_months=6,
+            accepted_bank_currency="SGD",
+        )
+        extracted_by_template["Bank Statements"]["Currency"] = "MYR"
+        warnings = []
+        build_bank_statement_doc(
+            extracted_by_template, entity_name="X", warnings=warnings, policy=sgd_policy,
+        )
+        warning = next(w for w in warnings if w.field == "Currency")
+        assert warning.expected_state == "SGD"
+        assert "MYR" in warning.current_state
+
+    def test_matching_currency_raises_no_warning(self, extracted_by_template):
+        extracted_by_template["Bank Statements"]["Currency"] = " myr "
+        warnings = []
+        build_bank_statement_doc(extracted_by_template, entity_name="X", warnings=warnings)
+        assert not any(w.field == "Currency" for w in warnings)
 
     def test_records_source_template_provenance(self, extracted_by_template):
         result = build_validation_bundle(
@@ -219,6 +381,52 @@ class TestBuildBankStatementDoc:
 
     def test_missing_template_returns_none(self):
         assert build_bank_statement_doc({}, entity_name="X") is None
+
+    def test_covered_months_reflects_distinct_transaction_months(self, extracted_by_template):
+        doc = build_bank_statement_doc(extracted_by_template, entity_name="X")
+        assert doc.data.covered_months == [
+            "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06",
+        ]
+
+    def test_covered_months_reveals_a_gap_the_date_range_alone_would_hide(self, extracted_by_template):
+        # Drop every March transaction -- statement_start/end_date still span
+        # Jan-Jun (they only look at min/max), but covered_months must not
+        # claim March, so continuity can catch the gap.
+        txns = extracted_by_template["Bank Statements"]["Transactions"]
+        extracted_by_template["Bank Statements"]["Transactions"] = [
+            t for t in txns if not t["Transaction Date"].startswith("2026-03")
+        ]
+        doc = build_bank_statement_doc(extracted_by_template, entity_name="X")
+        assert doc.data.statement_start_date == date(2026, 1, 1)
+        assert doc.data.statement_end_date == date(2026, 6, 30)
+        assert "2026-03" not in doc.data.covered_months
+
+    def test_ddmmyyyy_transaction_date_is_parsed_not_dropped(self, extracted_by_template):
+        # Extraction's normal convention elsewhere in the codebase is
+        # 'DD-MM-YYYY' (see _parse_ddmmyyyy) -- a row in that format should
+        # still be counted, not silently excluded as unparseable.
+        txns = extracted_by_template["Bank Statements"]["Transactions"]
+        txns.append({
+            "Transaction Date": "15-07-2026", "Transaction Description": "TEST",
+            "Transaction Debit": None, "Transaction Credit": 100.0, "Transaction Balance": 100.0,
+        })
+        warnings = []
+        doc = build_bank_statement_doc(extracted_by_template, entity_name="X", warnings=warnings)
+        assert "2026-07" in doc.data.covered_months
+        assert not any("unparseable transaction date" in w.message for w in warnings)
+
+    def test_genuinely_unparseable_transaction_date_still_warns_and_excludes(self, extracted_by_template):
+        txns = extracted_by_template["Bank Statements"]["Transactions"]
+        txns.append({
+            "Transaction Date": "not a date", "Transaction Description": "TEST",
+            "Transaction Debit": None, "Transaction Credit": 100.0, "Transaction Balance": 100.0,
+        })
+        warnings = []
+        doc = build_bank_statement_doc(extracted_by_template, entity_name="X", warnings=warnings)
+        assert any("unparseable transaction date" in w.message for w in warnings)
+        assert doc.data.covered_months == [
+            "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06",
+        ]
 
 
 class TestBuildIdentityDocuments:
@@ -261,6 +469,50 @@ class TestBuildIdentityDocuments:
         assert docs[1].data.nric_passport == ""  # null flagged, doesn't crash or shift
         assert docs[1].data.back_image_present is False
         assert any(w.document_id == "identity_document_1" and "NRIC" in w.field for w in warnings)
+
+    def test_id_type_is_read_and_normalized(self, deployed_extraction):
+        # TICKET-6: "ID Type" already exists on the MyKad template but the
+        # adapter used to drop it, so a passport-holding director was
+        # indistinguishable from a MyKad holder downstream.
+        mykad = deployed_extraction["MyKad (Director ID or Passport)"]
+        mykad["Directors"][1]["ID Type"] = "Passport"
+        docs = build_identity_documents(deployed_extraction)
+        assert docs[0].data.id_type == "mykad"
+        assert docs[1].data.id_type == "passport"
+
+    def test_unknown_or_absent_id_type_stays_none(self):
+        warnings = []
+        docs = build_identity_documents({
+            "MyKad (Director ID or Passport)": {
+                "Directors": [
+                    {"Director Name": "A", "Director NRIC or Passport Number": "1"},
+                    {"Director Name": "B", "Director NRIC or Passport Number": "2",
+                     "ID Type": "Driving Licence"},
+                ],
+            }
+        }, warnings=warnings)
+        assert [d.data.id_type for d in docs] == [None, None]
+
+        # An absent ID Type is routine (the fallback is the stricter MyKad
+        # rule, so it can't let anything through) -- no warning. A value that
+        # *was* read off the document but isn't a recognized identity type is
+        # a real anomaly a reviewer should see.
+        id_type_warnings = [w for w in warnings if w.field.endswith("ID Type")]
+        assert [w.document_id for w in id_type_warnings] == ["identity_document_1"]
+        assert "Driving Licence" in id_type_warnings[0].current_state
+
+    def test_unreadable_ic_side_stays_null_and_is_flagged(self, deployed_extraction):
+        # TICKET-5 regression: an unreadable IC image must reach the rules as
+        # None ("couldn't tell" -> needs review), never as False or True.
+        mykad = deployed_extraction["MyKad (Director ID or Passport)"]
+        mykad["Directors"][0]["Front Side IC Present"] = None
+        warnings = []
+        docs = build_identity_documents(deployed_extraction, warnings=warnings)
+        assert docs[0].data.front_image_present is None
+        assert any(
+            w.document_id == "identity_document_0" and "Front Side IC Present" in w.field
+            for w in warnings
+        )
 
 
 class TestBuildConsentFormDocs:
@@ -315,11 +567,13 @@ class TestBuildCustomerInformationDoc:
         assert [d.name for d in doc.data.directors] == ["AIMAN", "NURUL"]
         assert [d.email for d in doc.data.directors] == ["aiman@x.my", "nurul@x.my"]
 
-    def test_null_fields_coerced_to_blank_not_warned_per_field(self, extracted_by_template):
+    def test_null_fields_coerced_to_not_available_not_warned_per_field(self, extracted_by_template):
         extracted_by_template["Customer Information Form"]["Company Office Status"] = None
         warnings = []
         doc = build_customer_information_doc(extracted_by_template, warnings=warnings)
-        assert doc.data.company_office_status == ""  # completeness rule reports it, adapter doesn't warn
+        # TICKET-2: "Not Available", not "", so it reads unambiguously in the
+        # report rather than looking like an empty cell.
+        assert doc.data.company_office_status == NOT_AVAILABLE
         assert not any(w.field == "Company Office Status" for w in warnings)
 
     def test_missing_template_returns_none(self):
@@ -377,8 +631,9 @@ class TestBuildValidationBundle:
         # The example fixture is otherwise complete -- the only warnings
         # should be the pre-documented extraction schema gaps: no
         # Shareholder NRIC attribute on SSM Form 24, no Business Registration
-        # Number attribute on SSM Form 44, and no currency/account-type
-        # attributes on Bank Statements.
+        # Number attribute on SSM Form 44, and no currency attribute on Bank
+        # Statements. Account Type has no source attribute either, but it's
+        # no longer a relevant field, so it doesn't warn.
         # signature_present is supplied explicitly here, so no warning for it.
         result = build_validation_bundle(
             extracted_by_template,
@@ -387,7 +642,7 @@ class TestBuildValidationBundle:
         )
         fields = {w.field for w in result.warnings}
         assert fields == {
-            "Shareholders", "Business Registration Number", "Currency", "Account Type",
+            "Shareholders", "Business Registration Number", "Currency",
             "audited",
         }
 
@@ -418,8 +673,15 @@ class TestBuildValidationBundle:
         assert result.bundle.metadata.document_types_present == ["ssm_corporate_form"]
         report = ValidationEngine().run(result.bundle)
         # SSM completeness is no longer a check; the bundle still builds and the
-        # remaining rules just skip the document types that aren't present.
-        assert report.overall_passed is True
+        # remaining rules just skip the document types that aren't present...
+        assert all(
+            r.passed is None for r in report.results if r.rule_id != "package.completeness"
+        )
+        # ...but the package as a whole is incomplete, and package.completeness
+        # (FINDINGS #1) is what says so instead of letting the skips read as a pass.
+        gate = next(r for r in report.results if r.rule_id == "package.completeness")
+        assert gate.passed is False
+        assert report.overall_passed is False
 
     def test_entity_name_propagates_from_ssm_to_financial_and_bank_docs(self, extracted_by_template):
         result = build_validation_bundle(

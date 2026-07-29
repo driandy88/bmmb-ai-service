@@ -19,9 +19,20 @@ description verbatim; per-argument text lives here, not in a separate
 schema field.
 """
 
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
-from ._utils import normalize_id
+from ._utils import (
+    ID_TYPE_MYKAD,
+    ID_TYPE_PASSPORT,
+    MARITAL_STATUS_UNMARRIED,
+    is_blank,
+    normalize_id,
+    normalize_id_type,
+    normalize_marital_status,
+    resolve_entity_type_key,
+    summarize_items,
+)
+from ..domain.policies import BMMB_SME_POLICY_V1, ValidationPolicy
 
 # NOTE: nested-object parameters are typed as `List[Dict[str, object]]`, not
 # `List[SomeTypedDict]` or `List[Dict[str, Any]]`. Gemini's automatic
@@ -34,6 +45,60 @@ from ._utils import normalize_id
 # since the SDK isinstance-checks each value against the value type.
 # `Dict[str, object]` is the only combination that survives both schema
 # generation and execution, at the cost of a looser schema.
+
+def verify_required_documents_present(
+    present_document_types: List[str],
+    entity_type: str,
+    policy: ValidationPolicy = BMMB_SME_POLICY_V1,
+) -> Dict:
+    """Check the application package contains every mandatory document type for the entity.
+
+    Every other rule is written to degrade to "not applicable" when the
+    document it reads isn't in the bundle, so without this gate a package
+    with nothing in it produces nothing but skips and reads as a clean pass.
+    This is the one check that asks whether the package is there at all, so
+    it deliberately never degrades -- an empty bundle fails it.
+
+    Which documents are mandatory depends on the entity type: only a Sole
+    Prop/Partnership may satisfy the financials requirement with a tax
+    declaration (Borang B) instead of audited financial statements.
+
+    Args:
+        present_document_types: The canonical document_type values actually
+            present in the bundle (not the metadata's declared list).
+        entity_type: The entity type from the SSM corporate form, e.g.
+            "Sdn Bhd" or "Sole Proprietor". Typos, alternate spellings and
+            Malay terms resolve through the same alias/fuzzy table the
+            bank-statement minimum uses.
+    """
+    resolved_key = resolve_entity_type_key(entity_type, policy)
+    required_document_slots = policy.required_document_slots_for(resolved_key)
+
+    present = set(present_document_types)
+    missing_slots = [slot for slot in required_document_slots if not present.intersection(slot)]
+    passed = len(missing_slots) == 0
+
+    missing_summary = ", ".join(" or ".join(slot) for slot in missing_slots)
+
+    return {
+        "passed": passed,
+        "message": (
+            "The document package contains every required document type."
+            if passed
+            else f"The document package is missing {len(missing_slots)} required "
+                 f"document type(s): {missing_summary}."
+        ),
+        "details": {
+            "present_document_types": sorted(present),
+            # Which entity type the slot list was chosen for is the audit
+            # trail for *why* a given document was required.
+            "entity_type": entity_type,
+            "resolved_entity_type_key": resolved_key,
+            "required_document_slots": required_document_slots,
+            "missing_document_slots": missing_slots,
+        },
+    }
+
 
 def verify_financial_sections_present(financial_statement_data: List[Dict[str, object]]) -> Dict:
     """Check the Balance Sheet / P&L / Cash Flow / Auditor's Report flags on financial statements.
@@ -73,9 +138,22 @@ def verify_financial_sections_present(financial_statement_data: List[Dict[str, o
     passed = False if incomplete_documents else (None if needs_review_documents else True)
 
     if incomplete_documents:
-        message = f"{len(incomplete_documents)} financial statement(s) are missing required sections."
+        message = (
+            f"{len(incomplete_documents)} financial statement(s) are missing required sections: "
+            + summarize_items(
+                f"{doc['financial_year_end']} missing {', '.join(doc['missing_sections'])}"
+                for doc in incomplete_documents
+            ) + "."
+        )
     elif needs_review_documents:
-        message = f"{len(needs_review_documents)} financial statement(s) have unconfirmed sections -- needs review."
+        message = (
+            f"{len(needs_review_documents)} financial statement(s) have unconfirmed sections "
+            "-- needs review: "
+            + summarize_items(
+                f"{doc['financial_year_end']} unconfirmed {', '.join(doc['unconfirmed_sections'])}"
+                for doc in needs_review_documents
+            ) + "."
+        )
     else:
         message = "All financial statements include the required sections."
 
@@ -90,35 +168,53 @@ def verify_financial_sections_present(financial_statement_data: List[Dict[str, o
     }
 
 
+_ID_TYPE_LABELS = {ID_TYPE_MYKAD: "MyKad", ID_TYPE_PASSPORT: "passport"}
+
+
+def _id_type_label(id_type: object) -> str:
+    """Human-readable name for the document a person is expected to produce."""
+    return _ID_TYPE_LABELS.get(normalize_id_type(id_type), "identity document")
+
+
 def find_missing_ic_documents(ssm_people: List[Dict[str, object]], ic_documents: List[Dict[str, object]]) -> Dict:
-    """Compare SSM directors/shareholders against uploaded IC documents and return anyone missing.
+    """Compare SSM directors/shareholders against uploaded identity documents and return anyone missing.
 
     Use this to confirm every director/shareholder listed on the SSM forms
     has a corresponding identity_document uploaded, matched by NRIC/passport
-    number.
+    number. A director may hold either a Malaysian MyKad or a passport (the
+    SSM form's ID Type says which); both are accepted identity documents, so
+    a passport holder is never reported as missing an IC.
 
     Args:
         ssm_people: Directors/shareholders from the SSM corporate form(s),
-            each with name and nric_passport.
+            each with name, nric_passport, and (optionally) id_type.
         ic_documents: The identity_document documents in the bundle, each
-            with individual_name, nric_passport, front_image_present, and
-            back_image_present.
+            with individual_name, nric_passport, id_type, front_image_present,
+            and back_image_present.
     """
     ic_ids = {normalize_id(doc["nric_passport"]) for doc in ic_documents}
 
     missing_people = [
-        {"name": person["name"], "nric_passport": person["nric_passport"]}
+        {
+            "name": person["name"],
+            "nric_passport": person["nric_passport"],
+            "id_type": normalize_id_type(person.get("id_type")),
+        }
         for person in ssm_people
         if normalize_id(person["nric_passport"]) not in ic_ids
     ]
     passed = len(missing_people) == 0
 
+    missing_summary = ", ".join(
+        f"{_id_type_label(person['id_type'])} for {person['name']}" for person in missing_people
+    )
+
     return {
         "passed": passed,
         "message": (
-            "IC documents present for all SSM directors/shareholders."
+            "Identity documents present for all SSM directors/shareholders."
             if passed
-            else f"Missing IC document(s) for {len(missing_people)} person(s)."
+            else f"Missing identity document(s) for {len(missing_people)} person(s): {missing_summary}."
         ),
         "details": {
             "ssm_people_count": len(ssm_people),
@@ -128,28 +224,48 @@ def find_missing_ic_documents(ssm_people: List[Dict[str, object]], ic_documents:
     }
 
 
+def _required_image_sides(doc: Dict[str, object], id_type: Optional[str]) -> List[Tuple[str, Optional[bool]]]:
+    """The (label, tri-state flag) images this identity document must carry.
+
+    A MyKad is two-sided, so both front and back are required. A passport has
+    no IC-style back -- its single bio-data page (carried in
+    front_image_present) is the whole requirement, and back_image_present is
+    not applicable and must not be looked at. An unstated/unrecognized ID
+    Type is held to the stricter MyKad requirement.
+    """
+    front = doc.get("front_image_present")
+    if id_type == ID_TYPE_PASSPORT:
+        return [("bio_data_page", front)]
+    return [("front", front), ("back", doc.get("back_image_present"))]
+
+
 def check_ic_front_and_back(ic_documents: List[Dict[str, object]]) -> Dict:
-    """Verify that front_image_present and back_image_present are both true for every IC.
+    """Verify that every identity document carries the images its type requires.
 
     Use this for every identity_document in the bundle to catch partial
-    uploads (e.g. front of NRIC submitted but not the back). Each side is a
-    tri-state: True (confirmed present), False (confirmed missing -- a real
-    gap), or null (extraction couldn't tell -- "needs review", not the same
-    as a confirmed miss).
+    uploads (e.g. front of NRIC submitted but not the back). A MyKad needs
+    both a front and a back image; a passport needs only its bio-data page.
+    Each image is a tri-state: True (confirmed present), False (confirmed
+    missing -- a real gap), or null (extraction couldn't tell -- "needs
+    review", not the same as a confirmed miss).
 
     Args:
         ic_documents: The identity_document documents in the bundle, each
-            with individual_name, nric_passport, front_image_present, and
-            back_image_present.
+            with individual_name, nric_passport, id_type ("mykad" or
+            "passport"), front_image_present, and back_image_present.
     """
-    incomplete = []  # at least one side confirmed False
-    needs_review = []  # no confirmed-False side, but at least one null side
+    incomplete = []  # at least one required image confirmed False
+    needs_review = []  # no confirmed-False image, but at least one null image
     for doc in ic_documents:
-        front = doc.get("front_image_present")
-        back = doc.get("back_image_present")
-        missing_sides = [side for side, val in (("front", front), ("back", back)) if val is False]
-        unconfirmed_sides = [side for side, val in (("front", front), ("back", back)) if val is None]
-        entry = {"individual_name": doc.get("individual_name"), "nric_passport": doc.get("nric_passport")}
+        id_type = normalize_id_type(doc.get("id_type"))
+        required_sides = _required_image_sides(doc, id_type)
+        missing_sides = [side for side, val in required_sides if val is False]
+        unconfirmed_sides = [side for side, val in required_sides if val is None]
+        entry = {
+            "individual_name": doc.get("individual_name"),
+            "nric_passport": doc.get("nric_passport"),
+            "id_type": id_type,
+        }
         if missing_sides:
             incomplete.append({**entry, "missing_sides": missing_sides})
         elif unconfirmed_sides:
@@ -158,11 +274,24 @@ def check_ic_front_and_back(ic_documents: List[Dict[str, object]]) -> Dict:
     passed = False if incomplete else (None if needs_review else True)
 
     if incomplete:
-        message = f"{len(incomplete)} IC document(s) are missing front and/or back images."
+        message = (
+            f"{len(incomplete)} identity document(s) are missing required image(s): "
+            + summarize_items(
+                f"{doc['individual_name']} missing {', '.join(doc['missing_sides'])}"
+                for doc in incomplete
+            ) + "."
+        )
     elif needs_review:
-        message = f"{len(needs_review)} IC document(s) have unconfirmed front/back images -- needs review."
+        message = (
+            f"{len(needs_review)} identity document(s) have unconfirmed image(s) "
+            "-- needs review: "
+            + summarize_items(
+                f"{doc['individual_name']} unconfirmed {', '.join(doc['unconfirmed_sides'])}"
+                for doc in needs_review
+            ) + "."
+        )
     else:
-        message = "All IC documents have both front and back images present."
+        message = "All identity documents carry the images their type requires."
 
     return {
         "passed": passed,
@@ -204,11 +333,27 @@ _CUSTOMER_INFO_COMPANY_LABELS = {
 }
 
 
+# Spouse details only exist for a director who has a spouse, so they're
+# required conditionally rather than unconditionally -- an unmarried director
+# writing "N/A" has completed the form correctly, and failing them for it is
+# a false rejection.
+_SPOUSE_FIELDS = ("spouse_name", "spouse_contact_number")
+
+
 def verify_customer_information_completeness(customer_information: Dict[str, object]) -> Dict:
-    """Check that EVERY field on the Customer Information Form is filled in.
+    """Check that every applicable field on the Customer Information Form is filled in.
 
     Use this once the customer_information document has been extracted, to
     confirm no company field or director-particulars field was left blank.
+    Values meaning "nothing here" -- "N/A", "-", "Not Available" -- count as
+    blank, not as filled in.
+
+    Spouse Name and Spouse Contact Number are the one exception to "every
+    field is mandatory": they're required only when the director's marital
+    status says they have a spouse. For an unmarried director they're waived
+    and reported under not_applicable_fields. When the marital status can't be
+    read at all, the spouse fields are left undecided (needs review) rather
+    than guessed either way.
 
     Args:
         customer_information: The customer_information document's data --
@@ -218,28 +363,57 @@ def verify_customer_information_completeness(customer_information: Dict[str, obj
     missing_fields = [
         label
         for field, label in _CUSTOMER_INFO_COMPANY_LABELS.items()
-        if not customer_information.get(field)
+        if is_blank(customer_information.get(field))
     ]
+    not_applicable_fields = []
+    unconfirmed_marital_status = []
 
     directors = customer_information.get("directors") or []
     if not directors:
         missing_fields.append("Directors (no director particulars provided)")
     for i, director in enumerate(directors):
+        marital_status = normalize_marital_status(director.get("marital_status"))
         for field, label in _CUSTOMER_INFO_DIRECTOR_LABELS.items():
-            if not director.get(field):
-                missing_fields.append(f"Director[{i}] {label}")
+            qualified_label = f"Director[{i}] {label}"
+            if field in _SPOUSE_FIELDS:
+                if marital_status == MARITAL_STATUS_UNMARRIED:
+                    not_applicable_fields.append(qualified_label)
+                    continue
+                if marital_status is None:
+                    # Can't tell whether a spouse was expected. The marital
+                    # status field is either already flagged blank below, or
+                    # holds a value we don't recognize -- either way, one root
+                    # cause, reported once.
+                    continue
+            if is_blank(director.get(field)):
+                missing_fields.append(qualified_label)
+        if marital_status is None and not is_blank(director.get("marital_status")):
+            unconfirmed_marital_status.append(
+                f"Director[{i}] {_CUSTOMER_INFO_DIRECTOR_LABELS['marital_status']}"
+            )
 
-    passed = len(missing_fields) == 0
+    passed = False if missing_fields else (None if unconfirmed_marital_status else True)
+
+    if missing_fields:
+        message = (
+            f"Missing {len(missing_fields)} Customer Information Form field(s): "
+            f"{summarize_items(missing_fields)}."
+        )
+    elif unconfirmed_marital_status:
+        message = (
+            "Marital status could not be read, so spouse details could not be "
+            f"checked -- needs review: {summarize_items(unconfirmed_marital_status)}."
+        )
+    else:
+        message = "All applicable Customer Information Form fields are completed."
+
     return {
         "passed": passed,
-        "message": (
-            "All Customer Information Form fields are completed."
-            if passed
-            else f"Missing {len(missing_fields)} Customer Information Form field(s): "
-                 f"{', '.join(missing_fields)}."
-        ),
+        "message": message,
         "details": {
             "missing_fields": missing_fields,
+            "not_applicable_fields": not_applicable_fields,
+            "unconfirmed_marital_status": unconfirmed_marital_status,
         },
     }
 
@@ -282,12 +456,22 @@ def verify_consent_signatures(ssm_people: List[Dict[str, object]], consent_forms
     )
 
     if missing_consent or unsigned_consent:
-        message = (
-            f"{len(missing_consent)} missing Consent Form(s), "
-            f"{len(unsigned_consent)} confirmed-unsigned Consent Form(s)."
-        )
+        parts = []
+        if missing_consent:
+            parts.append(
+                f"No Consent Form for {summarize_items(p['name'] for p in missing_consent)}"
+            )
+        if unsigned_consent:
+            parts.append(
+                f"Consent Form is unsigned for "
+                f"{summarize_items(p['name'] for p in unsigned_consent)}"
+            )
+        message = "; ".join(parts) + "."
     elif unconfirmed_consent:
-        message = f"{len(unconfirmed_consent)} Consent Form(s) have an unconfirmed signature -- needs review."
+        message = (
+            f"{len(unconfirmed_consent)} Consent Form(s) have an unconfirmed signature "
+            f"-- needs review: {summarize_items(p['name'] for p in unconfirmed_consent)}."
+        )
     else:
         message = "All required parties have a signed Consent Form."
 

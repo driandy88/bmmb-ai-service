@@ -70,6 +70,8 @@ from .bundle import (
     TaxDeclarationDoc,
     ValidationBundle,
 )
+from .domain.policies import BMMB_SME_POLICY_V1, ValidationPolicy
+from .rules._utils import NOT_AVAILABLE, normalize_currency, normalize_id_type
 
 
 class AdapterDataGapError(ValueError):
@@ -138,6 +140,30 @@ def _optional_str(
     return str(value)
 
 
+def _safe_id_type(
+    value: Any, *, warnings: list[AdapterWarning], document_type: str, document_id: str, field: str,
+) -> Optional[str]:
+    """Resolve an "ID Type" attribute to "mykad" / "passport", or None.
+
+    None is safe by construction -- an unknown ID Type is held to the stricter
+    MyKad requirement downstream (see IdentityDocumentData.id_type), so it can
+    never let a document through. A *null* ID Type is therefore routine and
+    doesn't warn. A non-null value that resolves to nothing is different: it
+    means extraction read something real off the document that this service
+    doesn't recognize, and a reviewer should see the string it couldn't place.
+    """
+    resolved = normalize_id_type(value)
+    if resolved is None and value is not None and str(value).strip():
+        warnings.append(AdapterWarning(
+            document_type=document_type, document_id=document_id, field=field,
+            message=f"{field} was not a recognized identity-document type; "
+                    f"defaulting to the stricter MyKad requirement.",
+            current_state=f"{value!r} (unrecognized)",
+            expected_state="a MyKad or passport identity-document type",
+        ))
+    return resolved
+
+
 def _safe_bool(
     value: Any, *, warnings: list[AdapterWarning], document_type: str, document_id: str, field: str,
     default: Optional[bool] = False,
@@ -192,6 +218,22 @@ def _parse_ddmmyyyy(value: str) -> date:
     cosmetic -- Pydantic will reject 'DD-MM-YYYY' outright."""
     day, month, year = value.split("-")
     return date(int(year), int(month), int(day))
+
+
+def _parse_transaction_date(raw: Any) -> Optional[date]:
+    """Bank Statements' Transaction Date is normally ISO 'YYYY-MM-DD', but
+    tolerate 'DD-MM-YYYY' too (the format the rest of extraction uses --
+    see _parse_ddmmyyyy) rather than dropping an otherwise-good row just
+    because the two conventions disagree on this one template."""
+    text = str(raw)
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        pass
+    try:
+        return _parse_ddmmyyyy(text)
+    except (ValueError, TypeError):
+        return None
 
 
 # ── SSM corporate forms ──────────────────────────────────────────────────────
@@ -283,6 +325,13 @@ def _build_ssm_doc(
                 nric_passport=_safe_str((row or {}).get("Director NRIC or Passport Number"), warnings=warnings,
                                          document_type="ssm_corporate_form", document_id=document_id,
                                          field=f"Directors[{i}].Director NRIC or Passport Number"),
+                # Says which identity document this director must produce
+                # (MyKad vs passport) -- the SSM form is the authoritative
+                # declaration, used to fill the gap when the identity document
+                # itself doesn't state its own type.
+                id_type=_safe_id_type((row or {}).get("ID Type"), warnings=warnings,
+                                       document_type="ssm_corporate_form", document_id=document_id,
+                                       field=f"Directors[{i}].ID Type"),
             )
             for i, row in enumerate(director_rows)
         ]
@@ -432,12 +481,28 @@ def build_financial_statement_docs(
     if not extracted:
         return []
 
+    # The 4 section-present flags are Unique (one value for the whole
+    # document), so read them once and share them across every fanned-out year
+    # rather than re-reading -- and re-warning -- per row.
+    section_flags = {
+        field: _safe_bool(extracted.get(attr), warnings=warnings, document_type="financial_statement",
+                          document_id="financial_statement", field=attr, default=None)
+        for field, attr in _FS_SECTION_FLAGS.items()
+    }
+
+    # No explicit audited-status attribute exists on this template, so infer
+    # it from whether an Auditor's Report section was found: a set of accounts
+    # carrying an auditor's report is audited, one confirmed not to isn't. The
+    # tri-state carries straight through -- null stays "couldn't determine",
+    # never "confirmed unaudited".
+    audited = section_flags["auditors_report_present"]
     if "Audited" not in extracted:
         warnings.append(AdapterWarning(
             document_type="financial_statement", document_id="financial_statement",
             field="audited",
-            message="No explicit audited-status attribute exists in the current financial-statement template.",
-            current_state="no signal available (left as null)",
+            message="No explicit audited-status attribute exists in the current financial-statement "
+                    "template; audited was inferred from the Auditor's Report section instead.",
+            current_state=f"inferred from Auditor's Report Present = {audited!r}",
             expected_state="true or false confirming whether the statements are audited",
         ))
 
@@ -463,12 +528,8 @@ def build_financial_statement_docs(
             data=FinancialStatementData(
                 entity_name=entity_name,
                 financial_year_end=_parse_ddmmyyyy(fye),
-                audited=None,
-                **{
-                    field: _safe_bool(extracted.get(attr), warnings=warnings, document_type="financial_statement",
-                                       document_id=document_id, field=attr, default=None)
-                    for field, attr in _FS_SECTION_FLAGS.items()
-                },
+                audited=audited,
+                **section_flags,
             ),
             provenance=DocumentProvenance(source_template="Financial Statements (Sdn Bhd)"),
         ))
@@ -520,6 +581,7 @@ def build_bank_statement_doc(
     *,
     entity_name: str,
     warnings: Optional[list[AdapterWarning]] = None,
+    policy: ValidationPolicy = BMMB_SME_POLICY_V1,
 ) -> Optional[BankStatementDoc]:
     """One consolidated BankStatementDoc built from the "Bank Statements"
     template's daily Transactions row_group. The monthly end balance is the
@@ -547,9 +609,8 @@ def build_bank_statement_doc(
     by_month: dict[tuple[int, int], list] = {}
     for i, row in enumerate(txns):
         raw_date = (row or {}).get("Transaction Date")
-        try:
-            d = date.fromisoformat(str(raw_date))
-        except (TypeError, ValueError):
+        d = _parse_transaction_date(raw_date) if raw_date else None
+        if d is None:
             if raw_date:
                 warnings.append(AdapterWarning(
                     document_type="bank_statement", document_id=document_id,
@@ -568,29 +629,34 @@ def build_bank_statement_doc(
         document_type="bank_statement", document_id=document_id, field="Bank Name",
     )
 
-    # Currency is read from the template's "Currency" attribute. For now a
-    # non-MYR statement is only warned (the check_bank_statement_currency rule
-    # already treats a mismatch as needs-review, not a hard fail -- it needs
-    # manual conversion before balances compare like-for-like).
+    # Currency is read from the template's "Currency" attribute. A foreign
+    # currency is only warned, never blocked here (check_bank_statement_currency
+    # treats a mismatch as needs-review, not a hard fail -- it needs manual
+    # conversion before balances compare like-for-like). The accepted currency
+    # comes from the policy rather than a hardcoded "MYR" so the warning can't
+    # drift from the rule that acts on it.
+    accepted_currency = normalize_currency(policy.accepted_bank_currency)
     currency = _optional_str(
         extracted.get("Currency"), warnings=warnings,
         document_type="bank_statement", document_id=document_id, field="Currency",
     )
-    if currency is not None and currency.strip().upper() != "MYR":
-        warnings.append(AdapterWarning(
-            document_type="bank_statement", document_id=document_id, field="Currency",
-            message=f"Bank statement currency is {currency!r}, not MYR -- needs conversion and manual review.",
-            current_state=currency, expected_state="MYR",
-        ))
+    if currency is not None:
+        # "RM" and "MYR" are the same currency -- normalize before judging, or
+        # a perfectly ordinary Malaysian statement gets flagged for conversion
+        # into its own currency.
+        detected_currency = normalize_currency(currency)
+        if detected_currency is not None and detected_currency != accepted_currency:
+            warnings.append(AdapterWarning(
+                document_type="bank_statement", document_id=document_id, field="Currency",
+                message=f"Bank statement currency detected as {detected_currency}, not the "
+                        f"accepted {accepted_currency} -- balances need conversion before "
+                        "they compare like-for-like; flagged for manual review.",
+                current_state=f"{detected_currency} (as extracted: {currency!r})",
+                expected_state=accepted_currency,
+            ))
 
-    # Account Type still has no source attribute on the Bank Statements
-    # template -- keep it explicitly unknown and surface the integration gap.
-    warnings.append(AdapterWarning(
-        document_type="bank_statement", document_id=document_id, field="Account Type",
-        message="Account Type has no source attribute in the current Bank Statements template.",
-        current_state="no signal available (left as null)",
-        expected_state="an account type, e.g. current or savings",
-    ))
+    # Account Type has no source attribute on the Bank Statements template
+    # and is no longer a field anything depends on -- left null, no warning.
 
     monthly_balances = []
     all_dates: list[date] = []
@@ -618,6 +684,7 @@ def build_bank_statement_doc(
             statement_start_date=min(all_dates),
             statement_end_date=max(all_dates),
             monthly_balances=monthly_balances,
+            covered_months=[f"{year:04d}-{month:02d}" for (year, month) in sorted(by_month)],
         ),
         provenance=DocumentProvenance(source_template="Bank Statements"),
     )
@@ -634,6 +701,11 @@ def build_identity_documents(
     row_group -- one correlated object per director carrying Director Name/NRIC/
     Front Side IC Present/Back Side IC Present/ID Type, so a name can't drift onto
     another director's NRIC or IC-present flags.
+
+    "ID Type" resolves to "mykad" or "passport" (or None when absent /
+    unrecognized), which is what tells the identity rules whether to require a
+    front+back pair or a single passport bio-data page -- see
+    IdentityDocumentData.id_type.
 
     GAP: no "expiry_date" attribute exists on the MyKad template --
     IdentityDocumentData.expiry_date is always None until one is added.
@@ -656,6 +728,8 @@ def build_identity_documents(
                                            document_id=f"identity_document_{i}", field=f"Directors[{i}].Director Name"),
                 nric_passport=_safe_str((row or {}).get("Director NRIC or Passport Number"), warnings=warnings, document_type="identity_document",
                                          document_id=f"identity_document_{i}", field=f"Directors[{i}].Director NRIC or Passport Number"),
+                id_type=_safe_id_type((row or {}).get("ID Type"), warnings=warnings, document_type="identity_document",
+                                       document_id=f"identity_document_{i}", field=f"Directors[{i}].ID Type"),
                 front_image_present=_safe_bool((row or {}).get("Front Side IC Present"), warnings=warnings, document_type="identity_document",
                                                 document_id=f"identity_document_{i}", field=f"Directors[{i}].Front Side IC Present",
                                                 default=None),
@@ -768,7 +842,7 @@ def build_customer_information_doc(
     """CustomerInfoDoc built from the "Customer Information Form" template --
     director personal particulars (one row per director) plus company info.
 
-    Null fields are coerced to "" here (not warned per-field): the
+    Null fields are coerced to NOT_AVAILABLE here (not warned per-field): the
     verify_customer_information_completeness rule is the single place that
     reports which fields are unfilled, so the adapter doesn't also flood
     adapter_warnings with one entry per blank cell.
@@ -780,7 +854,7 @@ def build_customer_information_doc(
     document_id = "customer_information"
 
     def blank(value: object) -> str:
-        return "" if value is None else str(value)
+        return NOT_AVAILABLE if value is None else str(value)
 
     director_rows = _safe_list(extracted.get("Directors"), warnings=warnings,
                                document_type="customer_information", document_id=document_id, field="Directors")

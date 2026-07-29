@@ -31,6 +31,12 @@ a document id, while `rule_id` identifies the underlying rule consistently.
 2. `needs_review` if no check failed but at least one check needs review;
 3. `passed` otherwise, including reports containing only not-applicable checks.
 
+A report can no longer consist of *nothing but* not-applicable checks:
+`package.completeness` always produces a real result, and fails when a
+mandatory document type is absent from the package. That's what stops a
+near-empty bundle — where every other rule correctly skips — from
+aggregating to `passed`.
+
 AI review must not change deterministic `passed`, `status`, or overall results.
 It may only add findings and explanatory narrative.
 
@@ -38,10 +44,12 @@ It may only add findings and explanatory narrative.
 
 `ValidationReport.results_by_document` is a computed field (present in
 `.model_dump()` / JSON output, not just Python) that groups the
-`CheckResult` objects by document type: `SSM_CORPORATE_FORM`,
+`CheckResult` objects by document type: `PACKAGE`, `SSM_CORPORATE_FORM`,
 `FINANCIAL_STATEMENT`, `BANK_STATEMENT`, `IDENTITY_DOCUMENT`,
-`CONSENT_FORM`, `APPLICATION`. It is derived from the flat `results` list
-via each rule's `RuleDefinition.document_group` (`rules/catalog.py`).
+`CONSENT_FORM`, `CUSTOMER_INFORMATION`. It is derived from the flat `results`
+list via each rule's `RuleDefinition.document_group` (`rules/catalog.py`).
+`PACKAGE` holds the one rule that isn't about a document's contents but about
+which documents arrived at all (`package.completeness`).
 
 `results` still exists on the model — it's the source `results_by_document`
 is computed from, and `overall_passed` / `overall_status` read it — and the
@@ -71,12 +79,13 @@ omitted:
     "entity_type": "...",
     "policy_id": "bmmb-sme-2026-01",
     "results_by_document": {
-      "SSM_CORPORATE_FORM": [ {"check": "verify_ssm_completeness", "...": "..."} ],
+      "PACKAGE": [ {"check": "verify_required_documents_present", "...": "..."} ],
+      "SSM_CORPORATE_FORM": [ {"check": "strict_match_entity_names[...]", "...": "..."} ],
       "FINANCIAL_STATEMENT": [ ... ],
       "BANK_STATEMENT": [ ... ],
       "IDENTITY_DOCUMENT": [ ... ],
       "CONSENT_FORM": [ ... ],
-      "APPLICATION": [ ... ]
+      "CUSTOMER_INFORMATION": [ ... ]
     }
   },
   "ai_findings": [...],

@@ -19,8 +19,12 @@ class RuleDefinition:
 
 
 RULE_CATALOG = (
+    # First, and deliberately so: every rule below degrades to "not applicable"
+    # when its document is absent, so this gate is what stops a near-empty
+    # package from reading as a clean pass.
+    RuleDefinition("package.completeness", "verify_required_documents_present", "package", "The package contains every mandatory document type for the entity.", "PACKAGE"),
     RuleDefinition("financial_statement.freshness", "calculate_financial_18_month_rule", "financial", "Latest financial year is within the allowed age.", "FINANCIAL_STATEMENT"),
-    RuleDefinition("financial_statement.consecutive_years", "check_financial_consecutive_years", "financial", "Financial documents cover two consecutive years.", "FINANCIAL_STATEMENT"),
+    RuleDefinition("financial_statement.consecutive_years", "check_financial_consecutive_years", "financial", "Financial documents cover at least two consecutive years with no missing or duplicated year.", "FINANCIAL_STATEMENT"),
     RuleDefinition("financial_statement.completeness", "verify_financial_sections_present", "financial", "Each financial statement contains required sections.", "FINANCIAL_STATEMENT"),
     RuleDefinition("bank_statement.continuity", "check_bank_statement_continuity", "bank_statement", "Bank statement periods have no gaps or overlaps.", "BANK_STATEMENT"),
     RuleDefinition("bank_statement.duration", "verify_bank_statement_duration", "bank_statement", "Bank statements meet the required coverage duration.", "BANK_STATEMENT"),
@@ -28,8 +32,8 @@ RULE_CATALOG = (
     RuleDefinition("bank_statement.overdraft", "check_bank_statement_overdraft", "bank_statement", "Bank statement ending balances are not overdrawn.", "BANK_STATEMENT"),
     RuleDefinition("bank_statement.bank_consistency", "check_bank_statement_bank_consistency", "bank_statement", "All bank statements in the set are from the same bank.", "BANK_STATEMENT"),
     RuleDefinition("bank_statement.currency", "check_bank_statement_currency", "bank_statement", "Bank statement currency matches the accepted currency.", "BANK_STATEMENT"),
-    RuleDefinition("identity_document.front_and_back", "check_ic_front_and_back", "identity", "Each IC has front and back images.", "IDENTITY_DOCUMENT"),
-    RuleDefinition("identity_document.coverage", "find_missing_ic_documents", "identity", "Required parties have corresponding IC documents.", "IDENTITY_DOCUMENT"),
+    RuleDefinition("identity_document.front_and_back", "check_ic_front_and_back", "identity", "Each identity document has the images its type requires (MyKad: front and back; passport: bio-data page).", "IDENTITY_DOCUMENT"),
+    RuleDefinition("identity_document.coverage", "find_missing_ic_documents", "identity", "Required parties have corresponding identity documents (MyKad or passport).", "IDENTITY_DOCUMENT"),
     RuleDefinition("consent.signature", "verify_consent_signatures", "consent", "Required parties have signed consent forms.", "CONSENT_FORM"),
     RuleDefinition("customer_information.completeness", "verify_customer_information_completeness", "customer_information", "Every Customer Information Form field is completed.", "CUSTOMER_INFORMATION"),
     RuleDefinition("entity_name.match", "strict_match_entity_names", "matching", "Entity names match across documents.", "SSM_CORPORATE_FORM"),
