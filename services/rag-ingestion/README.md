@@ -113,7 +113,7 @@ live in config/YAML, never hardcoded in `.py`. Vision model is `gemini-2.5-flash
 |---|---|---|
 | **0** | Scaffold + config + `schema.sql` + CLI (`all`/`--version`/`--supersede`) | ✅ realigned to per-program model |
 | **1** | Stage 1 parse + `extraction.md` | ✅ all 6 docs parsed; tables render; internal p32–35 + PROUD rescue verified |
-| 2 | Stage 2 verify report + sign-off gate | ⬜ |
+| 2 | Stage 2 verify report + sign-off gate | ✅ side-by-side HTML report (numbers highlighted); Stage 3 refuses without sign-off |
 | 3 | Stage 3 curate + Stage 4 chunk (program-code breadcrumb) | ⬜ |
 | 4 | Stage 5 enrich + Stage 6 embed + Stage 7 index | ⬜ |
 | 5 | `PgVectorRetriever`: program-scope (§6a) → filters → hybrid → RRF → rerank → floor | ⬜ |
