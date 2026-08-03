@@ -65,8 +65,18 @@ class Settings:
     # ── Cloud Storage — source documents ─────────────────────────────────────
     gcs_sources_bucket: str = os.getenv("GCS_SOURCES_BUCKET", "bmmb-rag-sources")
 
-    # ── Stage 1 · parsing ────────────────────────────────────────────────────
+    # ── Stage 1 · parsing + automated verification (Change Brief §3, §4) ─────
     parse_dpi: int = int(os.getenv("PARSE_DPI", "150"))
+    # Table / numeric-dense pages are re-rendered at this higher DPI (§3.3): no
+    # JPEG compression artifacts on small figures like `2,540 kg` or `0.75%`.
+    parse_dpi_tables: int = int(os.getenv("PARSE_DPI_TABLES", "300"))
+    # Self-consistency (§3.2): a page with >= this many Pass-B facts (or a table)
+    # is transcribed twice at temperature 0 and its numbers diffed.
+    self_consistency_min_facts: int = int(os.getenv("SELF_CONSISTENCY_MIN_FACTS", "3"))
+    # products.yaml (the workbook quantum table) is owned by the chat service; the
+    # cross-check (§4 Check 3) reads it there rather than duplicating the numbers.
+    # Path is resolved relative to the service root (services/rag-ingestion/).
+    products_yaml: str = os.getenv("PRODUCTS_YAML", "../chat/app/config/products.yaml")
 
     # ── Stage 4 · chunking (§5 / §11: tables never split) ────────────────────
     chunk_target_min_tokens: int = int(os.getenv("CHUNK_TARGET_MIN_TOKENS", "300"))

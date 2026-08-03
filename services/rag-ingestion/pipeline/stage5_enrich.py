@@ -1,10 +1,17 @@
 """
-Stage 5 · Enrich (brief §5).
+Stage 5 · Enrich (brief §5; Change Brief §2, §4).
 
 Attaches the full metadata schema to every chunk: a deterministic chunk_id
 (hash of doc_id + version + content, so an unchanged doc re-runs as a no-op upsert
 and a new version yields new ids — §7b), plus doc_title / source_uri deep-link /
-dates / lang from documents.yaml and approved_by/at from the Stage-2 sign-off.
+dates / lang from documents.yaml.
+
+This is where automated verification's page flags become the chunk-level
+`needs_review` (Change Brief §4): a chunk is `needs_review=true` if ANY of its
+source pages was flagged in verification.json — that chunk is later excluded from
+customer-channel retrieval, exactly like access_tier. `approved_by` / `approved_at`
+are no longer sourced from a human sign-off (that gate was removed, §2); they stay
+in the record as `None`, reserved for formal product-team approval later.
 
 Reads data/04_chunks/<corpus>/<doc_id>.jsonl → writes data/05_enriched/<corpus>/<doc_id>.jsonl.
 """
@@ -17,7 +24,7 @@ from pathlib import Path
 import yaml
 
 from config.settings import get_settings
-from pipeline.stage2_verify import load_signoff
+from pipeline.verify import flagged_pages
 
 _ROOT = Path(__file__).resolve().parent.parent
 _DOCS_PATH = _ROOT / "config" / "documents.yaml"
@@ -37,8 +44,9 @@ def _deeplink(uri: str | None, pages: list[int]) -> str | None:
     return f"{uri}#page={min(pages)}" if uri and pages else uri
 
 
-def _enrich_record(chunk: dict, doc: dict, signoff: dict | None) -> dict:
+def _enrich_record(chunk: dict, doc: dict, flagged: set[int]) -> dict:
     version = str(chunk.get("version") or doc.get("version"))
+    pages = chunk.get("pages", [])
     return {
         "chunk_id": _chunk_id(chunk["doc_id"], version, chunk["section"], chunk["content"]),
         "corpus": chunk["corpus"],
@@ -46,7 +54,7 @@ def _enrich_record(chunk: dict, doc: dict, signoff: dict | None) -> dict:
         "section": chunk["section"],
         "doc_id": chunk["doc_id"],
         "doc_title": doc.get("title"),
-        "source_uri": _deeplink(doc.get("source_uri"), chunk.get("pages", [])),
+        "source_uri": _deeplink(doc.get("source_uri"), pages),
         "version": version,
         "effective_date": str(doc.get("effective_date")) if doc.get("effective_date") else None,
         "expiry_date": str(doc.get("expiry_date")) if doc.get("expiry_date") else None,
@@ -54,11 +62,12 @@ def _enrich_record(chunk: dict, doc: dict, signoff: dict | None) -> dict:
         "access_tier": chunk.get("access_tier", "customer"),
         "lang": doc.get("lang", "en"),
         "content": chunk["content"],
-        "approved_by": (signoff or {}).get("approved_by"),
-        "approved_at": (signoff or {}).get("approved_at"),
+        "needs_review": bool(set(pages) & flagged),   # §4: any flagged source page taints the chunk
+        "approved_by": None,                           # reserved for formal approval (§2)
+        "approved_at": None,
         # carried for inspection / debugging (not DB columns)
         "_breadcrumb": chunk.get("breadcrumb"),
-        "_pages": chunk.get("pages", []),
+        "_pages": pages,
         "_tokens": chunk.get("tokens"),
     }
 
@@ -82,16 +91,18 @@ def run(args) -> int:
             if args.doc and doc_id != args.doc:
                 continue
             doc = docs.get(doc_id, {})
-            signoff = load_signoff(doc_id)
+            flagged = flagged_pages(doc_id, settings)
             out_records = []
             for line in jf.read_text().splitlines():
                 if line.strip():
-                    out_records.append(_enrich_record(json.loads(line), doc, signoff))
+                    out_records.append(_enrich_record(json.loads(line), doc, flagged))
             out_dir = _ROOT / settings.data_dir / "05_enriched" / corpus
             out_dir.mkdir(parents=True, exist_ok=True)
             out = out_dir / f"{doc_id}.jsonl"
             out.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in out_records) + "\n")
+            n_review = sum(1 for r in out_records if r["needs_review"])
             total += len(out_records)
-            print(f"[stage5_enrich] {corpus}/{doc_id}: {len(out_records)} chunks -> {out.name}")
+            note = f" ({n_review} needs_review)" if n_review else ""
+            print(f"[stage5_enrich] {corpus}/{doc_id}: {len(out_records)} chunks{note} -> {out.name}")
     print(f"[stage5_enrich] total {total} enriched chunks.")
     return 0

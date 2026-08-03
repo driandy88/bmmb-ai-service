@@ -27,19 +27,20 @@ _UPSERT = """
 INSERT INTO rag_chunks
   (chunk_id, corpus, program_code, section, doc_id, doc_title, source_uri, version,
    effective_date, expiry_date, content_type, access_tier, lang, content, content_tsv,
-   embedding, approved_by, approved_at, indexed_at)
+   embedding, needs_review, approved_by, approved_at, indexed_at)
 VALUES
   (%(chunk_id)s, %(corpus)s, %(program_code)s, %(section)s, %(doc_id)s, %(doc_title)s,
    %(source_uri)s, %(version)s, %(effective_date)s, %(expiry_date)s, %(content_type)s,
    %(access_tier)s, %(lang)s, %(content)s, to_tsvector('english', %(content)s),
-   %(embedding)s::vector, %(approved_by)s, %(approved_at)s, now())
+   %(embedding)s::vector, %(needs_review)s, %(approved_by)s, %(approved_at)s, now())
 ON CONFLICT (chunk_id) DO UPDATE SET
   corpus=EXCLUDED.corpus, program_code=EXCLUDED.program_code, section=EXCLUDED.section,
   doc_id=EXCLUDED.doc_id, doc_title=EXCLUDED.doc_title, source_uri=EXCLUDED.source_uri,
   version=EXCLUDED.version, effective_date=EXCLUDED.effective_date, expiry_date=EXCLUDED.expiry_date,
   content_type=EXCLUDED.content_type, access_tier=EXCLUDED.access_tier, lang=EXCLUDED.lang,
   content=EXCLUDED.content, content_tsv=EXCLUDED.content_tsv, embedding=EXCLUDED.embedding,
-  approved_by=EXCLUDED.approved_by, approved_at=EXCLUDED.approved_at, indexed_at=now()
+  needs_review=EXCLUDED.needs_review, approved_by=EXCLUDED.approved_by,
+  approved_at=EXCLUDED.approved_at, indexed_at=now()
 """
 
 
@@ -83,6 +84,7 @@ def _report(conn) -> None:
     for label, q in [
         ("by corpus", "SELECT corpus, count(*) FROM rag_chunks GROUP BY corpus ORDER BY corpus"),
         ("by access_tier", "SELECT access_tier, count(*) FROM rag_chunks GROUP BY access_tier ORDER BY access_tier"),
+        ("needs_review", "SELECT needs_review, count(*) FROM rag_chunks GROUP BY needs_review ORDER BY needs_review"),
     ]:
         rows = conn.execute(q).fetchall()
         print(f"  {label}: " + ", ".join(f"{a}={b}" for a, b in rows))
@@ -147,6 +149,10 @@ def run(args) -> int:
         for r in recs:
             conn.execute(_UPSERT, {**r, "embedding": _vec_literal(r["embedding"])})
         conn.commit()
-        print(f"[stage7_index] upserted {len(recs)} chunks → {inserts} inserted, {updates} updated (db={settings.db_name}).")
+        flagged = sum(1 for r in recs if r.get("needs_review"))
+        excl = (f" · {flagged} flagged (excluded from customer retrieval) · see review.html"
+                if flagged else "")
+        print(f"[stage7_index] indexed {len(recs)} chunks → {inserts} inserted, "
+              f"{updates} updated (db={settings.db_name}){excl}.")
         _report(conn)
     return 0

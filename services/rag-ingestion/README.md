@@ -17,8 +17,10 @@ prompt, or schema changes.
 ```
 Source docs (per-program sales kits, policy docs, directory)
   │
-  ├─ 1. PARSE    → clean Markdown per page (Gemini vision — text extraction is unusable on these decks, §7c-7)
-  ├─ 2. VERIFY   → SME signs off the extracted figures                       ← human gate
+  ├─ 1. PARSE    → clean Markdown per page (Gemini vision), TWO independent reads (layout + structured facts),
+  │                adaptive 150/300 DPI + self-consistency on numeric-dense pages (§3), THEN auto-verify:
+  │                cross-pass agreement · sanity bounds · product cross-check → verification.json + review.html
+  │   (no stage 2 — the human sign-off gate was REMOVED, Change Brief §2; verification is automated inside stage 1)
   ├─ 3. CURATE   → reorganise into per-program canonical docs; classify access_tier
   ├─ 4. CHUNK    → structure-aware, breadcrumbed (breadcrumb carries program_code), tables never split
   ├─ 5. ENRICH   → attach the metadata schema
@@ -33,8 +35,10 @@ Source docs (per-program sales kits, policy docs, directory)
 Every stage **reads the previous stage's directory and writes its own**. Each is
 independently runnable, idempotent, and inspectable — open `data/03_curated/` and
 read the Markdown, or `data/04_chunks/` and read the chunks, without running
-anything else. No stage reaches back more than one step; a failed stage never
-corrupts an earlier one. `data/` is git-ignored (only the empty structure is tracked).
+anything else. Stages read the previous step (the one exception: Stage 5 also
+reads Stage 1's `verification.json` to carry each page's review flag onto its
+chunks). A failed stage never corrupts an earlier one. `data/` is git-ignored
+(only the empty structure is tracked).
 
 ## Sources (Phase 1 set)
 
@@ -111,8 +115,8 @@ live in config/YAML, never hardcoded in `.py`. Vision model is `gemini-2.5-flash
 | Phase | Work | Status |
 |---|---|---|
 | **0** | Scaffold + config + `schema.sql` + CLI (`all`/`--version`/`--supersede`) | ✅ realigned to per-program model |
-| **1** | Stage 1 parse + `extraction.md` | ✅ all 6 docs parsed; tables render; internal p32–35 + PROUD rescue verified |
-| 2 | Stage 2 verify report + sign-off gate | ✅ side-by-side HTML report (numbers highlighted); Stage 3 refuses without sign-off |
+| **1** | Stage 1 parse + `extraction.md` (+ Pass B `fact_extraction.md`, self-consistency) | ✅ two-pass read; tables 300 DPI; internal p32–35 + PROUD rescue verified |
+| ~~2~~ | ~~Stage 2 verify report + sign-off gate~~ → **removed** | ✅ human gate deleted (Change Brief §2); replaced by automated `verify.py` inside Stage 1 (§4). No stage 2. |
 | 3 | Stage 3 curate + Stage 4 chunk (program-code breadcrumb) | ✅ deterministic curate → per-program canonical docs; breadcrumbed chunks, tables never split |
 | 4 | Stage 5 enrich + Stage 6 embed + Stage 7 index | ✅ 20 chunks in Cloud SQL `bmmb_dev`; access-tier filter + freshness verified live |
 | 5 | `PgVectorRetriever`: program-scope (§6a) → filters → hybrid → RRF → rerank → floor | ⬜ |
@@ -127,7 +131,8 @@ live in config/YAML, never hardcoded in `.py`. Vision model is `gemini-2.5-flash
 - **Chunks are data, not instructions** — retrieved text is untrusted; injection in a document must be inert.
 - **Honest abstention** — below the relevance floor, return no context; decline + offer Sales handoff.
 - **Never mix embedding models/dimensions** in one index — that is a versioned re-embed.
-- **GCP only, in-region**; **retrieval informs, never decides** (eligibility stays deterministic); Stage 3 refuses to run without a Stage-2 sign-off.
+- **GCP only, in-region**; **retrieval informs, never decides** (eligibility stays deterministic).
+- **Automated verification, not a human gate** (Change Brief §2/§4) — Stage 1 runs two independent extractions + sanity/product cross-checks; a flagged page is never dropped and never blocks the clean pages, but its chunks index with `needs_review=true` and are excluded from customer retrieval in SQL, exactly like `access_tier`. Do not remove that filter.
 
 ## Known gaps & verified findings (surfaced, not silently filled — §7c, §12)
 

@@ -7,14 +7,16 @@ pages across corpora (program vs sales_dir), drops skipped filler, and carries t
 access_tier / content_type so downstream stages can enforce §11 and disclaimers.
 
 Curation is DETERMINISTIC — it maps slide headings to canonical sections and moves
-the body text VERBATIM. No LLM rewrites the content, so every figure the human
-signed off in Stage 2 survives byte-for-byte.
+the body text VERBATIM. No LLM rewrites the content, so every figure that Stage 1's
+automated verification checked survives byte-for-byte.
 
 Output: data/03_curated/<corpus>/<program_code|doc_id>.md — YAML front-matter +
 `## Section` blocks, each with a `<!-- section=… pages=… content_type=… -->`
 provenance comment that Stage 4/5 read.
 
-Hard gate (§5, §11): refuses to run for any document without a valid Stage-2 sign-off.
+No human gate (Change Brief §2): Stage 1's automated verification replaced the
+Stage-2 sign-off. Pages that verification flagged are still curated here; they are
+quarantined later by `needs_review` at index time, not dropped from the corpus.
 """
 from __future__ import annotations
 
@@ -25,7 +27,6 @@ from pathlib import Path
 import yaml
 
 from config.settings import get_settings
-from pipeline.stage2_verify import signoff_ok
 
 _ROOT = Path(__file__).resolve().parent.parent
 _DOCS_PATH = _ROOT / "config" / "documents.yaml"
@@ -137,20 +138,6 @@ def run(args) -> int:
         if not documents:
             print(f"[stage3_curate] no doc_id={args.doc!r} in documents.yaml")
             return 1
-
-    # ── §11 hard gate: every targeted document needs a valid Stage-2 sign-off ──
-    blocked = []
-    for doc in documents:
-        version = getattr(args, "version", None) or doc.get("version")
-        ok, reason = signoff_ok(doc["doc_id"], version)
-        if not ok:
-            blocked.append((doc["doc_id"], reason))
-    if blocked:
-        for doc_id, reason in blocked:
-            print(f"[stage3_curate] REFUSED {doc_id}: {reason}")
-        print('[stage3_curate] Stage 3 requires a Stage-2 sign-off (§11 hard gate). '
-              'Run: cli.py stage2 --doc <id> --approve --by "<name>"')
-        return 1
 
     parsed_root = _ROOT / settings.data_dir / "01_parsed"
     for doc in documents:

@@ -120,6 +120,9 @@ class PgVectorRetriever(Retriever):
         params: dict = {}
         if channel == "customer":                       # §11: SQL access-tier boundary
             clauses.append("access_tier = 'customer'")
+            # A page that automated verification flagged is quarantined from the
+            # customer channel in SQL, exactly like access_tier (rag-ingestion §4).
+            clauses.append("needs_review = false")
         if program_code:                                # §6a branch A/B
             clauses.append("program_code = %(pc)s")
             params["pc"] = program_code
