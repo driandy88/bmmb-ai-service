@@ -2,11 +2,15 @@
 """
 rag-ingestion — offline knowledge-layer pipeline for the BMMB Customer Service Agent.
 
-One entrypoint, seven stages. Each stage reads the previous stage's output
-directory and writes its own, so every stage is independently runnable,
+One entrypoint. Stages are numbered stage1, stage3..stage7 — there is no stage2:
+the human sign-off gate was removed (Change Brief §2) and Stage 1 now runs
+automated verification (pipeline/verify.py) at its end. The numbers are kept
+stable so paths and commands don't move. Each stage reads the previous stage's
+output directory and writes its own, so every stage is independently runnable,
 idempotent, and inspectable (open ``data/03_curated/`` and read the Markdown
-without running anything else). No stage reaches back more than one step; a
-failed stage never corrupts an earlier one.
+without running anything else). A failed stage never corrupts an earlier one.
+(Stage 5 additionally reads Stage 1's verification.json to carry each page's
+review flag onto the chunks it produced.)
 
     python cli.py stage1 --doc mihp_i
     python cli.py stage4 --corpus program
@@ -27,9 +31,11 @@ import importlib
 
 # stage key -> (module, one-line help, arg keys). Handlers are lazy-imported
 # inside main() so `--help` runs with zero third-party dependencies installed.
+# NOTE: there is no stage2 — the human sign-off gate was removed (Change Brief §2);
+# Stage 1 now runs automated verification (pipeline/verify.py) at its end. Stage
+# numbers are kept stable (stage3, stage5, …) so paths, docs, and commands don't move.
 STAGES: list[tuple[str, str, str, tuple[str, ...]]] = [
-    ("stage1", "pipeline.stage1_parse",  "Parse PDF pages -> Markdown (Gemini vision)",             ("doc", "version", "force")),
-    ("stage2", "pipeline.stage2_verify", "Build the human-review report + record sign-off (gate)",  ("doc", "version", "approve", "by")),
+    ("stage1", "pipeline.stage1_parse",  "Parse PDF pages -> Markdown (two-pass) + auto-verify",    ("doc", "version", "force")),
     ("stage3", "pipeline.stage3_curate", "Reorganise pages -> per-program canonical docs",          ("doc", "version")),
     ("stage4", "pipeline.stage4_chunk",  "Chunk canonical docs (breadcrumbed, tables intact)",      ("doc", "version", "corpus")),
     ("stage5", "pipeline.stage5_enrich", "Attach the metadata schema to each chunk",                ("doc", "version", "corpus")),
@@ -46,8 +52,7 @@ _ARGS: dict[str, tuple[tuple[str, ...], dict]] = {
     "force":     (("--force",),     dict(action="store_true", help="re-run work already done instead of skipping")),
     "dry_run":   (("--dry-run",),   dict(action="store_true", dest="dry_run", help="report changes without writing")),
     "supersede": (("--supersede",), dict(action="store_true", help="expire the prior version instead of deleting it (§7b)")),
-    "approve":   (("--approve",),   dict(action="store_true", help="record sign-off for the document(s) instead of building the report")),
-    "by":        (("--by",),        dict(help='approver name/role, required with --approve')),
+    "report":    (("--report",),    dict(action="store_true", help="print the flagged-page detail after re-verifying")),
 }
 
 
@@ -69,6 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
     all_sp = sub.add_parser("all", help="run stage1..stage7 in order for one document (annual refresh)")
     _add_args(all_sp, ("doc", "version", "force"))
     all_sp.set_defaults(_module="__all__")
+
+    # `verify` re-runs the automated checks on already-parsed docs (no re-parse,
+    # no model calls) and rebuilds review.html — Stage 1 also runs it automatically.
+    verify_sp = sub.add_parser("verify", help="re-run automated verification + rebuild review.html")
+    _add_args(verify_sp, ("doc", "report"))
+    verify_sp.set_defaults(_module="pipeline.verify")
 
     for key, module, help_, argkeys in STAGES:
         sp = sub.add_parser(key, help=help_)

@@ -22,10 +22,15 @@ CREATE TABLE IF NOT EXISTS rag_chunks (
   content         text NOT NULL,                       -- breadcrumb + section body (embedded text)
   content_tsv     tsvector,                            -- keyword half of hybrid search
   embedding       vector(1536) NOT NULL,               -- gemini-embedding-001 @ 1536 (LOCKED)
-  approved_by     text,
-  approved_at     timestamptz,
+  needs_review    boolean NOT NULL DEFAULT false,       -- automated verification flagged its source page (§4)
+  approved_by     text,                                -- nullable: reserved for formal product-team approval (§2)
+  approved_at     timestamptz,                          -- nullable: reserved (see approved_by)
   indexed_at      timestamptz NOT NULL DEFAULT now()
 );
+
+-- Existing deployments: add the column in place (no-op once present). The
+-- customer-channel retrieval filter uses it exactly like access_tier (§4).
+ALTER TABLE rag_chunks ADD COLUMN IF NOT EXISTS needs_review boolean NOT NULL DEFAULT false;
 
 -- Vector index: HNSW/cosine — better recall/latency than IVFFlat and needs no
 -- training data present at build time (§7). Tune ef_search at query time.

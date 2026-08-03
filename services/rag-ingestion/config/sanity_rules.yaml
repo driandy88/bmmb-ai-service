@@ -1,0 +1,68 @@
+# Numeric plausibility bounds + product cross-check map for the automated
+# Stage-1 verification (pipeline/verify.py, Change Brief §4). Editable without a
+# code change — this file is the source of truth for the bounds, nothing is
+# hardcoded in Python (§7 Do-NOT).
+#
+# Field names below are the CONTROLLED VOCABULARY that Pass B fact extraction
+# must emit (prompts/fact_extraction.md). A fact is matched to a rule by exact
+# field name first, then by `unit` as a fallback, so an unforeseen field with a
+# known unit is still bounds-checked rather than silently skipped.
+
+# ── Check 2 · numeric sanity bounds ──────────────────────────────────────────
+# A value OUTSIDE [min, max] flags the page. `null` bound = unbounded on that side.
+bounds:
+  # Generic financing amounts / minimums: RM 1,000 – RM 50,000,000 (§4 Check 2).
+  - kind: financing_amount
+    unit: MYR
+    min: 1000
+    max: 50000000
+    fields: [financing_size_min, financing_amount, quantum_min]
+  # A financing MAXIMUM has a higher floor: an SME product whose maximum reads as
+  # RM 5,000 is the "RM 5 million -> RM 5,000" misread §4 calls out. A legitimate
+  # minimum can be small, but a maximum this low is a transcription error, so the
+  # max field is bounded [RM 50,000, RM 50,000,000]. (Editable here, not in code.)
+  - kind: financing_max
+    unit: MYR
+    min: 50000
+    max: 50000000
+    fields: [financing_size_max, quantum_max]
+  - kind: profit_rate
+    unit: "%"
+    min: 0
+    max: 20
+    fields: [rate, profit_rate, spread, profit_spread, flat_rate]
+  - kind: tenure
+    unit: years
+    min: 1
+    max: 30
+    fields: [tenure_max_years, tenure_min_years, tenure_years]
+  - kind: margin_of_financing
+    unit: "%"
+    min: 1
+    max: 100
+    fields: [margin_max_pct, margin_pct, margin_of_financing]
+  - kind: guarantee_coverage
+    unit: "%"
+    min: 1
+    max: 100
+    fields: [guarantee_coverage_pct, guarantee_pct, coverage_pct]
+  - kind: guarantee_fee
+    unit: "%"
+    min: 0
+    max: 10
+    fields: [guarantee_fee_pct, guarantee_fee]
+
+# ── Check 3 · cross-check against known product truth ────────────────────────
+# Compares the extracted `financing_size_max` against products.yaml (the workbook
+# quantum table the chat service already trusts). Because of the §7c-5 naming
+# drift (the decks say MIHP-I / GGSM3; the product table says MIHP / GGSM), the
+# map is EXPLICIT — never inferred by stripping suffixes, which would risk
+# comparing against the wrong product. A program_code absent here has no
+# independent truth to check against: Check 3 is skipped and the report says so
+# (e.g. PROUD, a dealer programme not in the SME quantum table).
+program_crosscheck:
+  MIHP-I: MIHP
+  MHP-I: MHP
+  GGSM3: GGSM
+  SJUM: SJUM
+  # PROUD:  (dealer programme — not in the SME quantum table; no cross-check)
