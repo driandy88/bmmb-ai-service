@@ -118,7 +118,7 @@ live in config/YAML, never hardcoded in `.py`. Vision model is `gemini-2.5-flash
 | 4 | Stage 5 enrich + Stage 6 embed + Stage 7 index | ⬜ |
 | 5 | `PgVectorRetriever`: program-scope (§6a) → filters → hybrid → RRF → rerank → floor | ⬜ |
 | 6 | Swap into chat via `RAG_BACKEND=pgvector`; `query_rewrite.md` | ⬜ |
-| 7 | `golden_set.csv`, `run_ragas.py`, `run_deterministic.py` (+ §6a checks) | ⬜ |
+| 7 | `golden_set.csv`, `run_ragas.py`, `run_deterministic.py` (+ §6a checks) | ⏸ **RAGAS deferred** — revisit later (per BMMB) |
 
 ## Non-negotiables (violating these is a defect — §2, §6a, §11)
 
