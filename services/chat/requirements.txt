@@ -19,3 +19,8 @@ google-genai==0.3.*
 # (SESSION_STORE_BACKEND=postgres, AUDIT_BACKEND=cloudsql).
 cloud-sql-python-connector[pg8000]==1.*
 SQLAlchemy==2.*
+
+# RAG store (RAG_BACKEND=pgvector) — PgVectorRetriever queries Cloud SQL pgvector
+# over host:port (proxy locally, private IP in prod). Vectors passed as text and
+# cast ::vector, so the pgvector-python package is not required.
+psycopg[binary]==3.*
