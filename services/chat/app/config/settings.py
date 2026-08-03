@@ -71,12 +71,29 @@ class Settings:
     # ── API ──────────────────────────────────────────────────────────────────
     allowed_origins: str = os.getenv("ALLOWED_ORIGINS", "*")
 
-    # ── Cloud SQL (checkpointer / audit durability) — optional ───────────────
+    # ── Cloud SQL (checkpointer / audit durability / RAG store) — optional ───
     instance_connection_name: str | None = os.getenv("INSTANCE_CONNECTION_NAME") or None
     db_user: str | None = os.getenv("DB_USER") or None
     db_pass: str | None = os.getenv("DB_PASS") or None
     db_name: str | None = os.getenv("DB_NAME") or None
     db_use_private_ip: bool = field(default_factory=lambda: _flag("DB_USE_PRIVATE_IP", False))
+    # Local dev reaches Cloud SQL through the cloud-sql-proxy (127.0.0.1:5433);
+    # prod sets DB_HOST to the private IP. Used by PgVectorRetriever.
+    db_host: str | None = os.getenv("DB_HOST") or None
+    db_port: int = int(os.getenv("DB_PORT", "5432"))
+
+    # ── RAG retrieval (PgVectorRetriever — brief §6 / §6a) ───────────────────
+    # Query embedding MUST match the ingested vectors (gemini-embedding-001 @ 1536).
+    embedding_model_id: str = os.getenv("EMBEDDING_MODEL_ID", "gemini-embedding-001")
+    embedding_dimensions: int = int(os.getenv("EMBEDDING_DIMENSIONS", "1536"))
+    # Hybrid + fusion + abstention knobs (config, not hardcoded — §8).
+    rag_hybrid_candidates: int = int(os.getenv("RAG_HYBRID_CANDIDATES", "20"))  # per leg, pre-fusion
+    rag_rerank_top_n: int = int(os.getenv("RAG_RERANK_TOP_N", "5"))
+    rag_rrf_k: int = int(os.getenv("RAG_RRF_K", "60"))
+    # Below this best dense cosine, return EMPTY so the agent abstains (§2.5).
+    # Tuned to the current corpus: relevant queries score ~0.66–0.73, out-of-corpus
+    # ~0.50, so 0.58 separates cleanly. Re-tune against the eval set as it grows.
+    rag_relevance_floor: float = float(os.getenv("RAG_RELEVANCE_FLOOR", "0.58"))
 
     def origins_list(self) -> list[str]:
         if self.allowed_origins.strip() == "*":
