@@ -53,6 +53,14 @@ class LLMClient(ABC):
         Returns `fallback` (the agent's deterministic text) if generation is
         unavailable or fails."""
 
+    @abstractmethod
+    def rewrite_query(self, message: str, programs: list[tuple[str, str]]) -> dict:
+        """-> {rewritten_query: str, program_code: str|None, is_program_dependent: bool}
+        Normalise customer vocabulary to bank vocabulary (loan->financing,
+        interest->profit rate) and extract an explicitly-named programme (§6a
+        branch A). `programs` = [(code, title)] from the live index. Sees only the
+        current message — no history, so it cannot resolve pronouns (branch B)."""
+
 
 # ── Deterministic stub ───────────────────────────────────────────────────────
 
@@ -213,6 +221,23 @@ class StubLLMClient(LLMClient):
         # Offline: the agent's deterministic text IS the reply.
         return fallback
 
+    def rewrite_query(self, message: str, programs: list[tuple[str, str]]) -> dict:
+        text = message or ""
+        low = text.lower()
+        rewritten = text
+        for pat, repl in ((r"\binterest rate\b", "profit rate"), (r"\binterest\b", "profit rate"),
+                          (r"\bloans?\b", "financing"), (r"\bborrow\b", "finance")):
+            rewritten = re.sub(pat, repl, rewritten, flags=re.I)
+        program_code = None
+        for code, title in programs:
+            if code.lower() in low or (title and title.lower() in low):
+                program_code = code
+                break
+        dep = bool(re.search(r"\b(rate|profit rate|amount|size|how much|tenure|margin|"
+                             r"guarantee|eligib|qualify)\b", low))
+        return {"rewritten_query": rewritten.strip() or text,
+                "program_code": program_code, "is_program_dependent": dep}
+
 
 # ── Vertex AI / Gemini ───────────────────────────────────────────────────────
 
@@ -343,6 +368,32 @@ class VertexGeminiClient(LLMClient):
         except Exception as exc:  # noqa: BLE001
             log.warning("Vertex compose(%s) failed (%s); using fallback text.", prompt_name, exc)
             return fallback
+
+    def rewrite_query(self, message: str, programs: list[tuple[str, str]]) -> dict:
+        try:
+            codes = [c for c, _ in programs]
+            listing = "\n".join(f"  {c} — {t}" for c, t in programs) or "  (none configured)"
+            filled = render(load_prompt("query_rewrite"), programs=listing, message=message)
+            pc_schema = ({"type": "STRING", "enum": codes, "nullable": True} if codes
+                         else {"type": "STRING", "nullable": True})
+            schema = {
+                "type": "OBJECT",
+                "properties": {
+                    "rewritten_query": {"type": "STRING"},
+                    "program_code": pc_schema,
+                    "is_program_dependent": {"type": "BOOLEAN"},
+                },
+                "required": ["rewritten_query"],
+            }
+            out = self._generate_json("query_rewrite", filled, schema)
+            return {
+                "rewritten_query": (out.get("rewritten_query") or message).strip(),
+                "program_code": out.get("program_code") or None,
+                "is_program_dependent": bool(out.get("is_program_dependent", False)),
+            }
+        except Exception as exc:  # noqa: BLE001 — degrade to stub, never break the turn
+            log.warning("Vertex rewrite_query failed (%s); using stub.", exc)
+            return self._fallback.rewrite_query(message, programs)
 
 
 # ── Factory ──────────────────────────────────────────────────────────────────
