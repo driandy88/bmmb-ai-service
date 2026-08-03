@@ -39,6 +39,34 @@ intent_corpora:
   INS-03: [guidelines_shariah]
   AMB-05: [program, guidelines_shariah]
 
-# Sections a curated program document is reorganised into (Stage 3), and the
-# `section` metadata values a chunk may carry (Stage 5).
-sections: [overview, eligibility, financing_size, purpose, tenure, fees, documents]
+# Canonical sections a curated document is reorganised into (Stage 3), in output
+# order. Extends the brief's 7 with the §6a program-dependent attributes as their
+# OWN sections (financing_rate, margin, guarantee) so a chunk's breadcrumb names
+# the exact attribute — the safety net against MHP-i/MIHP-i confusion. `criteria`
+# is the internal-tier filtering doc; `other` catches anything unmapped (logged).
+sections:
+  [overview, eligibility, financing_size, financing_rate, margin, tenure,
+   guarantee, purpose, facility, fees, documents, contact, criteria, other]
+
+# Deterministic heading -> canonical-section map (Stage 3). A parsed slide heading
+# is lowercased and matched by substring; FIRST section whose keywords hit wins, so
+# order = priority (guarantee before fees so "guarantee fee" -> guarantee). Editable
+# by BMMB; unmatched headings fall to `other` and are logged, never dropped.
+section_keywords:
+  overview:        ["hire purchase", "government guarantee scheme", "skim jaminan",
+                    "program untuk dealer", "commercial financing solutions", "objective", "focus sector"]
+  financing_size:  ["financing size", "financing amount", "financing limit"]
+  financing_rate:  ["financing rate", "profit rate", "indicative installment", "installment amount"]
+  margin:          ["margin of financing", "margin financing"]
+  tenure:          ["tenure", "term of utilisation", "term / revolving"]
+  guarantee:       ["guarantee cover", "guarantee coverage", "guarantee fee", "guarantee per customer"]
+  eligibility:     ["eligibility", "who is eligible", "sme criteria", "eligible dealers",
+                    "classification of motor vehicle", "type of motor vehicle"]
+  purpose:         ["purpose of financing", "purpose"]
+  documents:       ["what do we need", "what we need", "required documents"]
+  fees:            ["stamp duty", "fee"]
+  facility:        ["facilit", "application type", "trade facility", "mcash", "floor stocking",
+                    "security", "how to enjoy", "campaign"]
+  contact:         ["contact us", "sales management team"]
+  criteria:        ["filtering", "key areas", "key indicators", "no of years", "no of staff",
+                    "pd rating", "permitted business", "gearing", "good conduct", "credit record"]
