@@ -15,7 +15,17 @@ langchain-core==0.3.*
 # Vertex AI (Gemini) — used only by LLM_BACKEND=vertex.
 google-genai==0.3.*
 
-# Cloud SQL — used only by the Postgres checkpointer / audit durability layer
-# (SESSION_STORE_BACKEND=postgres, AUDIT_BACKEND=cloudsql).
+# Cloud SQL — the Postgres checkpointer / audit durability layer
+# (SESSION_STORE_BACKEND=postgres, AUDIT_BACKEND=cloudsql) and the RAG vector
+# store in the `bmmb` database (RAG_BACKEND=pgvector).
 cloud-sql-python-connector[pg8000]==1.*
 SQLAlchemy==2.*
+
+# RAG document parsing (agents/rag/ingestion/parser.py). Imported lazily, per
+# format — a Markdown-only corpus touches neither.
+pypdf==6.*
+python-docx==1.*
+
+# RAG embeddings, RAG_EMBEDDING_PROVIDER=hf only (Inference API client — no
+# torch, no local weights). Imported lazily; the Vertex provider never needs it.
+huggingface-hub==1.*
