@@ -66,6 +66,23 @@ class PgVectorRetriever(Retriever):
     def __init__(self, settings: Settings, namespaces: dict[Corpus, str]):
         self._s = settings
         self._namespaces = namespaces  # kept for interface parity; the `corpus` column is the boundary
+        self._programs_cache: list[tuple[str, str]] | None = None
+
+    def programs(self) -> list[tuple[str, str]]:
+        """Distinct (program_code, doc_title) present in the index — the valid scope
+        set for §6a program extraction (learned from the DB, so it matches the index's
+        codes, not the chat product config). Cached per instance."""
+        if self._programs_cache is not None:
+            return self._programs_cache
+        try:
+            with self._connect() as conn, conn.cursor() as cur:
+                cur.execute("SELECT program_code, MIN(doc_title) FROM rag_chunks "
+                            "WHERE program_code IS NOT NULL GROUP BY program_code ORDER BY program_code")
+                self._programs_cache = [(r[0], r[1]) for r in cur.fetchall()]
+        except Exception as e:  # non-fatal — fall back to no scope enum
+            log.warning("programs() query failed (%s)", type(e).__name__)
+            self._programs_cache = []
+        return self._programs_cache
 
     # ── connection (per-call; thread-safe for a low-QPS bot) ─────────────────
     # psycopg over host:port — local dev via the cloud-sql-proxy (127.0.0.1:5433),
