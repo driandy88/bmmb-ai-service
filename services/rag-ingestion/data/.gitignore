@@ -1,0 +1,6 @@
+# Pipeline artifacts stay local and inspectable; only the empty stage structure
+# is tracked. Real parsed pages, chunks, embeddings, etc. are never committed.
+*
+!*/
+!.gitkeep
+!.gitignore

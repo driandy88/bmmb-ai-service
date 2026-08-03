@@ -1,0 +1,38 @@
+# Corpus definitions + defaults. One physical store (rag_chunks); the `corpus`
+# column is the hard retrieval boundary (brief §3, §11). Keep these three names
+# in sync with the chat service's Corpus enum
+# (services/chat/app/agents/rag/retriever.py).
+
+corpora:
+  program:
+    description: Product decks, product sheets, T&C, FAQ — the financing programs.
+    default_access_tier: customer
+    programs: [MIHP-I, MHP-I, AL-IJARAH, GGSM, CGC, SRF, BIZJAMIN, TERAJU, SJUM]
+
+  guidelines_shariah:
+    description: BMMB SME policy, Shariah rulings, prohibited-activity lists.
+    default_access_tier: customer
+    status: empty      # KNOWN GAP (§12): no source content yet (workbook Sheet 4 empty).
+                       # Build the plumbing, leave it empty, report it. Do NOT invent
+                       # Shariah content — it requires governance sign-off before indexing.
+
+  sales_dir:
+    description: Branch / sales directory — state -> region -> named representative.
+    default_access_tier: customer
+    note: >-
+      Deterministic lookup, not semantic search (§12). Recommend serving from a
+      plain SQL table; kept in the corpus enum only for interface consistency.
+      Flag before vector-searching it.
+
+# Which corpora a routed intent retrieves from (consumed at Phase 5/6 by the
+# chat-side retriever). AMB-05 is the reason the retriever must accept a SET:
+# a Shariah-boundary business-type question needs program AND policy context.
+intent_corpora:
+  INS-01: [sales_dir]
+  INS-02: [program]
+  INS-03: [guidelines_shariah]
+  AMB-05: [program, guidelines_shariah]
+
+# Sections a curated program document is reorganised into (Stage 3), and the
+# `section` metadata values a chunk may carry (Stage 5).
+sections: [overview, eligibility, financing_size, purpose, tenure, fees, documents]
