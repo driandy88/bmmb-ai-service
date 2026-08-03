@@ -1,0 +1,31 @@
+# rag-ingestion dependencies. Grouped by the phase that first needs them so the
+# scaffold (Phase 0) stays installable-light; `cli.py --help` needs none of these.
+# Pin exact versions once each phase is built and verified against Vertex.
+
+# Config (all phases)
+pyyaml
+python-dotenv
+
+# Stage 1 · parse — rasterise PDF pages + Gemini vision
+pymupdf                 # PDF -> page images, no system poppler dependency
+pillow
+google-genai            # Vertex Gemini (vision transcription, query rewrite)
+
+# Stage 4 · chunk — token counting for the 300–800 target
+tiktoken
+
+# Stage 6 · embed — gemini-embedding-001 @ 1536 via Vertex
+google-cloud-aiplatform
+
+# Stage 7 · index — Cloud SQL pgvector
+psycopg[binary]
+pgvector
+cloud-sql-python-connector   # prod connection via instance name
+
+# Eval (Phase 7) — RAGAS, Vertex-judged (never the OpenAI default)
+ragas
+datasets
+langchain-google-vertexai
+
+# Tests
+pytest
