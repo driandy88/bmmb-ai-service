@@ -44,6 +44,19 @@ class RetrievalChunk:
     score: float
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    # Dict-style access so a caller that treats a chunk like a citation dict
+    # ({"snippet","corpus","ref"}) works unchanged — "fix the interface, not the
+    # callers" (§6). `snippet` aliases `text`. (program_advisor iterates chunks
+    # this way; harmless with the stub's empty list, real once chunks flow.)
+    def __getitem__(self, key: str) -> Any:
+        return self.text if key == "snippet" else getattr(self, key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        try:
+            return self[key]
+        except AttributeError:
+            return default
+
 
 # A single corpus or a set of them (AMB-05 spans program + guidelines_shariah).
 CorpusScope = Union[Corpus, Iterable[Corpus]]
