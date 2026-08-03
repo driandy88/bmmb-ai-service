@@ -49,14 +49,18 @@ class Settings:
     judge_model_id: str = os.getenv("JUDGE_MODEL_ID", "gemini-2.5-pro")
 
     # ── Cloud SQL (pgvector) — the store ─────────────────────────────────────
-    db_host: str | None = os.getenv("DB_HOST") or None
-    db_port: int = int(os.getenv("DB_PORT", "5432"))
-    db_name: str = os.getenv("DB_NAME", "bmmb_rag")
-    db_user: str | None = os.getenv("DB_USER") or None
-    db_password: str | None = os.getenv("DB_PASSWORD") or None
-    # In prod, connect via the Cloud SQL Python Connector using this instance
-    # connection name instead of a raw host (project:region:instance).
-    cloud_sql_instance: str | None = os.getenv("CLOUD_SQL_INSTANCE") or None
+    # Env-var names match the sibling services (extraction/chat): DB_PASS,
+    # INSTANCE_CONNECTION_NAME. Local dev connects through the cloud-sql-proxy on
+    # 127.0.0.1:5433; prod uses the connector with the instance connection name.
+    db_host: str = os.getenv("DB_HOST", "127.0.0.1")
+    db_port: int = int(os.getenv("DB_PORT", "5433"))
+    db_name: str = os.getenv("DB_NAME", "bmmb_dev")
+    db_user: str = os.getenv("DB_USER", "postgres")
+    db_password: str | None = os.getenv("DB_PASS") or None
+    instance_connection_name: str | None = os.getenv("INSTANCE_CONNECTION_NAME") or None
+
+    # ── Stage 6 · embed ──────────────────────────────────────────────────────
+    embed_batch_size: int = int(os.getenv("EMBED_BATCH_SIZE", "50"))
 
     # ── Cloud Storage — source documents ─────────────────────────────────────
     gcs_sources_bucket: str = os.getenv("GCS_SOURCES_BUCKET", "bmmb-rag-sources")
