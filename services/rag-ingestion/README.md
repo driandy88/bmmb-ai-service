@@ -81,7 +81,7 @@ db/                    schema.sql (rag_chunks DDL + HNSW/GIN indexes), migration
 eval/                  golden_set.csv, run_ragas.py, run_deterministic.py, runs/
 notebooks/             rag_pipeline_test.ipynb (per-stage + retrieval + end-to-end)
 tests/                 test_chunking / test_metadata / test_retrieval_filters
-data/                  git-ignored intermediate artifacts (00_raw … 05_enriched)
+data/                  git-ignored intermediate artifacts (00_raw … 05_enriched, 06_embedded)
 ```
 
 ## Usage
@@ -96,11 +96,10 @@ python cli.py stage7 --dry-run
 python cli.py all --doc mihp_i --version 2027.1   # annual refresh: one program, parse→index (§7b)
 ```
 
-Apply the schema (needs the `vector` extension on the Cloud SQL instance):
-
-```bash
-psql "$DATABASE_URL" -f db/schema.sql
-```
+The index lives in the existing Cloud SQL instance `bmmb`, database **`bmmb_dev`**
+(pgvector 0.8.1). Stage 7 **self-applies `db/schema.sql`** (all statements are
+`IF NOT EXISTS`) on first run — no manual `psql` step. Local dev connects through
+the cloud-sql-proxy on `127.0.0.1:5433`; DB creds are in `.env` (git-ignored).
 
 Configuration is entirely environment-driven — see `config/settings.py`; secrets from
 Secret Manager → env. `RAG_BACKEND`, model ids, dimensions, thresholds, corpus names
@@ -115,7 +114,7 @@ live in config/YAML, never hardcoded in `.py`. Vision model is `gemini-2.5-flash
 | **1** | Stage 1 parse + `extraction.md` | ✅ all 6 docs parsed; tables render; internal p32–35 + PROUD rescue verified |
 | 2 | Stage 2 verify report + sign-off gate | ✅ side-by-side HTML report (numbers highlighted); Stage 3 refuses without sign-off |
 | 3 | Stage 3 curate + Stage 4 chunk (program-code breadcrumb) | ✅ deterministic curate → per-program canonical docs; breadcrumbed chunks, tables never split |
-| 4 | Stage 5 enrich + Stage 6 embed + Stage 7 index | ⬜ |
+| 4 | Stage 5 enrich + Stage 6 embed + Stage 7 index | ✅ 20 chunks in Cloud SQL `bmmb_dev`; access-tier filter + freshness verified live |
 | 5 | `PgVectorRetriever`: program-scope (§6a) → filters → hybrid → RRF → rerank → floor | ⬜ |
 | 6 | Swap into chat via `RAG_BACKEND=pgvector`; `query_rewrite.md` | ⬜ |
 | 7 | `golden_set.csv`, `run_ragas.py`, `run_deterministic.py` (+ §6a checks) | ⏸ **RAGAS deferred** — revisit later (per BMMB) |
