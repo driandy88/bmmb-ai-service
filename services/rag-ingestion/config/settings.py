@@ -8,14 +8,25 @@ operational — no model id, threshold, dimension, or corpus name — is hardcod
 elsewhere; this file and the YAML in ``config/`` are the single source of truth
 (brief §11: "Do not hardcode thresholds, model ids, corpus names, or prompts").
 
-Kept import-light (stdlib only) so ``cli.py --help`` and per-stage arg parsing
-work before any GCP dependency is installed.
+Kept import-light so ``cli.py --help`` and per-stage arg parsing work before the
+GCP dependencies are installed (``cli.py --help`` never imports this module).
 """
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
+
+# Load the service .env BEFORE the dataclass defaults below are evaluated — they
+# read os.getenv at class-definition (import) time, so the environment must be
+# populated first. Defensive: works even if python-dotenv isn't installed yet.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+except ModuleNotFoundError:
+    pass
 
 
 @dataclass(frozen=True)

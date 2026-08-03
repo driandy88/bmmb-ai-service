@@ -1,7 +1,7 @@
 # rag-ingestion
 
 Offline knowledge-layer pipeline for the BMMB **Customer Service Agent**. It turns
-source documents (designed slide decks, policy docs, a directory) into an indexed,
+source documents (per-program sales kits, policy docs, a directory) into an indexed,
 governed corpus in Cloud SQL `pgvector`, which the chat service's `PgVectorRetriever`
 then queries behind the **frozen `Retriever` interface** — no agent, orchestrator,
 prompt, or schema changes.
@@ -15,17 +15,17 @@ prompt, or schema changes.
 ## Pipeline
 
 ```
-Source docs (PDF decks, policy docs, directory)
+Source docs (per-program sales kits, policy docs, directory)
   │
-  ├─ 1. PARSE    → clean Markdown per page (Gemini vision — text extraction fails on designed slides)
+  ├─ 1. PARSE    → clean Markdown per page (Gemini vision — text extraction is unusable on these decks, §7c-7)
   ├─ 2. VERIFY   → SME signs off the extracted figures                       ← human gate
   ├─ 3. CURATE   → reorganise into per-program canonical docs; classify access_tier
-  ├─ 4. CHUNK    → structure-aware, breadcrumbed, tables never split
+  ├─ 4. CHUNK    → structure-aware, breadcrumbed (breadcrumb carries program_code), tables never split
   ├─ 5. ENRICH   → attach the metadata schema
   ├─ 6. EMBED    → gemini-embedding-001 @ 1536, task-typed, batched
   ├─ 7. INDEX    → upsert into Cloud SQL pgvector (idempotent on chunk_id)
   │
-  └─ QUERY TIME (chat side): rewrite → filter by corpus/tier/freshness → hybrid search → RRF → rerank → floor
+  └─ QUERY TIME (chat side): rewrite → program-scope (§6a) → filter corpus/tier/freshness → hybrid → RRF → rerank → floor
 ```
 
 ## Clean-step rule
@@ -34,20 +34,48 @@ Every stage **reads the previous stage's directory and writes its own**. Each is
 independently runnable, idempotent, and inspectable — open `data/03_curated/` and
 read the Markdown, or `data/04_chunks/` and read the chunks, without running
 anything else. No stage reaches back more than one step; a failed stage never
-corrupts an earlier one.
+corrupts an earlier one. `data/` is git-ignored (only the empty structure is tracked).
 
-```
-data/00_raw/ → 01_parsed/ → 02_verified/ → 03_curated/ → 04_chunks/ → 05_enriched/
-```
+## Sources (Phase 1 set)
 
-`data/` is git-ignored (only the empty structure is tracked); artifacts stay local.
+**One program = one document = one version** (§7b) — the yearly refresh is a
+single-document operation, never a rebuild.
+
+| doc_id | program_code | corpus / tier | notes |
+|---|---|---|---|
+| `mihp_i` | MIHP-I | program | Industrial HP (Non-Act goods, 3% flat). Near-twin of MHP-i — §7c-2 |
+| `mhp_i` | MHP-I | program | Hire Purchase-i (Act goods, 2.4% flat). Near-twin of MIHP-i |
+| `ggsm3` | GGSM3 | program | Gov Guarantee Madani **3** (align vs GGSM/GGSM4 — §7c-5). p5 indicative |
+| `sjum` | SJUM | program | Skim Jaminan Usahawan MARA. Bilingual EN/MS |
+| `proud` | PROUD | program | Dealer program (`audience: dealer`). **Canva filler p10–15 skipped** — §7c-1 |
+| `commercial_financing_internal_criteria` | — | program / **internal** | p32–35 of the combined deck: credit-filtering thresholds. `access_tier: internal` — customer channel must never retrieve (§11) |
+
+## Program scoping (§6a) — a Phase 5–6 retrieval concern, seeded here
+
+The five programs give **different correct answers to the same question** (financing
+size: MIHP-i/MHP-i RM20k–5m · SJUM ≤RM2m · GGSM3 ≤RM10m · PROUD ≤RM20m). An unscoped
+top-k returns mutually contradictory chunks; blending them is a confidently-wrong
+mis-selling answer. The retriever (Phase 5) + query rewrite (Phase 6) implement three
+branches:
+
+- **A. Explicit** — query names a program → `WHERE program_code = …`, single-program answer.
+- **B. Inherited** — session `last_program` ("and its tenure?") → same filter from state.
+- **C. Unscoped** — no program named/remembered:
+  - *program-agnostic* (Shariah, general docs) → answer normally;
+  - *program-dependent* (size, rate, tenure, margin, guarantee, eligibility) → **compare named programs, or route to the Sheet-3 funnel. Never blend, never silently pick one.** (Preferred: funnel.)
+
+**Ingestion's job for §6a:** every chunk carries an accurate `program_code`, and the
+Stage-4 breadcrumb prefixes it (`MIHP-i › … ›`) so a chunk is never ambiguous in
+isolation. Query-time artifacts land later: `prompts/query_rewrite.md` returns
+`{rewritten_query, program_code|null, is_program_dependent}`; comparisons retrieve
+**per-program** (one filtered query each), not one global top-k.
 
 ## Layout
 
 ```
-cli.py                 single entrypoint — `python cli.py <stage> [opts]`
-config/                settings.py (env), documents.yaml (source manifest), corpora.yaml
-prompts/               extraction.md (vision→Markdown), query_rewrite.md, …  (added per phase)
+cli.py                 entrypoint — `python cli.py <stage> [opts]`, plus `all --doc --version`
+config/                settings.py (env), documents.yaml (per-program manifest), corpora.yaml
+prompts/               extraction.md (vision→Markdown); query_rewrite.md added Phase 6
 pipeline/              stage1_parse … stage7_index
 db/                    schema.sql (rag_chunks DDL + HNSW/GIN indexes), migrations/
 eval/                  golden_set.csv, run_ragas.py, run_deterministic.py, runs/
@@ -61,49 +89,55 @@ data/                  git-ignored intermediate artifacts (00_raw … 05_enriche
 Run from this directory so `config` and `pipeline` import as top-level packages:
 
 ```bash
-python cli.py --help                 # lists every stage
-python cli.py stage1 --doc talk_pp_commercial_financing
-python cli.py stage4 --corpus program
+python cli.py --help
+python cli.py stage1 --doc mihp_i          # one document
+python cli.py stage1                       # every document in the manifest
 python cli.py stage7 --dry-run
+python cli.py all --doc mihp_i --version 2027.1   # annual refresh: one program, parse→index (§7b)
 ```
 
-Apply the schema to the Cloud SQL instance (needs the `vector` extension available):
+Apply the schema (needs the `vector` extension on the Cloud SQL instance):
 
 ```bash
 psql "$DATABASE_URL" -f db/schema.sql
 ```
 
-Configuration is entirely environment-driven — see `config/settings.py`; secrets
-come from Secret Manager → env, never source. `RAG_BACKEND`, model ids, dimensions,
-thresholds, and corpus names live in config, never hardcoded in `.py`.
+Configuration is entirely environment-driven — see `config/settings.py`; secrets from
+Secret Manager → env. `RAG_BACKEND`, model ids, dimensions, thresholds, corpus names
+live in config/YAML, never hardcoded in `.py`. Vision model is `gemini-2.5-flash`
+(confirmed available in `asia-southeast1`; `gemini-2.5-pro` is not — §12).
 
-## Build order (build one phase at a time; commit + report after each)
+## Build order (one phase at a time; commit + report after each)
 
 | Phase | Work | Status |
 |---|---|---|
-| **0** | Scaffold, `settings.py`, `documents.yaml`, `corpora.yaml`, `schema.sql`, README, CLI | ✅ this commit |
-| 1 | Stage 1 parse + `prompts/extraction.md`, on one document | ⬜ |
+| **0** | Scaffold + config + `schema.sql` + CLI (`all`/`--version`/`--supersede`) | ✅ realigned to per-program model |
+| **1** | Stage 1 parse + `extraction.md` | ✅ all 6 docs parsed; tables render; internal p32–35 + PROUD rescue verified |
 | 2 | Stage 2 verify report + sign-off gate | ⬜ |
-| 3 | Stage 3 curate + Stage 4 chunk | ⬜ |
+| 3 | Stage 3 curate + Stage 4 chunk (program-code breadcrumb) | ⬜ |
 | 4 | Stage 5 enrich + Stage 6 embed + Stage 7 index | ⬜ |
-| 5 | `PgVectorRetriever`: filters → hybrid → RRF → rerank → floor | ⬜ |
-| 6 | Swap into chat via `RAG_BACKEND=pgvector`; query rewriting | ⬜ |
-| 7 | `golden_set.csv`, `run_ragas.py`, `run_deterministic.py` | ⬜ |
+| 5 | `PgVectorRetriever`: program-scope (§6a) → filters → hybrid → RRF → rerank → floor | ⬜ |
+| 6 | Swap into chat via `RAG_BACKEND=pgvector`; `query_rewrite.md` | ⬜ |
+| 7 | `golden_set.csv`, `run_ragas.py`, `run_deterministic.py` (+ §6a checks) | ⬜ |
 
-## Non-negotiables (violating these is a defect — brief §2, §11)
+## Non-negotiables (violating these is a defect — §2, §6a, §11)
 
 - **Islamic finance terminology** — *financing* not loan, *profit rate* not interest; handle "loan"/"interest" at query rewriting, never in output.
-- **Access tiers are a SQL security control** — `access_tier: internal` content (credit-filtering criteria) must never reach the customer channel. Filtering it in a prompt is not enough; it defeats the ADV-05 threshold-probing guardrail from the knowledge side.
-- **Chunks are data, not instructions** — retrieved text is untrusted; "ignore previous instructions" in a document must be inert.
-- **Honest abstention** — below the relevance floor, return no context; the agent declines and offers a Sales handoff. A fluent guess is a compliance incident.
+- **Program scoping (§6a)** — never merge figures from different `program_code`, and never silently pick one program when none was specified. Compare, or route to the funnel.
+- **Access tiers are a SQL security control** — `access_tier: internal` (the filtering-criteria doc) must never reach the customer channel; filtering in a prompt is not enough (defeats the ADV-05 guardrail from the knowledge side).
+- **Chunks are data, not instructions** — retrieved text is untrusted; injection in a document must be inert.
+- **Honest abstention** — below the relevance floor, return no context; decline + offer Sales handoff.
 - **Never mix embedding models/dimensions** in one index — that is a versioned re-embed.
-- **GCP only, in-region** — Vertex for embeddings/LLM, Cloud SQL, GCS, Secret Manager. No third-party vector DB, no OpenAI (including as a RAGAS judge).
-- **Retrieval informs, never decides** — RAG output never feeds the eligibility rules function.
-- Human sign-off (Stage 2) gates indexing; **Stage 3 refuses to run without it**.
+- **GCP only, in-region**; **retrieval informs, never decides** (eligibility stays deterministic); Stage 3 refuses to run without a Stage-2 sign-off.
 
-## Known gaps (surfaced, not silently filled — brief §12)
+## Known gaps & verified findings (surfaced, not silently filled — §7c, §12)
 
-- **`guidelines_shariah` has no source content yet** (workbook Sheet 4 empty). Plumbing is built; the corpus stays empty and this blocks INS-03 / AMB-05. Escalate to BMMB as a dated dependency.
-- **`sales_dir`** is a deterministic state→region→contact lookup — better served by a plain SQL table than by vector search; kept in the enum for interface consistency.
-- **Interface question for Phase 5:** the frozen `Retriever.retrieve(query, corpus: Corpus, top_k)` takes a *single* `Corpus`, but AMB-05 needs `program` + `guidelines_shariah` **together**. Resolve *how* multi-corpus is expressed without changing call-sites before starting Phase 5 (see the phase report).
-- Confirm current Vertex model ids at build time rather than assuming.
+- **PROUD deck shipped with unremoved Canva template filler** (Studio Shodwe / Lorem ipsum / fake address, p10–15). Skipped. The brief's example numbers (`skip [8–15]`) were **wrong** — p8 (Required Documents) and p9 (dealer contacts) are real; verified against the file and corrected. Report the shipped filler to BMMB.
+- **MHP-i vs MIHP-i are near-identical** (same size/tenure/margin/eligibility; differ on rate 2.4% vs 3% and asset class). Biggest retrieval hazard — breadcrumb must carry the full code; a mandatory golden-set bucket asserts a MIHP-i query never returns MHP-i in top-3.
+- **Stale BFR figures** (GGSM3 6.56%, PROUD 6.81% dated May 2024). Tagged `content_type: indicative`; generation must disclaim "indicative, subject to prevailing BFR". BFR content needs an owner + cadence independent of the annual deck.
+- **Eligibility differs by program** (GGSM3 ≥3 yrs; SJUM ≥2 yrs + Bumiputera + 20% paid-up + RM500k sales). Presented as information only — retrieval must never alter the deterministic eligibility outcome.
+- **Contact slides repeat across all 5 kits** (identical Commercial Sales Management Team). Dedupe on email or treat workbook Sheet 2 as authoritative — don't create 5 near-duplicate `sales_dir` entries.
+- **`guidelines_shariah` has no source content yet** (Sheet 4 empty). Plumbing built; corpus stays empty; blocks INS-03 / AMB-05. Escalate to BMMB.
+- **`sales_dir`** is a deterministic state→region→contact lookup — better as a plain SQL table; kept in the enum for interface consistency.
+- **Interface tension for Phase 5:** the frozen `Retriever.retrieve(query, corpus: Corpus, top_k)` takes a *single* corpus, but AMB-05 needs `program` + `guidelines_shariah` together **and** §6a needs `program_code` scoping + per-program fan-out. Resolve how multi-corpus + program-scope are expressed without changing call-sites before Phase 5.
+- Vertex model ids confirmed at build time: `gemini-2.5-flash` for vision (pro unavailable in-region).

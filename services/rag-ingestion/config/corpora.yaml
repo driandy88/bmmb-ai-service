@@ -5,9 +5,15 @@
 
 corpora:
   program:
-    description: Product decks, product sheets, T&C, FAQ — the financing programs.
+    description: Per-program Sales Kits — the financing programs (§7).
     default_access_tier: customer
-    programs: [MIHP-I, MHP-I, AL-IJARAH, GGSM, CGC, SRF, BIZJAMIN, TERAJU, SJUM]
+    # The five Sales Kits supplied for Phase 1. NOTE the naming: the deck is
+    # "Madani 3" -> GGSM3 (not GGSM / GGSM4); align products.yaml + intents.yaml
+    # before indexing or product-code retrieval will miss (§7c-5).
+    programs: [MIHP-I, MHP-I, GGSM3, SJUM, PROUD]
+    # Other programs (AL-IJARAH, CGC, SRF, BIZJAMIN, TERAJU, Business Credit Card-i,
+    # GGSM4) exist as brochures/combined-deck slides but are OUT of scope until
+    # supplied as their own per-program documents (§7b rule 1).
 
   guidelines_shariah:
     description: BMMB SME policy, Shariah rulings, prohibited-activity lists.
