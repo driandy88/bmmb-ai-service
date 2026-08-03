@@ -29,7 +29,7 @@ import importlib
 # inside main() so `--help` runs with zero third-party dependencies installed.
 STAGES: list[tuple[str, str, str, tuple[str, ...]]] = [
     ("stage1", "pipeline.stage1_parse",  "Parse PDF pages -> Markdown (Gemini vision)",             ("doc", "version", "force")),
-    ("stage2", "pipeline.stage2_verify", "Build the human-review report + record sign-off (gate)",  ("doc", "version")),
+    ("stage2", "pipeline.stage2_verify", "Build the human-review report + record sign-off (gate)",  ("doc", "version", "approve", "by")),
     ("stage3", "pipeline.stage3_curate", "Reorganise pages -> per-program canonical docs",          ("doc", "version")),
     ("stage4", "pipeline.stage4_chunk",  "Chunk canonical docs (breadcrumbed, tables intact)",      ("doc", "version", "corpus")),
     ("stage5", "pipeline.stage5_enrich", "Attach the metadata schema to each chunk",                ("doc", "version", "corpus")),
@@ -46,6 +46,8 @@ _ARGS: dict[str, tuple[tuple[str, ...], dict]] = {
     "force":     (("--force",),     dict(action="store_true", help="re-run work already done instead of skipping")),
     "dry_run":   (("--dry-run",),   dict(action="store_true", dest="dry_run", help="report changes without writing")),
     "supersede": (("--supersede",), dict(action="store_true", help="expire the prior version instead of deleting it (§7b)")),
+    "approve":   (("--approve",),   dict(action="store_true", help="record sign-off for the document(s) instead of building the report")),
+    "by":        (("--by",),        dict(help='approver name/role, required with --approve')),
 }
 
 
