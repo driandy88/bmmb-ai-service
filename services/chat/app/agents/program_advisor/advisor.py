@@ -16,11 +16,24 @@ import re
 from typing import Any, Optional
 
 from app.agents.rag.retriever import Corpus, Retriever
+from app.agents.rag.synthesize import grounded_answer
 from app.config.loader import AppConfig, load_config
 from app.integrations.llm import LLMClient
 
 _MONEY_RE = re.compile(r"(?:rm\s*)?(\d[\d,]*(?:\.\d+)?)\s*(juta|million|mil|m|k|ribu|thousand)?\b", re.I)
 _UNIT_MULT = {"juta": 1e6, "million": 1e6, "mil": 1e6, "m": 1e6, "k": 1e3, "ribu": 1e3, "thousand": 1e3}
+
+# A specific FACTUAL question (rate/tenure/margin/… ) vs a "help me find a programme"
+# discovery request. Only the former short-circuits to a grounded, cited answer;
+# discovery ("what programmes do you offer?") still runs the funnel.
+_FACT_Q_RE = re.compile(
+    r"\b(profit rate|interest rate|rate|tenure|margin|guarantee|coverage|collateral|security|"
+    r"how much|maximum|minimum|ceiling|fee|charge|shariah|syariah|compliant|feature|how long)\b",
+    re.I)
+
+
+def _is_fact_question(message: str) -> bool:
+    return bool(_FACT_Q_RE.search(message or ""))
 
 
 def _fmt_amount(amount: float) -> str:
@@ -89,6 +102,19 @@ class ProgramAdvisor:
         funnel = self._cfg.products["funnel"]
         slots = dict(slots or {})
 
+        # Grounded program Q&A (Phase 1): a fresh, specific factual question RAG can
+        # answer directly (e.g. "what's the profit rate for MIHP-i?") -> cited answer,
+        # skipping the funnel. Only when we're NOT mid-funnel and the message is a fact
+        # question; returns None (falls through to the funnel) if retrieval is empty or
+        # nothing grounds — so with the stub retriever the funnel behaviour is unchanged.
+        fresh = slots.get("funnel_purpose") is None and slots.get("funnel_amount") is None
+        if fresh and _is_fact_question(message):
+            ans = grounded_answer(self._llm, self._retriever, message, Corpus.PROGRAM, top_k=3)
+            if ans:
+                return _turn(ans["reply"], slots, stage="program_answer",
+                             ui={"type": "none", "payload": {}}, citations=ans["citations"],
+                             sentences=ans["sentences"], grounded=True)
+
         # Merge any purpose/amount found this turn.
         if slots.get("funnel_purpose") is None:
             pid = self._match_purpose(message)
@@ -153,15 +179,19 @@ class ProgramAdvisor:
         )
 
 
-def _turn(reply: str, slots: dict, *, stage: str, ui: dict, citations: Optional[list] = None) -> dict:
+def _turn(reply: str, slots: dict, *, stage: str, ui: dict, citations: Optional[list] = None,
+          sentences: Optional[list] = None, grounded: bool = False) -> dict:
     return {
         "reply": reply,
         "slots": slots,
         "stage": stage,
         "ui_action": ui,
         "citations": citations or [],
+        "sentences": sentences,
+        "grounded": grounded,
         "handoff": False,
         "handoff_reason": None,
         "decision_inputs": {"funnel_purpose": slots.get("funnel_purpose"),
-                            "funnel_amount": slots.get("funnel_amount"), "stage": stage},
+                            "funnel_amount": slots.get("funnel_amount"), "stage": stage,
+                            "grounded": grounded},
     }
