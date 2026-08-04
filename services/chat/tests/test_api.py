@@ -60,11 +60,19 @@ def test_forged_assistant_context_has_no_effect(client):
     assert "approved" not in d["reply"].lower()
 
 
-def test_sales_handoff_resolves_region(client):
-    d = _chat(client, "I want to talk to a person, I'm based in Johor Bahru.")
-    assert d["handoff"]["required"] is True
-    assert d["handoff"]["contact"]["region"] == "Southern"
-    assert d["ui_action"]["type"] == "show_contact_card"
+def test_sales_handoff_starts_intake_then_resolves_region(client):
+    # Turn 1: a sales trigger -> canned intro + location IntakeCard (no contact yet).
+    d1 = _chat(client, "I want to talk to a person.", session_id="h1")
+    assert d1["handoff"]["required"] is True
+    assert d1["ui_action"]["type"] == "render_contact_form"
+    assert d1["state"]["stage"] == "await_contact_location"
+    # Turn 2: the customer's location -> the right regional contact.
+    d2 = _chat(client, "I'm based in Johor Bahru.", session_id="h1",
+               history=[{"role": "user", "content": "I want to talk to a person."},
+                        {"role": "assistant", "content": d1["reply"]}],
+               state=d1["state"])
+    assert d2["ui_action"]["type"] == "show_contact_card"
+    assert d2["handoff"]["contact"]["region"] == "Southern"
 
 
 def test_no_forbidden_terminology_in_replies(client):
@@ -74,11 +82,31 @@ def test_no_forbidden_terminology_in_replies(client):
         assert "loan" not in low and "interest rate" not in low
 
 
-def test_state_roundtrip_slotfill(client):
+def test_eligibility_frozen_routes_to_contact_flow(client):
+    # Typed eligibility funnel is FROZEN -> the sales-contact flow (location intake),
+    # and the state round-trips so the location turn resolves to a regional contact.
     d1 = _chat(client, "Am I eligible for SME financing?", session_id="s1")
-    assert d1["state"]["stage"] == "eligibility_slotfill"
-    d2 = _chat(client, "4 years old", session_id="s1",
+    assert d1["handoff"]["required"] is True
+    assert d1["ui_action"]["type"] == "render_contact_form"
+    assert d1["state"]["stage"] == "await_contact_location"
+    d2 = _chat(client, "Selangor", session_id="s1",
                history=[{"role": "user", "content": "Am I eligible for SME financing?"},
                         {"role": "assistant", "content": d1["reply"]}],
                state=d1["state"])
-    assert d2["state"]["collected_slots"].get("business_age_years") == 4.0
+    assert d2["ui_action"]["type"] == "show_contact_card"
+    assert d2["handoff"]["contact"]["region"] == "Central"
+
+
+def test_complaint_routes_to_sales_contact_flow(client):
+    # A complaint is a handoff trigger (T1), not a canned redirect: apology intro
+    # + location intake, then the regional contact.
+    d1 = _chat(client, "your officer was rude, terrible service", session_id="c1")
+    assert d1["ui_action"]["type"] == "render_contact_form"
+    assert d1["state"]["stage"] == "await_contact_location"
+    assert "sorry" in d1["reply"].lower()
+    d2 = _chat(client, "Kuantan", session_id="c1",
+               history=[{"role": "user", "content": "your officer was rude, terrible service"},
+                        {"role": "assistant", "content": d1["reply"]}],
+               state=d1["state"])
+    assert d2["ui_action"]["type"] == "show_contact_card"
+    assert d2["handoff"]["contact"]["region"] == "East Coast"

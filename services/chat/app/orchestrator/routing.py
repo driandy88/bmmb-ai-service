@@ -54,9 +54,14 @@ STAGE_TO_ROUTE: dict[str, str] = {
     "eligibility_slotfill": "ROUTE-ELIGIBILITY",
     "funnel_purpose": "ROUTE-PROGRAM",
     "funnel_amount": "ROUTE-PROGRAM",
+    "await_contact_location": "ROUTE-BRANCH",   # turn 2 of the sales-contact flow
     "await_application_id_continue": "ROUTE-CONTINUE",
     "await_application_id_track": "ROUTE-TRACK",
 }
+
+# Out-of-scope intents that are actually handoff TRIGGERS (Sheet 2.1), not canned
+# redirects: a complaint (OOS-09) routes to the sales-contact flow (T1), not R5.
+HANDOFF_INTENTS: set[str] = {"OOS-09"}
 
 
 @dataclass
@@ -190,6 +195,15 @@ def decide(
                 secondary = SecondaryAction("append_canned", cat_id=secondary_id, ref=secondary_row.response_ref)
 
     # ── 5. Dispatch the primary ─────────────────────────────────────────────
+    # A complaint is a handoff trigger (T1), not a canned redirect — route it to
+    # the sales-contact flow. The handoff infers T1 from the message.
+    if primary_id in HANDOFF_INTENTS:
+        handler, label = ROUTE_TABLE["ROUTE-BRANCH"]
+        return RoutingDecision(
+            action=DISPATCH, route_label=f"{label} (T1 complaint)",
+            primary_cat_id=primary_id, primary_ref="ROUTE-BRANCH",
+            primary_handler=handler, secondary=secondary,
+        )
     if primary_row.is_route:
         handler, label = ROUTE_TABLE.get(primary_row.response_ref, (None, "Unknown route"))
         return RoutingDecision(

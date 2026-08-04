@@ -75,30 +75,33 @@ class EligibilityAgent:
         )
 
     def handle(self, message: str, history: list[dict], collected_slots: dict) -> dict:
-        # 1. Tier-2 -> hand off, don't attempt.
-        if self._tier2_signal(message, history):
+        slots_in = collected_slots or {}
+        # FROZEN typed funnel: a FRESH eligibility question (no slots collected yet)
+        # routes to the sales-contact flow (T4) — the SME team does the assessment.
+        # A flow ALREADY in progress with slots is only reachable via the document-
+        # upload path, which is kept: let it finish its verdict rather than drop it.
+        has_slots = any(slots_in.get(k) is not None for k in rules.SLOT_KEYS)
+        if not has_slots:
             return {
-                "reply": "",                       # sales_handoff composes the reply
-                "slots": dict(collected_slots),
+                "reply": "",                   # sales_handoff composes the reply
+                "slots": dict(slots_in),
                 "status": rules.REFER_TO_SALES,
                 "stage": _DONE_STAGE,
                 "missing": [],
                 "ui_action": {"type": "none", "payload": {}},
                 "handoff": True,
-                "handoff_reason": "T4",            # sensitive/borderline eligibility
+                "handoff_reason": "T4",        # sensitive/borderline eligibility -> Sales
                 "decision_inputs": {"rule_version": self._cfg.rule_version, "status": rules.REFER_TO_SALES,
-                                    "tier2_signal": True},
+                                    "eligibility": "frozen"},
                 "citations": [],
             }
 
-        # 2. Extract + merge slots (new values win).
+        # Document-initiated flow in progress: extract + merge + deterministic verdict.
         extracted = self._llm.extract_slots(message, history) or {}
-        slots = {**(collected_slots or {})}
+        slots = {**slots_in}
         for k in rules.SLOT_KEYS:
             if extracted.get(k) is not None:
                 slots[k] = extracted[k]
-
-        # 3-4. Deterministic decision + response.
         return self._respond(slots)
 
     def ingest_document(
