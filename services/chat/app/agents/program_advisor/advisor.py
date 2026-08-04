@@ -23,18 +23,6 @@ from app.integrations.llm import LLMClient
 _MONEY_RE = re.compile(r"(?:rm\s*)?(\d[\d,]*(?:\.\d+)?)\s*(juta|million|mil|m|k|ribu|thousand)?\b", re.I)
 _UNIT_MULT = {"juta": 1e6, "million": 1e6, "mil": 1e6, "m": 1e6, "k": 1e3, "ribu": 1e3, "thousand": 1e3}
 
-# A specific FACTUAL question (rate/tenure/margin/… ) vs a "help me find a programme"
-# discovery request. Only the former short-circuits to a grounded, cited answer;
-# discovery ("what programmes do you offer?") still runs the funnel.
-_FACT_Q_RE = re.compile(
-    r"\b(profit rate|interest rate|rate|tenure|margin|guarantee|coverage|collateral|security|"
-    r"how much|maximum|minimum|ceiling|fee|charge|shariah|syariah|compliant|feature|how long)\b",
-    re.I)
-
-
-def _is_fact_question(message: str) -> bool:
-    return bool(_FACT_Q_RE.search(message or ""))
-
 
 def _fmt_amount(amount: float) -> str:
     """Short RM label for prose, e.g. 100000 -> 'RM 100k', 1500000 -> 'RM 1.5m'."""
@@ -98,22 +86,46 @@ class ProgramAdvisor:
                 return o["label"]
         return ""
 
+    # -- grounded-answer gating --------------------------------------------
+    def _is_funnel_nav(self, message: str) -> bool:
+        """A bare funnel answer — a lone purpose keyword or an amount — that should
+        continue the funnel rather than trigger a program lookup."""
+        short = len((message or "").split()) <= 6
+        return short and (self._match_purpose(message) is not None or self._parse_amount(message) is not None)
+
+    def _scoped_program(self, message: str) -> Optional[str]:
+        """The specific programme this message names, resolved against the LIVE index
+        via the query-rewrite program extraction (so it survives the products.yaml ↔
+        index naming drift, §6a branch A). None if no programme is named."""
+        programs = getattr(self._retriever, "programs", lambda: [])() or []
+        if not programs:
+            return None
+        try:
+            rw = self._llm.rewrite_query(message, programs)
+        except Exception:  # never break the turn on a rewrite failure
+            return None
+        code = rw.get("program_code")
+        return code if code in {c for c, _ in programs} else None
+
     def handle(self, message: str, history: list[dict], slots: dict) -> dict:
         funnel = self._cfg.products["funnel"]
         slots = dict(slots or {})
 
-        # Grounded program Q&A (Phase 1): a fresh, specific factual question RAG can
-        # answer directly (e.g. "what's the profit rate for MIHP-i?") -> cited answer,
-        # skipping the funnel. Only when we're NOT mid-funnel and the message is a fact
-        # question; returns None (falls through to the funnel) if retrieval is empty or
-        # nothing grounds — so with the stub retriever the funnel behaviour is unchanged.
-        fresh = slots.get("funnel_purpose") is None and slots.get("funnel_amount") is None
-        if fresh and _is_fact_question(message):
-            ans = grounded_answer(self._llm, self._retriever, message, Corpus.PROGRAM, top_k=3)
-            if ans:
-                return _turn(ans["reply"], slots, stage="program_answer",
-                             ui={"type": "none", "payload": {}}, citations=ans["citations"],
-                             sentences=ans["sentences"], grounded=True)
+        # Grounded program Q&A (Phase 1): when the customer NAMES a specific programme
+        # (a direct question, or the "Details" button), answer it with a grounded, cited,
+        # program-scoped answer — regardless of any funnel state, so stuck slots can't
+        # block it. A GENERAL question naming no programme keeps running the funnel
+        # (§6a: never silently pick one programme). Bare funnel answers (a lone purpose
+        # or amount) skip this so the funnel flows without an extra rewrite call.
+        if not self._is_funnel_nav(message):
+            program = self._scoped_program(message)
+            if program:
+                ans = grounded_answer(self._llm, self._retriever, message, Corpus.PROGRAM,
+                                      top_k=4, program_code=program)
+                if ans:
+                    return _turn(ans["reply"], slots, stage="program_answer",
+                                 ui={"type": "none", "payload": {}}, citations=ans["citations"],
+                                 sentences=ans["sentences"], grounded=True)
 
         # Merge any purpose/amount found this turn.
         if slots.get("funnel_purpose") is None:
