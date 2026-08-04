@@ -14,6 +14,7 @@ repeated bot failure (low-confidence loop) · T4 sensitive/borderline eligibilit
 """
 from __future__ import annotations
 
+import random
 from typing import Optional
 
 from app.config.loader import AppConfig, load_config
@@ -57,7 +58,9 @@ class SalesHandoff:
 
     def contact_for(self, region_id: str) -> dict:
         contacts = self._sales["regions"][region_id]["contacts"]
-        c = dict(contacts[0])
+        # Regions with more than one rep (e.g. Central, Southern, East Coast) —
+        # pick one at random so the load isn't always on contacts[0].
+        c = dict(random.choice(contacts))
         c["region"] = self._sales["regions"][region_id]["region"]
         c["hours"] = get_settings().handoff_hours
         return c
@@ -111,7 +114,12 @@ class SalesHandoff:
         }
 
     def _resolve(self, message: str, history: list[dict]) -> dict:
-        region = self.resolve_region(message + " " + " ".join(t.get("content", "") for t in (history or [])))
+        # Resolve from the customer's actual answer only (history is kept in the
+        # signature but intentionally unused). Searching the whole transcript let
+        # incidental place mentions from earlier turns (usually KL / Selangor)
+        # win the longest-name match, so every pick resolved to Central; the
+        # turn-2 message already carries the location they chose.
+        region = self.resolve_region(message)
         contact = self.contact_for(region["region_id"])
         who = self._branch_contact_str(contact)
         hours = contact.get("hours", "")
