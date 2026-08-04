@@ -75,6 +75,43 @@ def test_sales_handoff_starts_intake_then_resolves_region(client):
     assert d2["handoff"]["contact"]["region"] == "Southern"
 
 
+def test_program_offer_affirmation_routes_to_apply(client):
+    # After a grounded program answer offers "apply / talk to our team", a bare
+    # affirmation ("sounds good") continues to Apply — naming the programme —
+    # instead of being read as a goodbye (the dead-end fix).
+    d = _chat(client, "ok sounds good to me",
+              state={"stage": "program_offer", "collected_slots": {"last_program": "GGSM3"}})
+    assert d["ui_action"]["type"] == "open_application_link"
+    assert d["ui_action"]["payload"].get("program") == "GGSM3"
+    assert "GGSM3" in d["reply"]
+
+
+def test_program_offer_decline_closes_gracefully(client):
+    # A decline to the same offer closes without dropping into the funnel.
+    d = _chat(client, "no thanks",
+              state={"stage": "program_offer", "collected_slots": {"last_program": "GGSM3"}})
+    assert d["ui_action"]["type"] == "none"
+    assert d["state"]["stage"] == "program_done"
+    assert "GGSM3" in d["reply"]
+
+
+def test_signoff_offers_preset_next_steps(client):
+    # A sign-off isn't a full stop: it re-surfaces the start-session presets as
+    # chips, reworded to continue the thread (not greet like a new session).
+    d = _chat(client, "goodbye")
+    assert d["intent"]["primary"] == "SOC-03"
+    labels = [s["label"] for s in d["suggestions"]]
+    assert "Explore programmes" in labels and "Talk to our team" in labels
+    assert "help" in d["reply"].lower()      # continuation wording, not a bare goodbye
+
+
+def test_out_of_scope_offers_preset_next_steps(client):
+    # An out-of-scope redirect is a dead-end for the ask, so offer a way forward.
+    d = _chat(client, "do you offer personal loans or car loans?")
+    assert d["audit"]["decision_inputs"].get("canned")   # OOS canned redirect
+    assert len(d["suggestions"]) > 0
+
+
 def test_no_forbidden_terminology_in_replies(client):
     for msg in ["What programs do you offer?", "Am I eligible?", "I want to apply now."]:
         d = _chat(client, msg)

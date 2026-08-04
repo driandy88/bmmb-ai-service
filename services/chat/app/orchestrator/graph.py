@@ -32,7 +32,7 @@ from app.agents.application.initiate import Initiate
 from app.agents.application.lookup import ApplicationLookup
 from app.api.schemas import (
     AnswerSentence, AuditBlock, ChatRequest, ChatResponse, Citation, GuardrailVerdict, HandoffBlock,
-    HandoffContact, IntentBlock, ResponseState, UiAction,
+    HandoffContact, IntentBlock, ResponseState, Suggestion, UiAction,
 )
 from app.config.loader import AppConfig, load_config
 from app.config.settings import Settings, get_settings
@@ -192,6 +192,7 @@ def _assemble(final: dict, taxonomy=None) -> ChatResponse:
                            type=(row.type if row else None)),
         ui_action=_ui(final.get("ui_action")),
         citations=[Citation(**c) for c in final.get("citations", [])],
+        suggestions=[Suggestion(**s) for s in final.get("suggestions", [])],
         handoff=_handoff(final.get("handoff")),
         state=ResponseState(stage=final.get("stage"),
                             collected_slots=final.get("slots", {}) or {},

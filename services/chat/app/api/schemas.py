@@ -112,6 +112,15 @@ class AnswerSentence(BaseModel):
     cites: list[int] = Field(default_factory=list)
 
 
+class Suggestion(BaseModel):
+    """A suggested next step rendered as a clickable chip. GENERAL — any turn may
+    attach `suggestions`, independent of `ui_action`, so program answers,
+    eligibility results, guidelines, etc. all reuse it. Clicking sends `value` as
+    the next message (so it flows through the same routing as if typed)."""
+    label: str                          # what the chip shows, e.g. "Apply for GGSM3"
+    value: str                          # the message sent when clicked, e.g. "I'd like to apply for GGSM3"
+
+
 class HandoffContact(BaseModel):
     region: Optional[str] = None
     employee: Optional[str] = None
@@ -159,6 +168,9 @@ class ChatResponse(BaseModel):
     intent: IntentBlock = Field(default_factory=IntentBlock)
     ui_action: UiAction = Field(default_factory=UiAction)
     citations: list[Citation] = Field(default_factory=list)
+    # Optional next-step chips ("Apply", "Talk to our team", …). Empty on turns
+    # that offer no follow-up. Reusable by any agent (see Suggestion).
+    suggestions: list[Suggestion] = Field(default_factory=list)
     handoff: HandoffBlock = Field(default_factory=HandoffBlock)
     state: ResponseState = Field(default_factory=ResponseState)
     audit: AuditBlock

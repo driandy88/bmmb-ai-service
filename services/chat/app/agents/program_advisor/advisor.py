@@ -18,7 +18,9 @@ from typing import Any, Optional
 from app.agents.rag.retriever import Corpus, Retriever
 from app.agents.rag.synthesize import grounded_answer
 from app.config.loader import AppConfig, load_config
+from app.config.settings import get_settings
 from app.integrations.llm import LLMClient
+from app.utils.suggestions import explore_suggestions
 
 _MONEY_RE = re.compile(r"(?:rm\s*)?(\d[\d,]*(?:\.\d+)?)\s*(juta|million|mil|m|k|ribu|thousand)?\b", re.I)
 _UNIT_MULT = {"juta": 1e6, "million": 1e6, "mil": 1e6, "m": 1e6, "k": 1e3, "ribu": 1e3, "thousand": 1e3}
@@ -31,6 +33,16 @@ def _fmt_amount(amount: float) -> str:
     if amount >= 1_000:
         return f"RM {amount / 1_000:.0f}k"
     return f"RM {amount:,.0f}"
+
+# Bare replies to the post-answer "apply / talk to our team" offer (stage
+# `program_offer`). Decline is checked first so "just looking" doesn't match "ok".
+_APPLY_KEYWORDS = ["apply", "sign up", "sign me up", "get started", "go ahead", "proceed",
+                   "yes", "yeah", "yep", "sure", "okay", "ok", "sounds good", "sound good",
+                   "let's do it", "lets do it", "let's go", "lets go", "interested",
+                   "i want", "i'd like", "want to"]
+_DECLINE_KEYWORDS = ["no thanks", "no thank", "not now", "maybe later", "not interested",
+                     "that's all", "thats all", "nothing else", "no more", "i'm good",
+                     "im good", "just looking", "no need"]
 
 # Keyword -> purpose id (Sheet 3, column 1).
 _PURPOSE_KEYWORDS = {
@@ -107,25 +119,85 @@ class ProgramAdvisor:
         code = rw.get("program_code")
         return code if code in {c for c, _ in programs} else None
 
-    def handle(self, message: str, history: list[dict], slots: dict) -> dict:
+    # -- post-answer offer (apply / talk to our team) ----------------------
+    @staticmethod
+    def _offer_suggestions(program: str) -> list[dict]:
+        """The next-step chips shown under a grounded answer. `value` is what gets
+        sent when clicked, so each flows through normal routing (Apply -> INITIATE,
+        Talk -> BRANCH/Sales)."""
+        return [
+            {"label": f"Apply for {program}", "value": f"I'd like to apply for {program}"},
+            {"label": "Connect to Sales team", "value": "I'd like to talk to your SME financing team"},
+        ]
+
+    def _followup_decision(self, message: str) -> str:
+        """Read a bare reply to the offer: 'apply' | 'decline' | 'other'. An
+        explicit 'talk to a person' is caught upstream by the classifier (INS-01)
+        and routed to Sales, so here we only resolve proceed vs. decline."""
+        low = (message or "").lower().strip()
+        if low in ("no", "nope", "nah") or any(k in low for k in _DECLINE_KEYWORDS):
+            return "decline"
+        if any(k in low for k in _APPLY_KEYWORDS):
+            return "apply"
+        return "other"
+
+    def _apply_turn(self, program: str, slots: dict) -> dict:
+        """Proceed to application for the programme just discussed — named, so the
+        customer sees it carried through (not a generic 'the application form')."""
+        url = get_settings().new_application_url
+        return _turn(
+            f"Great — let's get your application for {program} started. "
+            "I'll take you to the application form.",
+            slots, stage="initiate",
+            ui={"type": "open_application_link", "payload": {"url": url, "program": program}},
+        )
+
+    def handle(self, message: str, history: list[dict], slots: dict, *, stage: Optional[str] = None) -> dict:
         funnel = self._cfg.products["funnel"]
         slots = dict(slots or {})
 
-        # Grounded program Q&A (Phase 1): when the customer NAMES a specific programme
-        # (a direct question, or the "Details" button), answer it with a grounded, cited,
-        # program-scoped answer — regardless of any funnel state, so stuck slots can't
-        # block it. A GENERAL question naming no programme keeps running the funnel
-        # (§6a: never silently pick one programme). Bare funnel answers (a lone purpose
-        # or amount) skip this so the funnel flows without an extra rewrite call.
-        if not self._is_funnel_nav(message):
-            program = self._scoped_program(message)
-            if program:
-                ans = grounded_answer(self._llm, self._retriever, message, Corpus.PROGRAM,
-                                      top_k=4, program_code=program)
-                if ans:
-                    return _turn(ans["reply"], slots, stage="program_answer",
-                                 ui={"type": "none", "payload": {}}, citations=ans["citations"],
-                                 sentences=ans["sentences"], grounded=True)
+        # Which specific programme (if any) this turn names — computed once and
+        # reused below. A GENERAL question names none and keeps the funnel (§6a:
+        # never silently pick one). A bare funnel answer (lone purpose/amount)
+        # skips the rewrite so the funnel flows without an extra LLM call.
+        program = None if self._is_funnel_nav(message) else self._scoped_program(message)
+
+        # Continuation of a grounded answer's "apply / talk to our team" offer:
+        # a bare reply that names no new programme is read as proceed/decline
+        # rather than re-classified (which reads "sounds good" as a goodbye —
+        # the dead-end we're fixing). Reached via STAGE_TO_ROUTE["program_offer"].
+        if stage == "program_offer" and slots.get("last_program") and not program:
+            prog = slots["last_program"]
+            decision = self._followup_decision(message)
+            if decision == "apply":
+                return self._apply_turn(prog, slots)
+            if decision == "decline":
+                return _turn(f"No problem — I'm here whenever you'd like to look at {prog} "
+                             "or another programme. A few things I can help with —",
+                             slots, stage="program_done", ui={"type": "none", "payload": {}},
+                             suggestions=explore_suggestions(prog))
+            # Neither a clear yes/no nor a new programme: keep the thread open
+            # instead of dropping into the funnel purpose prompt for a stray reply.
+            return _turn(f"Sure — would you like to apply for {prog}, or ask me anything "
+                         "else about our SME financing?", slots, stage="program_offer",
+                         ui={"type": "none", "payload": {}},
+                         suggestions=self._offer_suggestions(prog))
+
+        # Grounded program Q&A (Phase 1): when the customer NAMES a programme (a
+        # direct question, or the "Details" button), answer it with a grounded,
+        # cited answer AND offer the next step so the thread doesn't dead-end.
+        if program:
+            ans = grounded_answer(self._llm, self._retriever, message, Corpus.PROGRAM,
+                                  top_k=4, program_code=program)
+            if ans:
+                slots["last_program"] = program
+                cta = f"Would you like to apply for {program}, or speak with our SME team?"
+                sentences = list(ans["sentences"]) + [{"text": cta, "cites": []}]
+                reply = (ans["reply"] + " " + cta).strip()
+                return _turn(reply, slots, stage="program_offer",
+                             ui={"type": "none", "payload": {}}, citations=ans["citations"],
+                             sentences=sentences, grounded=True,
+                             suggestions=self._offer_suggestions(program))
 
         # Merge any purpose/amount found this turn.
         if slots.get("funnel_purpose") is None:
@@ -192,7 +264,8 @@ class ProgramAdvisor:
 
 
 def _turn(reply: str, slots: dict, *, stage: str, ui: dict, citations: Optional[list] = None,
-          sentences: Optional[list] = None, grounded: bool = False) -> dict:
+          sentences: Optional[list] = None, grounded: bool = False,
+          suggestions: Optional[list] = None) -> dict:
     return {
         "reply": reply,
         "slots": slots,
@@ -201,6 +274,7 @@ def _turn(reply: str, slots: dict, *, stage: str, ui: dict, citations: Optional[
         "citations": citations or [],
         "sentences": sentences,
         "grounded": grounded,
+        "suggestions": suggestions or [],
         "handoff": False,
         "handoff_reason": None,
         "decision_inputs": {"funnel_purpose": slots.get("funnel_purpose"),

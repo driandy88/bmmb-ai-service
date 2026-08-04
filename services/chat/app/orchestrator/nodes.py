@@ -14,6 +14,7 @@ from typing import Any
 
 from app.orchestrator import routing
 from app.utils import terminology
+from app.utils.suggestions import explore_suggestions
 
 _NONE_UI = {"type": "none", "payload": {}}
 _NO_HANDOFF = {"required": False, "reason": None, "contact": None}
@@ -83,11 +84,28 @@ def handoff_node(state: dict, deps) -> dict:
 
 
 def canned_node(state: dict, deps) -> dict:
-    """Out-of-scope redirect (R1–R5)."""
+    """Out-of-scope redirect (R1–R5) or social close (R9/R10/R11)."""
     d: routing.RoutingDecision = state["decision"]
     reply = deps.config.responses.wording(d.primary_ref)
+    row = deps.config.taxonomy.get(d.primary_cat_id)
+    last_program = (state.get("slots") or {}).get("last_program")
+
+    # Done / dead-end turns don't have to be a full stop. A sign-off (SOC-03) or
+    # an out-of-scope redirect re-surfaces the start-session presets as chips so
+    # the customer always has a way forward — but the sign-off is REWORDED to
+    # continue the thread (referencing what we just discussed), not to greet them
+    # again like a new session.
+    suggestions: list[dict] = []
+    if d.primary_cat_id == "SOC-03":
+        lead = f"Glad I could help with {last_program} today. " if last_program else "Glad I could help. "
+        reply = lead + "If there's anything else, here are a few ways I can keep helping —"
+        suggestions = explore_suggestions(last_program)
+    elif row is not None and row.type == "out_of_scope":
+        suggestions = explore_suggestions(last_program)
+
     updates: dict[str, Any] = {
         "ui_action": dict(_NONE_UI), "citations": [], "handoff": dict(_NO_HANDOFF),
+        "suggestions": suggestions,
         "stage": "redirect", "decision_inputs": {"canned": d.primary_ref, "cat_id": d.primary_cat_id},
     }
     reply, extra = _apply_secondary(state, deps, reply)
@@ -115,6 +133,7 @@ def dispatch_node(state: dict, deps) -> dict:
     citations = list(res.get("citations", []))
     sentences = res.get("sentences")          # grounded RAG answer (Phase 1), else None
     grounded = bool(res.get("grounded"))
+    suggestions = list(res.get("suggestions", []))   # next-step chips, any handler may attach
     decision_inputs = dict(res.get("decision_inputs", {}))
     updates: dict[str, Any] = {}
     if "slots" in res:
@@ -146,7 +165,7 @@ def dispatch_node(state: dict, deps) -> dict:
 
     updates.update({"reply": reply, "ui_action": ui, "handoff": handoff_block,
                     "citations": citations, "sentences": sentences, "grounded": grounded,
-                    "stage": stage, "decision_inputs": decision_inputs})
+                    "suggestions": suggestions, "stage": stage, "decision_inputs": decision_inputs})
     return updates
 
 
@@ -194,14 +213,15 @@ def _run_handler(deps, ref: str, state: dict) -> dict:
         return deps.sales_handoff.handle(msg, hist, reason=None, channel=state.get("channel", "customer"),
                                          stage=state.get("stage"))
     if ref == "ROUTE-PROGRAM":
-        return deps.program_advisor.handle(msg, hist, slots)
+        return deps.program_advisor.handle(msg, hist, slots, stage=state.get("stage"))
     if ref in ("ROUTE-GUIDELINES", "ROUTE-SHARIAH"):
         return deps.guidelines.handle(msg, hist)
     if ref == "ROUTE-ELIGIBILITY":
         return deps.eligibility.handle(msg, hist, slots)
     if ref == "ROUTE-INITIATE":
         post = state.get("client_state", {}).get("stage") == "eligibility_done"
-        return deps.initiate.handle(msg, hist, post_eligibility=post)
+        return deps.initiate.handle(msg, hist, post_eligibility=post,
+                                    program=slots.get("last_program"))
     if ref == "ROUTE-CONTINUE":
         return deps.lookup.handle(msg, hist, application_id=state.get("application_id"), mode="continue")
     if ref == "ROUTE-TRACK":

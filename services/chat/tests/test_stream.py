@@ -33,7 +33,7 @@ def test_stream_emits_start_tokens_done():
     assert events.count("token") > 0
     assert reply.strip()                              # reply reassembles from tokens
     assert set(done) == {"session_id", "reply", "sentences", "grounded", "intent",
-                         "ui_action", "citations", "handoff", "state", "audit"}
+                         "ui_action", "citations", "suggestions", "handoff", "state", "audit"}
     assert done["reply"] == reply                    # streamed text == envelope reply
 
 
