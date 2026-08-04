@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Optional
 
 from app.agents.rag.retriever import Corpus, Retriever
+from app.agents.rag.synthesize import grounded_answer
 from app.config.loader import AppConfig, load_config
 from app.integrations.llm import LLMClient
 
@@ -31,24 +32,29 @@ class GuidelinesAgent:
         self._cfg = config or load_config()
 
     def handle(self, message: str, history: list[dict]) -> dict:
-        chunks = self._retriever.retrieve(message, Corpus.GUIDELINES_SHARIAH, top_k=4)
-        citations = [{"corpus": c.corpus, "ref": c.ref, "snippet": c.text} for c in chunks]
-
-        if chunks:
-            # TODO(real-RAG): synthesize a grounded answer from these chunks via
-            # a dedicated guidelines prompt once Sheet-4 documents are ingested.
-            # Until then the corpus is empty, so this branch never runs.
-            grounded = "\n".join(f"• {c.text}" for c in chunks)
-            reply = f"Here's what our guidelines cover:\n{grounded}"
-        else:
-            reply = _FALLBACK
-
+        # Grounded, cited answer over the Shariah/guidelines corpus (Phase 1). Returns
+        # None while the corpus is empty (Sheet 4 pending) or nothing grounds it.
+        ans = grounded_answer(self._llm, self._retriever, message,
+                              Corpus.GUIDELINES_SHARIAH, top_k=4)
+        if ans:
+            return {
+                "reply": ans["reply"],
+                "sentences": ans["sentences"],
+                "grounded": True,
+                "citations": ans["citations"],
+                "stage": "guidelines",
+                "ui_action": {"type": "none", "payload": {}},
+                "handoff": False,
+                "handoff_reason": None,
+                "decision_inputs": {"corpus": Corpus.GUIDELINES_SHARIAH.value,
+                                    "chunks": len(ans["citations"]), "grounded": True},
+            }
         return {
-            "reply": reply,
-            "citations": citations,
+            "reply": _FALLBACK,
+            "citations": [],
             "stage": "guidelines",
             "ui_action": {"type": "none", "payload": {}},
             "handoff": False,
             "handoff_reason": None,
-            "decision_inputs": {"corpus": Corpus.GUIDELINES_SHARIAH.value, "chunks": len(chunks)},
+            "decision_inputs": {"corpus": Corpus.GUIDELINES_SHARIAH.value, "chunks": 0},
         }

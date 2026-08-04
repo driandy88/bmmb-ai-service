@@ -31,7 +31,7 @@ from app.agents.sales_handoff.handoff import SalesHandoff
 from app.agents.application.initiate import Initiate
 from app.agents.application.lookup import ApplicationLookup
 from app.api.schemas import (
-    AuditBlock, ChatRequest, ChatResponse, Citation, GuardrailVerdict, HandoffBlock,
+    AnswerSentence, AuditBlock, ChatRequest, ChatResponse, Citation, GuardrailVerdict, HandoffBlock,
     HandoffContact, IntentBlock, ResponseState, UiAction,
 )
 from app.config.loader import AppConfig, load_config
@@ -180,6 +180,9 @@ def _assemble(final: dict, taxonomy=None) -> ChatResponse:
     return ChatResponse(
         session_id=final["session_id"],
         reply=final.get("reply", ""),
+        sentences=([AnswerSentence(**s) for s in final["sentences"]]
+                   if final.get("sentences") else None),
+        grounded=bool(final.get("grounded")),
         intent=IntentBlock(primary=primary_id,
                            confidence=float(intent.get("confidence") or 0.0),
                            secondary=intent.get("secondary"),

@@ -106,10 +106,13 @@ def dispatch_node(state: dict, deps) -> dict:
     res = _run_handler(deps, d.primary_ref, state)
 
     reply = res.get("reply", "") or ""
+    primary_reply = reply
     ui = res.get("ui_action", dict(_NONE_UI))
     handoff_block = res.get("handoff_block") or dict(_NO_HANDOFF)
     stage = res.get("stage")
     citations = list(res.get("citations", []))
+    sentences = res.get("sentences")          # grounded RAG answer (Phase 1), else None
+    grounded = bool(res.get("grounded"))
     decision_inputs = dict(res.get("decision_inputs", {}))
     updates: dict[str, Any] = {}
     if "slots" in res:
@@ -131,8 +134,15 @@ def dispatch_node(state: dict, deps) -> dict:
         updates["slots"] = {**updates.get("slots", state.get("slots", {})), **extra.pop("route_secondary_slots")}
     updates.update(extra)
 
+    # If a handoff or Sheet-9 secondary appended text, the sentence→cite map no
+    # longer covers the whole reply — drop it so the UI renders the plain combined
+    # reply instead of chips over only part of it.
+    if reply != primary_reply:
+        sentences, grounded = None, False
+
     updates.update({"reply": reply, "ui_action": ui, "handoff": handoff_block,
-                    "citations": citations, "stage": stage, "decision_inputs": decision_inputs})
+                    "citations": citations, "sentences": sentences, "grounded": grounded,
+                    "stage": stage, "decision_inputs": decision_inputs})
     return updates
 
 

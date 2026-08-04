@@ -92,6 +92,23 @@ class Citation(BaseModel):
     corpus: str
     ref: str
     snippet: str
+    # Phase 1 — enough for the UI to NAME the source (chip + Sources list).
+    # All optional so a bare {corpus, ref, snippet} (canned/secondary) still validates.
+    # Phase 2 (source preview) adds page_count / image_url / highlight here, additively.
+    n: Optional[int] = None            # 1-based citation number within this message
+    doc_id: Optional[str] = None
+    doc_title: Optional[str] = None
+    section: Optional[str] = None      # e.g. "Financing rate"
+    page: Optional[int] = None         # from source_uri #page=N
+    score: Optional[float] = None      # cosine 0..1 (drives the low-confidence chip)
+    access_tier: Optional[str] = None  # customer | internal
+
+
+class AnswerSentence(BaseModel):
+    """One sentence of a grounded answer + the citation numbers that support it
+    (§ Phase 1). Present only on grounded RAG turns; `cites` map to Citation.n."""
+    text: str
+    cites: list[int] = Field(default_factory=list)
 
 
 class HandoffContact(BaseModel):
@@ -133,6 +150,11 @@ class AuditBlock(BaseModel):
 class ChatResponse(BaseModel):
     session_id: str
     reply: str
+    # Grounded RAG turns also carry the answer split into sentences, each tagged
+    # with the citation numbers that support it, so the UI can render an inline
+    # chip per claim. `None` on every non-grounded turn → the UI renders `reply`.
+    sentences: Optional[list[AnswerSentence]] = None
+    grounded: bool = False
     intent: IntentBlock = Field(default_factory=IntentBlock)
     ui_action: UiAction = Field(default_factory=UiAction)
     citations: list[Citation] = Field(default_factory=list)

@@ -61,6 +61,14 @@ class LLMClient(ABC):
         branch A). `programs` = [(code, title)] from the live index. Sees only the
         current message — no history, so it cannot resolve pronouns (branch B)."""
 
+    @abstractmethod
+    def synthesize_answer(self, query: str, chunks: list) -> dict:
+        """-> {sentences: [{text: str, cites: [int]}], grounded: bool}
+        Write a grounded answer to `query` using ONLY the numbered `chunks`
+        (1-based) — each sentence cites the chunk number(s) that support it, and
+        nothing unsupported is written. grounded=False when the chunks do not
+        answer the question (the caller then abstains / falls back). Phase 1."""
+
 
 # ── Deterministic stub ───────────────────────────────────────────────────────
 
@@ -150,6 +158,27 @@ def _amount_near(text: str, keywords: list[str], window: int = 45) -> Optional[f
     return None
 
 
+def _chunk_text(c: Any) -> str:
+    """Chunk body from a RetrievalChunk (attr) or a plain dict."""
+    return getattr(c, "text", None) or (c.get("text") if isinstance(c, dict) else "") or ""
+
+
+def _chunk_label(c: Any) -> str:
+    """'doc_title · section' for the numbered chunk shown to the synthesiser."""
+    md = getattr(c, "metadata", None) or (c.get("metadata") if isinstance(c, dict) else {}) or {}
+    return " · ".join(x for x in (md.get("doc_title"), md.get("section")) if x) or "source"
+
+
+def _first_sentence(text: str, limit: int = 220) -> str:
+    """A readable lead sentence: drop the 'LABEL › section › ' breadcrumb Stage 4
+    prepends, then take up to the first sentence end (or `limit` chars)."""
+    body = text.split(" › ")[-1].strip() if " › " in text else text.strip()
+    body = body.replace("\n", " ").strip()
+    m = re.search(r"^(.+?[.!?])(\s|$)", body)
+    lead = m.group(1) if m else body
+    return (lead[:limit].rstrip() + "…") if len(lead) > limit else lead
+
+
 class StubLLMClient(LLMClient):
     def classify_intent(self, message: str, history: list[dict]) -> dict:
         low = (message or "").lower()
@@ -237,6 +266,16 @@ class StubLLMClient(LLMClient):
                              r"guarantee|eligib|qualify)\b", low))
         return {"rewritten_query": rewritten.strip() or text,
                 "program_code": program_code, "is_program_dependent": dep}
+
+    def synthesize_answer(self, query: str, chunks: list) -> dict:
+        # Offline/deterministic: no real synthesis — surface a lead sentence from
+        # each of the top chunks, each citing itself. Enough to render the chip +
+        # Sources UI without Vertex; the Vertex client writes the real prose.
+        if not chunks:
+            return {"sentences": [], "grounded": False}
+        sentences = [{"text": _first_sentence(_chunk_text(c)), "cites": [i]}
+                     for i, c in enumerate(chunks[:2], start=1)]
+        return {"sentences": sentences, "grounded": True}
 
 
 # ── Vertex AI / Gemini ───────────────────────────────────────────────────────
@@ -394,6 +433,44 @@ class VertexGeminiClient(LLMClient):
         except Exception as exc:  # noqa: BLE001 — degrade to stub, never break the turn
             log.warning("Vertex rewrite_query failed (%s); using stub.", exc)
             return self._fallback.rewrite_query(message, programs)
+
+    def synthesize_answer(self, query: str, chunks: list) -> dict:
+        n = len(chunks)
+        if not n:
+            return {"sentences": [], "grounded": False}
+        try:
+            listing = "\n\n".join(f"[{i}] ({_chunk_label(c)})\n{_chunk_text(c)}"
+                                  for i, c in enumerate(chunks, start=1))
+            filled = render(load_prompt("answer_synthesis"), query=query, chunks=listing)
+            schema = {
+                "type": "OBJECT",
+                "properties": {
+                    "grounded": {"type": "BOOLEAN"},
+                    "sentences": {"type": "ARRAY", "items": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "text": {"type": "STRING"},
+                            "cites": {"type": "ARRAY", "items": {"type": "INTEGER"}},
+                        },
+                        "required": ["text"],
+                    }},
+                },
+                "required": ["grounded"],
+            }
+            out = self._generate_json("answer_synthesis", filled, schema)
+            sentences = []
+            for s in (out.get("sentences") or []):
+                text = (s.get("text") or "").strip()
+                if not text:
+                    continue
+                # keep only in-range citation numbers — the model can't invent a source
+                cites = [c for c in (s.get("cites") or []) if isinstance(c, int) and 1 <= c <= n]
+                sentences.append({"text": text, "cites": cites})
+            grounded = bool(out.get("grounded")) and bool(sentences)
+            return {"sentences": sentences, "grounded": grounded}
+        except Exception as exc:  # noqa: BLE001 — degrade to stub, never break the turn
+            log.warning("Vertex synthesize_answer failed (%s); using stub.", exc)
+            return self._fallback.synthesize_answer(query, chunks)
 
 
 # ── Factory ──────────────────────────────────────────────────────────────────
