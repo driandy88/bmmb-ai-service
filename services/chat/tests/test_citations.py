@@ -1,7 +1,8 @@
 """Phase 1 — grounded, cited answers (program Q&A + guidelines).
 
-A fake retriever supplies chunks so the whole path runs deterministically under
-the stub LLM: retrieve -> synthesize_answer -> sentences[] + numbered citations.
+A fake retriever supplies chunks + a programs() set so the whole path runs
+deterministically under the stub LLM: name a programme -> retrieve -> synthesize ->
+sentences[] + numbered citations. A general question keeps running the funnel.
 """
 from app.agents.guidelines.guidelines import GuidelinesAgent
 from app.agents.program_advisor.advisor import ProgramAdvisor
@@ -10,11 +11,15 @@ from app.integrations.llm import StubLLMClient
 
 
 class FakeRetriever(Retriever):
-    def __init__(self, chunks):
+    def __init__(self, chunks, programs=None):
         self._chunks = chunks
+        self._programs = programs or []
 
     def retrieve(self, query, corpus, top_k=5, *, program_code=None, channel="customer"):
         return self._chunks[:top_k]
+
+    def programs(self):
+        return self._programs
 
 
 def _chunk(text, *, section="financing_rate", score=0.71, page=2):
@@ -26,10 +31,13 @@ def _chunk(text, *, section="financing_rate", score=0.71, page=2):
     )
 
 
-def test_program_fact_question_returns_grounded_cited_answer():
+PROGRAMS = [("MIHP-I", "MIHP-i Sales Kit"), ("GGSM3", "GGSM3 Sales Kit")]
+
+
+def test_named_program_returns_grounded_cited_answer():
     chunks = [_chunk("MIHP-I › Financing rate › Profit rate is 3% flat per annum.")]
-    adv = ProgramAdvisor(StubLLMClient(), FakeRetriever(chunks))
-    res = adv.handle("what's the profit rate for industrial hire purchase?", [], {})
+    adv = ProgramAdvisor(StubLLMClient(), FakeRetriever(chunks, PROGRAMS))
+    res = adv.handle("what's the profit rate for MIHP-I?", [], {})
     assert res["grounded"] is True
     assert res["ui_action"]["type"] == "none"               # answered, not funnelled
     assert res["sentences"][0]["cites"] == [1]
@@ -37,16 +45,33 @@ def test_program_fact_question_returns_grounded_cited_answer():
     assert cit["n"] == 1 and cit["page"] == 2 and cit["doc_title"] == "MIHP-i Sales Kit"
 
 
-def test_program_discovery_question_still_funnels():
-    adv = ProgramAdvisor(StubLLMClient(), FakeRetriever([_chunk("x")]))
+def test_named_program_answers_even_with_funnel_slots_set():
+    # The bug fix: a stuck funnel state must NOT block a named-programme question.
+    chunks = [_chunk("GGSM3 › Financing rate › Profit rate is BFR + 2% per annum.")]
+    adv = ProgramAdvisor(StubLLMClient(), FakeRetriever(chunks, PROGRAMS))
+    res = adv.handle("what's the profit rate for GGSM3?", [],
+                     {"funnel_purpose": 4, "funnel_amount": 300000})
+    assert res["grounded"] is True
+    assert res["ui_action"]["type"] == "none"
+
+
+def test_general_question_naming_no_programme_still_funnels():
+    adv = ProgramAdvisor(StubLLMClient(), FakeRetriever([_chunk("x")], PROGRAMS))
     res = adv.handle("what SME financing programmes do you offer?", [], {})
-    assert res["ui_action"]["type"] == "show_program_options"   # funnel, unchanged
+    assert res["ui_action"]["type"] == "show_program_options"   # funnel, §6a
     assert not res.get("grounded")
 
 
-def test_program_empty_retriever_falls_through_to_funnel():
-    adv = ProgramAdvisor(StubLLMClient(), FakeRetriever([]))   # stub-like: no chunks
-    res = adv.handle("what is the profit rate?", [], {})
+def test_bare_purpose_answer_continues_funnel():
+    adv = ProgramAdvisor(StubLLMClient(), FakeRetriever([_chunk("x")], PROGRAMS))
+    res = adv.handle("machinery", [], {})                       # a lone purpose -> funnel nav
+    assert res["ui_action"]["type"] == "show_program_options"
+    assert not res.get("grounded")
+
+
+def test_empty_index_falls_through_to_funnel():
+    adv = ProgramAdvisor(StubLLMClient(), FakeRetriever([], programs=[]))
+    res = adv.handle("tell me about GGSM3", [], {})
     assert res["ui_action"]["type"] == "show_program_options"
     assert not res.get("grounded")
 
