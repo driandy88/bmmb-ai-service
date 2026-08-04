@@ -54,6 +54,7 @@ STAGE_TO_ROUTE: dict[str, str] = {
     "eligibility_slotfill": "ROUTE-ELIGIBILITY",
     "funnel_purpose": "ROUTE-PROGRAM",
     "funnel_amount": "ROUTE-PROGRAM",
+    "program_offer": "ROUTE-PROGRAM",           # "apply / talk to our team" reply after a grounded answer
     "await_contact_location": "ROUTE-BRANCH",   # turn 2 of the sales-contact flow
     "await_application_id_continue": "ROUTE-CONTINUE",
     "await_application_id_track": "ROUTE-TRACK",

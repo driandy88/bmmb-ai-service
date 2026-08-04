@@ -41,6 +41,7 @@ class SessionState(TypedDict, total=False):
     citations: list[dict[str, Any]]    # [{corpus, ref, snippet}]
     sentences: Optional[list[dict[str, Any]]]  # grounded RAG answer (Phase 1): [{text, cites}]
     grounded: bool                     # True when the reply is a cited, grounded RAG answer
+    suggestions: list[dict[str, Any]]  # next-step chips [{label, value}] — any turn may attach
     handoff: dict[str, Any]            # {required, reason, contact}
     decision_inputs: dict[str, Any]    # PII-redacted inputs for audit
     rule_version: str
