@@ -74,10 +74,15 @@ jobs:
         run: |
           docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
 
-      # Stateless by design: no Cloud SQL, no secrets. RAG/audit/session are
-      # stub/memory/none; the only egress is message text -> Vertex Gemini via ADC
-      # (the runtime SA). chat-service-sa needs roles/aiplatform.user -- one-time
-      # setup, see services/chat/README.md.
+      # RAG is live: retrieval reads Cloud SQL pgvector (rag_chunks in bmmb_prod).
+      # The runtime SA needs roles/aiplatform.user (embeddings + Gemini) AND
+      # roles/cloudsql.client (DB) -- one-time setup, see services/chat/README.md.
+      # PgVectorRetriever connects with plain psycopg over the Cloud SQL unix
+      # socket (--add-cloudsql-instances mounts it at /cloudsql/<instance>), so
+      # DB_HOST is that socket dir and DB_PORT stays 5432. DB_PASS comes from
+      # Secret Manager (same secret the extraction deploy uses). EMBEDDING_* are
+      # pinned to match the ingested vectors (gemini-embedding-001 @ 1536) -- a
+      # mismatch silently breaks cosine retrieval.
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy ${{ env.SERVICE_NAME }} \
@@ -87,7 +92,9 @@ jobs:
             --allow-unauthenticated \
             --memory=1Gi --cpu=1 \
             --service-account=chat-service-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
-            --set-env-vars=LLM_BACKEND=vertex,GCP_PROJECT_ID=${{ env.PROJECT_ID }},VERTEX_LOCATION=${{ env.REGION }},MODEL_ID=gemini-2.5-flash,RAG_BACKEND=stub,AUDIT_BACKEND=memory,SESSION_STORE_BACKEND=none,EXTRACTION_BACKEND=stub,ALLOWED_ORIGINS='*'
+            --add-cloudsql-instances=${{ secrets.INSTANCE_CONNECTION_NAME }} \
+            --set-env-vars=LLM_BACKEND=vertex,GCP_PROJECT_ID=${{ env.PROJECT_ID }},VERTEX_LOCATION=${{ env.REGION }},MODEL_ID=gemini-2.5-flash,RAG_BACKEND=pgvector,AUDIT_BACKEND=memory,SESSION_STORE_BACKEND=none,EXTRACTION_BACKEND=stub,ALLOWED_ORIGINS='*',APP_ENV=prod,DB_HOST=/cloudsql/${{ secrets.INSTANCE_CONNECTION_NAME }},DB_PORT=5432,DB_NAME=bmmb_prod,DB_USER=${{ secrets.DB_USER }},EMBEDDING_MODEL_ID=gemini-embedding-001,EMBEDDING_DIMENSIONS=1536 \
+            --set-secrets=DB_PASS=${{ secrets.DB_PASS_SECRET_NAME }}:latest
 
       - name: Show deployed URL
         run: gcloud run services describe ${{ env.SERVICE_NAME }} --region=${{ env.REGION }} --format="value(status.url)"
