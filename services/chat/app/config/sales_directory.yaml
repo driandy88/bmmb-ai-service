@@ -36,6 +36,16 @@ trigger_message:
   T3: H4
   T4: H1
 
+# ── Handoff intro (shown BEFORE the location IntakeCard) ──────────────────────
+# Contact-free lead-in per trigger — the actual contact is given after the
+# customer picks their state/city. Keeps the apology (T1) / framing up front.
+handoff_intro:
+  T1: "I'm sorry about this experience — let me connect you with our SME financing team who can help."
+  T2: "Of course — I'll connect you with our SME financing team."
+  T3: "Let me hand you to someone who can help properly."
+  T4: "Eligibility is best confirmed with our SME financing team directly — let me connect you."
+  default: "I'll connect you with our SME financing team."
+
 # ── 2.2 & 2.3 Sales directory & contact details ──────────────────────────────
 # region_id -> region + ordered contacts. The handoff picks contacts[0]
 # deterministically. R4/R6 have a single contact in the sheet.

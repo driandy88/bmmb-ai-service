@@ -45,7 +45,8 @@ from app.orchestrator.state import SessionState, new_state
 from app.utils import pii
 
 _UI_TYPES = {"none", "render_eligibility_form", "show_eligibility_result",
-             "open_application_link", "show_contact_card", "show_program_options"}
+             "open_application_link", "show_contact_card", "render_contact_form",
+             "show_program_options"}
 
 
 @dataclass

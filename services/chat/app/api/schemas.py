@@ -22,6 +22,7 @@ UiActionType = Literal[
     "show_eligibility_result",
     "open_application_link",
     "show_contact_card",
+    "render_contact_form",       # collect the customer's location before routing to a contact
     "show_program_options",
 ]
 

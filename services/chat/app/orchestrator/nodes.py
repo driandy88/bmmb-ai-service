@@ -70,12 +70,14 @@ def clarify_node(state: dict, deps) -> dict:
 
 
 def handoff_node(state: dict, deps) -> dict:
-    """Low-confidence loop -> human handoff (T3)."""
+    """Low-confidence loop -> human handoff (T3). Starts the sales-contact flow
+    (intro + location IntakeCard); the client's next turn resolves the contact."""
     res = deps.sales_handoff.handle(state["message"], state.get("history", []),
-                                    reason="T3", channel=state.get("channel", "customer"))
+                                    reason="T3", channel=state.get("channel", "customer"),
+                                    stage=state.get("stage"))
     return {
         "reply": res["reply"], "ui_action": res["ui_action"], "handoff": res["handoff_block"],
-        "citations": [], "stage": "handoff", "awaiting_clarification": False,
+        "citations": [], "stage": res.get("stage", "handoff"), "awaiting_clarification": False,
         "decision_inputs": res["decision_inputs"],
     }
 
@@ -118,12 +120,14 @@ def dispatch_node(state: dict, deps) -> dict:
     if "slots" in res:
         updates["slots"] = res["slots"]
 
-    # Handler REQUESTED a handoff it doesn't perform itself (eligibility Tier-2).
+    # Handler REQUESTED a handoff it doesn't perform itself (frozen eligibility T4,
+    # etc.). Start the sales-contact flow (intro + location IntakeCard); its stage
+    # (await_contact_location) carries through so the next turn resolves the contact.
     if res.get("handoff") and not res.get("handoff_block"):
         h = deps.sales_handoff.handle(state["message"], state.get("history", []),
                                       reason=res.get("handoff_reason"), channel=state.get("channel", "customer"))
         reply = (reply + "\n\n" + h["reply"]).strip() if reply else h["reply"]
-        ui, handoff_block, stage = h["ui_action"], h["handoff_block"], "handoff"
+        ui, handoff_block, stage = h["ui_action"], h["handoff_block"], h.get("stage", "handoff")
         decision_inputs = {**decision_inputs, **h["decision_inputs"]}
 
     # Sheet-9 secondary.
@@ -184,7 +188,11 @@ def _run_handler(deps, ref: str, state: dict) -> dict:
     hist = state.get("history", [])
     slots = state.get("slots", {})
     if ref == "ROUTE-BRANCH":
-        return deps.sales_handoff.handle(msg, hist, reason=None, channel=state.get("channel", "customer"))
+        # Pass the client stage so turn 2 (await_contact_location) resolves the
+        # contact from the location the customer just gave. Same field the routing
+        # continuation keys on (STAGE_TO_ROUTE.get(state["stage"])).
+        return deps.sales_handoff.handle(msg, hist, reason=None, channel=state.get("channel", "customer"),
+                                         stage=state.get("stage"))
     if ref == "ROUTE-PROGRAM":
         return deps.program_advisor.handle(msg, hist, slots)
     if ref in ("ROUTE-GUIDELINES", "ROUTE-SHARIAH"):

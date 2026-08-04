@@ -1,14 +1,16 @@
 """
-Sales handoff agent (brief §7) — Sheet 2.
+Sales handoff agent (brief §7) — Sheet 2. A 2-turn flow:
 
-Resolves the customer's state/city -> region -> the correct Sales contact, and
-emits the handoff message (H1–H4) + a contact card. Handoff triggers:
-  T1 complaint/dispute · T2 explicit request for human · T3 repeated bot failure
-  (low-confidence loop) · T4 sensitive/borderline eligibility (Tier-2).
+  Turn 1 (_start): any sales trigger -> a canned intro (handoff_intro) + a location
+    IntakeCard (ui_action render_contact_form), stage = await_contact_location.
+  Turn 2 (_resolve): the customer's state/city -> region -> the correct Sales
+    contact + a contact card. Unresolvable / skipped -> the Overall team (R1).
 
-The trigger is usually supplied by the orchestrator (T3 from routing, T4 from
-the eligibility agent); when absent it's inferred from the message (T1/T2). An
-unresolvable location falls back to the Overall team (R1).
+Handoff triggers: T1 complaint/dispute · T2 explicit request for human · T3
+repeated bot failure (low-confidence loop) · T4 sensitive/borderline eligibility
+(also the FROZEN eligibility funnel). The trigger is supplied by the orchestrator
+(T3 from routing, T4 from the eligibility agent) or inferred from the message
+(T1/T2); it only shapes the turn-1 intro — turn 2 just gives the regional contact.
 """
 from __future__ import annotations
 
@@ -16,6 +18,9 @@ from typing import Optional
 
 from app.config.loader import AppConfig, load_config
 from app.config.settings import get_settings
+
+# Stage the client echoes back after turn 1 so turn 2 resolves the contact.
+_AWAIT_LOCATION_STAGE = "await_contact_location"
 
 
 class SalesHandoff:
@@ -76,35 +81,53 @@ class SalesHandoff:
             parts.append(f"({', '.join(reach)})")
         return " ".join(parts)
 
-    # -- main --------------------------------------------------------------
+    # -- main (2-turn: start -> collect location -> resolve contact) --------
     def handle(self, message: str, history: list[dict], *, reason: Optional[str] = None,
-               channel: str = "customer") -> dict:
+               channel: str = "customer", stage: Optional[str] = None) -> dict:
+        """Turn 1 (any sales trigger): a canned intro + a location IntakeCard.
+        Turn 2 (stage == await_contact_location): resolve the state/city the
+        customer gave -> the right regional contact (unresolvable -> R1)."""
+        if stage == _AWAIT_LOCATION_STAGE:
+            return self._resolve(message, history)
+        return self._start(message, reason)
+
+    def _start(self, message: str, reason: Optional[str]) -> dict:
         trigger = reason
         if trigger not in ("T1", "T2", "T3", "T4"):
             detected = self.detect_triggers(message)
             trigger = detected[0] if detected else "T2"   # default: general handoff
+        intro = self._sales.get("handoff_intro", {})
+        reply = intro.get(trigger) or intro.get("default") or "I'll connect you with our SME financing team."
+        trigger_name = next((t["name"] for t in self._sales["triggers"] if t["id"] == trigger), trigger)
+        return {
+            "reply": reply,
+            "stage": _AWAIT_LOCATION_STAGE,
+            "ui_action": {"type": "render_contact_form", "payload": {}},
+            "citations": [],
+            "handoff": True,
+            "handoff_reason": trigger,
+            "handoff_block": {"required": True, "reason": f"{trigger}: {trigger_name}", "contact": None},
+            "decision_inputs": {"trigger": trigger, "phase": "collect_location"},
+        }
 
+    def _resolve(self, message: str, history: list[dict]) -> dict:
         region = self.resolve_region(message + " " + " ".join(t.get("content", "") for t in (history or [])))
         contact = self.contact_for(region["region_id"])
-
-        msg_ref = self._sales["trigger_message"].get(trigger, "H1")
-        template = self._sales["handoff_messages"][msg_ref]["message"]
-        reply = template.format(branch_contact=self._branch_contact_str(contact),
-                                hours=contact.get("hours", ""))
-
-        trigger_name = next((t["name"] for t in self._sales["triggers"] if t["id"] == trigger), trigger)
+        who = self._branch_contact_str(contact)
+        hours = contact.get("hours", "")
+        if region["matched"]:
+            reply = (f"You're in our {region['region']} region — here's the Bank Muamalat SME financing "
+                     f"contact for your area: {who}. They're available {hours}.")
+        else:
+            reply = (f"No problem — our SME financing team can help: {who}. They're available {hours}.")
         return {
             "reply": reply,
             "stage": "handoff",
             "ui_action": {"type": "show_contact_card", "payload": contact},
             "citations": [],
             "handoff": True,
-            "handoff_reason": trigger,
-            "handoff_block": {
-                "required": True,
-                "reason": f"{trigger}: {trigger_name}",
-                "contact": contact,
-            },
-            "decision_inputs": {"trigger": trigger, "region_id": region["region_id"],
-                                "region": region["region"], "matched_location": region["matched"]},
+            "handoff_reason": "T2",
+            "handoff_block": {"required": True, "reason": "resolved contact", "contact": contact},
+            "decision_inputs": {"region_id": region["region_id"], "region": region["region"],
+                                "matched_location": region["matched"], "phase": "resolved"},
         }
