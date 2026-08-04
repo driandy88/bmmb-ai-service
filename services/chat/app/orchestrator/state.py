@@ -39,6 +39,8 @@ class SessionState(TypedDict, total=False):
     route: str                         # human-readable route label for audit
     ui_action: dict[str, Any]          # {type, payload}
     citations: list[dict[str, Any]]    # [{corpus, ref, snippet}]
+    sentences: Optional[list[dict[str, Any]]]  # grounded RAG answer (Phase 1): [{text, cites}]
+    grounded: bool                     # True when the reply is a cited, grounded RAG answer
     handoff: dict[str, Any]            # {required, reason, contact}
     decision_inputs: dict[str, Any]    # PII-redacted inputs for audit
     rule_version: str
