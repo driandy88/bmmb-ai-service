@@ -130,6 +130,29 @@ class ProgramAdvisor:
         code = rw.get("program_code")
         return code if code in {c for c, _ in programs} else None
 
+    @staticmethod
+    def _norm_program(code: str) -> str:
+        """Strip naming drift so products.yaml 'GGSM' == index 'GGSM3', 'MHP' == 'MHP-I'."""
+        norm = re.sub(r"[^A-Z]", "", (code or "").upper())
+        return norm[:-1] if norm.endswith("I") else norm
+
+    def _named_unindexed_program(self, message: str) -> Optional[tuple[str, str]]:
+        """A programme the bank HAS (products.yaml) but has no Sales Kit indexed for -> (code,
+        full_name). None when the message names no known programme, names one we CAN answer (it's
+        in the live index), or when there is no index at all (that stays a funnel case)."""
+        indexed = {self._norm_program(c) for c, _ in (getattr(self._retriever, "programs", lambda: [])() or [])}
+        if not indexed:
+            return None
+        for p in self._cfg.products.get("quantum", []):
+            code = (p.get("program") or "").strip()
+            if not code:
+                continue
+            # match the code with naming-drift suffixes (GGSM3, MHP-I, MIHP-i) as a whole word
+            if re.search(rf"\b{re.escape(code)}(?:[-\s]?i|[-\s]?\d+)?\b", message or "", re.IGNORECASE):
+                if self._norm_program(code) not in indexed:
+                    return code, (p.get("full_name") or code)
+        return None
+
     # -- post-answer offer (apply / talk to our team) ----------------------
     @staticmethod
     def _offer_suggestions(program: str) -> list[dict]:
@@ -239,6 +262,22 @@ class ProgramAdvisor:
             offer = self._grounded_offer(message, program, slots)
             if offer:
                 return offer
+
+        # A programme we KNOW (products.yaml) but have no Sales Kit indexed for — TERAJU, BIZJAMIN,
+        # CGC, SRF… Name it and offer the SME team, instead of silently dropping into the funnel or
+        # deflecting as off-topic. (Only when there IS an index; an empty index stays a funnel case.)
+        if not self._is_funnel_nav(message):
+            named = self._named_unindexed_program(message)
+            if named:
+                code, full_name = named
+                reply = (f"{full_name} is one of Bank Muamalat's SME financing programmes, but I don't "
+                         f"have its detailed materials on hand here yet. Our SME financing team can walk you "
+                         f"through {code} — or I can help you explore the programmes I can detail.")
+                return _turn(reply, slots, stage="program_done", ui={"type": "none", "payload": {}},
+                             suggestions=[
+                                 {"label": "Connect to Sales team", "value": "I'd like to talk to your SME financing team"},
+                                 {"label": "Explore programmes", "value": "What SME financing programmes do you offer?"},
+                             ])
 
         # Merge any purpose/amount found this turn.
         if slots.get("funnel_purpose") is None:
