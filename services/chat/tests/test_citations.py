@@ -149,6 +149,28 @@ def test_empty_index_falls_through_to_funnel():
     assert not res.get("grounded")
 
 
+_INDEX = [("GGSM3", "GGSM3 Sales Kit"), ("MIHP-I", "MIHP-i Sales Kit"), ("SJUM", "SJUM Sales Kit")]
+
+
+def test_known_programme_without_kit_gets_graceful_response():
+    # TERAJU is a real programme (products.yaml) but has no Sales Kit indexed — name it and offer the
+    # SME team, instead of a funnel dump or an off-topic deflection.
+    adv = ProgramAdvisor(StubLLMClient(), FakeRetriever([_chunk("x")], programs=_INDEX))
+    res = adv.handle("explain to me about TERAJU", [], {})
+    assert res["ui_action"]["type"] == "none"          # not the funnel
+    assert not res.get("grounded")
+    assert "TERAJU" in res["reply"]
+    assert any("Sales" in s["label"] for s in res["suggestions"])
+
+
+def test_indexed_programme_is_not_treated_as_missing():
+    # A programme WITH a kit (GGSM3) must still be answered, not routed to "no materials".
+    chunks = [_chunk("GGSM3 › Financing rate › The financing tenure is up to 5 years.")]
+    adv = ProgramAdvisor(StubLLMClient(), FakeRetriever(chunks, programs=_INDEX))
+    res = adv.handle("what is the tenure for GGSM3?", [], {})
+    assert res.get("grounded") is True
+
+
 def test_guidelines_grounded_when_corpus_has_chunks():
     chunks = [_chunk("Shariah › SME financing is structured under Tawarruq.", section="shariah")]
     agent = GuidelinesAgent(StubLLMClient(), FakeRetriever(chunks))
