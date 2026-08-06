@@ -55,6 +55,42 @@ def test_named_program_answers_even_with_funnel_slots_set():
     assert res["ui_action"]["type"] == "none"
 
 
+def test_program_offer_followup_inherits_last_program():
+    # Flow fix: in the post-answer offer, an anaphoric follow-up that names no programme
+    # ("elaborate more, the profit rate") is ANSWERED about the one just discussed
+    # (last_program), not deflected with "would you like to apply for GGSM3…".
+    chunks = [_chunk("GGSM3 › Financing rate › Profit rate is BFR + 2% per annum.")]
+    adv = ProgramAdvisor(StubLLMClient(), FakeRetriever(chunks, PROGRAMS))
+    res = adv.handle("can you elaborate more, like the profit rate and other details?",
+                     [], {"last_program": "GGSM3"}, stage="program_offer")
+    assert res["grounded"] is True
+    assert res["ui_action"]["type"] == "none"          # answered, not deflected
+    assert res["stage"] == "program_offer"             # still open for more follow-ups
+    assert res["slots"]["last_program"] == "GGSM3"
+
+
+def test_program_offer_other_programmes_opens_funnel():
+    # "what else do you have?" in the offer leaves the current programme and opens the
+    # discovery funnel, instead of dead-ending on "apply for GGSM3?".
+    adv = ProgramAdvisor(StubLLMClient(), FakeRetriever([_chunk("x")], PROGRAMS))
+    res = adv.handle("what else do you have?", [],
+                     {"last_program": "GGSM3"}, stage="program_offer")
+    assert res["ui_action"]["type"] == "show_program_options"
+    assert res["ui_action"]["payload"]["step"] == "purpose"
+    assert not res.get("grounded")
+    assert "last_program" not in res["slots"]          # moved off the old programme
+
+
+def test_program_offer_stray_reply_still_reprompts():
+    # A stray reply that is neither answerable nor a browse request keeps the original
+    # gentle re-prompt (unchanged behaviour) rather than dropping into the funnel.
+    adv = ProgramAdvisor(StubLLMClient(), FakeRetriever([], programs=PROGRAMS))
+    res = adv.handle("hmm cool", [], {"last_program": "GGSM3"}, stage="program_offer")
+    assert res["ui_action"]["type"] == "none"
+    assert not res.get("grounded")
+    assert "GGSM3" in res["reply"]
+
+
 def test_general_question_naming_no_programme_still_funnels():
     adv = ProgramAdvisor(StubLLMClient(), FakeRetriever([_chunk("x")], PROGRAMS))
     res = adv.handle("what SME financing programmes do you offer?", [], {})

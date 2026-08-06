@@ -44,6 +44,17 @@ _DECLINE_KEYWORDS = ["no thanks", "no thank", "not now", "maybe later", "not int
                      "that's all", "thats all", "nothing else", "no more", "i'm good",
                      "im good", "just looking", "no need"]
 
+# In the post-answer offer, a request to browse OTHER programmes (as opposed to a
+# follow-up about the current one). Phrase-based on purpose: a bare "other" inside
+# "and other thing" (a follow-up about the SAME programme) must NOT match, only an
+# explicit "other/different <programme>" or "what else do you have".
+_OTHER_PROGRAMS_RE = re.compile(
+    r"\b(?:other|another|different|alternative)\s+"
+    r"(?:program|programme|product|financing|facilit\w*|option|scheme|package|offering)s?\b"
+    r"|\bwhat(?:'s| is| are)?\s+else\s+(?:do\s+|can\s+)?(?:you|u|we)\s*(?:have|offer|got|provide|do)\b"
+    r"|\b(?:show|list|see)\s+(?:me\s+)?(?:all|other|more)\s+(?:program|programme|product|option|financing)s?\b",
+    re.I)
+
 # Keyword -> purpose id (Sheet 3, column 1).
 _PURPOSE_KEYWORDS = {
     1: ["expansion", "expand", "capital expenditure", "capex", "grow", "growth"],
@@ -130,6 +141,29 @@ class ProgramAdvisor:
             {"label": "Connect to Sales team", "value": "I'd like to talk to your SME financing team"},
         ]
 
+    @staticmethod
+    def _wants_other_programs(message: str) -> bool:
+        """True when the customer is asking to see OTHER programmes ('what else do you
+        have?', 'other financing options') rather than more about the current one."""
+        return bool(_OTHER_PROGRAMS_RE.search(message or ""))
+
+    def _grounded_offer(self, message: str, program: str, slots: dict) -> Optional[dict]:
+        """A grounded, cited answer about `program` + the apply/talk offer — or None when
+        the index has nothing relevant. Shared by a NAMED-programme question and, in the
+        offer stage, an anaphoric follow-up that inherits `last_program`."""
+        ans = grounded_answer(self._llm, self._retriever, message, Corpus.PROGRAM,
+                              top_k=4, program_code=program)
+        if not ans:
+            return None
+        slots["last_program"] = program
+        cta = f"Would you like to apply for {program}, or speak with our SME team?"
+        sentences = list(ans["sentences"]) + [{"text": cta, "cites": []}]
+        reply = (ans["reply"] + " " + cta).strip()
+        return _turn(reply, slots, stage="program_offer",
+                     ui={"type": "none", "payload": {}}, citations=ans["citations"],
+                     sentences=sentences, grounded=True,
+                     suggestions=self._offer_suggestions(program))
+
     def _followup_decision(self, message: str) -> str:
         """Read a bare reply to the offer: 'apply' | 'decline' | 'other'. An
         explicit 'talk to a person' is caught upstream by the classifier (INS-01)
@@ -176,28 +210,35 @@ class ProgramAdvisor:
                              "or another programme. A few things I can help with —",
                              slots, stage="program_done", ui={"type": "none", "payload": {}},
                              suggestions=explore_suggestions(prog))
-            # Neither a clear yes/no nor a new programme: keep the thread open
-            # instead of dropping into the funnel purpose prompt for a stray reply.
-            return _turn(f"Sure — would you like to apply for {prog}, or ask me anything "
-                         "else about our SME financing?", slots, stage="program_offer",
-                         ui={"type": "none", "payload": {}},
-                         suggestions=self._offer_suggestions(prog))
+            # A request to browse OTHER programmes leaves the current one and opens the
+            # discovery funnel below — otherwise "what else do you have?" dead-ended on an
+            # offer to apply for the very programme they were trying to move on from.
+            if self._wants_other_programs(message):
+                slots.pop("last_program", None)
+                # fall through to the funnel
+            else:
+                # Otherwise it's a follow-up QUESTION about the programme just discussed
+                # ("tell me more", "the profit rate", "what documents") — answer it, inheriting
+                # last_program so the grounded index is scoped to it even though the message
+                # names nothing. This is the anaphora the stateless retriever can't do alone;
+                # here we HAVE last_program in slots.
+                offer = self._grounded_offer(message, prog, slots)
+                if offer:
+                    return offer
+                # Nothing relevant to this programme and not asking to browse — keep the
+                # thread open with a gentle re-prompt (the original stray-reply behaviour).
+                return _turn(f"Sure — would you like to apply for {prog}, or ask me anything "
+                             "else about our SME financing?", slots, stage="program_offer",
+                             ui={"type": "none", "payload": {}},
+                             suggestions=self._offer_suggestions(prog))
 
         # Grounded program Q&A (Phase 1): when the customer NAMES a programme (a
         # direct question, or the "Details" button), answer it with a grounded,
         # cited answer AND offer the next step so the thread doesn't dead-end.
         if program:
-            ans = grounded_answer(self._llm, self._retriever, message, Corpus.PROGRAM,
-                                  top_k=4, program_code=program)
-            if ans:
-                slots["last_program"] = program
-                cta = f"Would you like to apply for {program}, or speak with our SME team?"
-                sentences = list(ans["sentences"]) + [{"text": cta, "cites": []}]
-                reply = (ans["reply"] + " " + cta).strip()
-                return _turn(reply, slots, stage="program_offer",
-                             ui={"type": "none", "payload": {}}, citations=ans["citations"],
-                             sentences=sentences, grounded=True,
-                             suggestions=self._offer_suggestions(program))
+            offer = self._grounded_offer(message, program, slots)
+            if offer:
+                return offer
 
         # Merge any purpose/amount found this turn.
         if slots.get("funnel_purpose") is None:
