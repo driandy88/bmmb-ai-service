@@ -19,20 +19,19 @@ from functools import lru_cache
 
 from app.config.loader import load_config
 
-# Programmes that live in the RAG index but not in products.yaml's quantum table,
-# plus the shared "Madani" family word — so "what is Madani 3" also routes in.
-_EXTRA_ALIASES = {"PROUD", "MADANI"}
-
 
 @lru_cache(maxsize=1)
 def _pattern() -> re.Pattern:
+    # Config-driven: the programme universe is products.yaml's quantum catalogue — no hardcoded list,
+    # so adding a programme there makes it detectable. These acronyms are all distinctive (none collide
+    # with common English words), which is why the match can be a plain word-boundary regex.
     codes = {
         (p.get("program") or "").strip().upper()
         for p in load_config().products.get("quantum", [])
         if (p.get("program") or "").strip()
-    } | _EXTRA_ALIASES
-    # Longest-first so e.g. MIHP is tried before MHP. Each base acronym may carry
-    # a naming-drift suffix: GGSM3, MHP-I, MIHP-i, GGSM 4 → still the same programme.
+    }
+    # Longest-first so e.g. MIHP is tried before MHP. Each base acronym may carry a naming-drift
+    # suffix: GGSM3, MHP-I, MIHP-i, GGSM 4 → still the same programme.
     alts = "|".join(sorted((re.escape(c) for c in codes), key=len, reverse=True))
     return re.compile(rf"\b(?:{alts})(?:[-\s]?i|[-\s]?\d+)?\b", re.IGNORECASE)
 

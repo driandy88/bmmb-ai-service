@@ -15,10 +15,10 @@ def _deps(primary, confidence=0.9):
 
 def test_mentions_program_detects_acronyms_and_naming_drift():
     for m in ["what is GGSM", "what is the tenure for GGSM3", "explain MIHP", "what about MHP-i",
-              "tell me about TERAJU", "is SJUM available", "what is Madani 3", "PROUD financing?"]:
+              "tell me about TERAJU", "is SJUM available", "do you have BIZJAMIN"]:
         assert mentions_program(m), m
     for m in ["what's your fixed deposit rate", "how's the weather today", "I want a savings account",
-              "hello there"]:
+              "hello there", "I'm proud of my business"]:  # "proud" must NOT match a programme
         assert not mentions_program(m), m
 
 
