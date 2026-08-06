@@ -82,6 +82,28 @@ def test_grounded_answer_keeps_labels_and_builds_readable_reply():
     assert "Profit rate: BFR + 2% per annum" in ans["reply"]
 
 
+def test_structured_to_sentences_flattens_lead_and_facts():
+    # The synthesiser now returns a FORCED {lead, facts:[{label,value,cites}]} shape (an optional
+    # label the model just ignored); this flattens it to sentences[{text, cites, label?}] for the UI.
+    from app.integrations.llm import _structured_to_sentences
+
+    out = {
+        "grounded": True,
+        "lead": "GGSM3 is a government-guaranteed scheme.",
+        "lead_cites": [1, 9],  # 9 is out of range -> dropped
+        "facts": [
+            {"label": "Financing", "value": "up to RM 10 million", "cites": [1]},
+            {"label": "Profit rate", "value": "from BFR + 2%", "cites": [2]},
+            {"label": "", "value": "", "cites": [1]},  # empty value -> skipped
+        ],
+    }
+    sents = _structured_to_sentences(out, n=4)
+    assert len(sents) == 3                                    # empty-value fact skipped
+    assert sents[0] == {"text": "GGSM3 is a government-guaranteed scheme.", "cites": [1]}  # lead: no label, 9 dropped
+    assert sents[1] == {"text": "up to RM 10 million", "cites": [1], "label": "Financing"}
+    assert sents[2]["label"] == "Profit rate"
+
+
 def test_named_program_answers_even_with_funnel_slots_set():
     # The bug fix: a stuck funnel state must NOT block a named-programme question.
     chunks = [_chunk("GGSM3 › Financing rate › Profit rate is BFR + 2% per annum.")]
