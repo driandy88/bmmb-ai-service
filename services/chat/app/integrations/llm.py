@@ -169,6 +169,29 @@ def _chunk_label(c: Any) -> str:
     return " · ".join(x for x in (md.get("doc_title"), md.get("section")) if x) or "source"
 
 
+def _structured_to_sentences(out: dict, n: int) -> list[dict]:
+    """Flatten the synthesiser's forced {lead, lead_cites, facts:[{label,value,cites}]} shape into the
+    sentences[{text, cites, label?}] the envelope/UI expects: the lead is a label-less sentence, each
+    fact a labelled one (text = value). Out-of-range citation numbers are dropped (no invented source)."""
+    def _cites(raw: Any) -> list[int]:
+        return [c for c in (raw or []) if isinstance(c, int) and 1 <= c <= n]
+
+    sentences: list[dict] = []
+    lead = (out.get("lead") or "").strip()
+    if lead:
+        sentences.append({"text": lead, "cites": _cites(out.get("lead_cites"))})
+    for f in (out.get("facts") or []):
+        value = (f.get("value") or "").strip()
+        if not value:
+            continue
+        entry = {"text": value, "cites": _cites(f.get("cites"))}
+        label = (f.get("label") or "").strip()
+        if label:
+            entry["label"] = label
+        sentences.append(entry)
+    return sentences
+
+
 def _first_sentence(text: str, limit: int = 220) -> str:
     """A readable lead sentence: drop the 'LABEL › section › ' breadcrumb Stage 4
     prepends, then take up to the first sentence end (or `limit` chars)."""
@@ -442,36 +465,28 @@ class VertexGeminiClient(LLMClient):
             listing = "\n\n".join(f"[{i}] ({_chunk_label(c)})\n{_chunk_text(c)}"
                                   for i, c in enumerate(chunks, start=1))
             filled = render(load_prompt("answer_synthesis"), query=query, chunks=listing)
+            # A FORCED shape — an explicit lead + a facts[] whose label/value are required — makes the
+            # model reliably produce labelled facts (an optional label it just ignores, writing prose).
             schema = {
                 "type": "OBJECT",
                 "properties": {
                     "grounded": {"type": "BOOLEAN"},
-                    "sentences": {"type": "ARRAY", "items": {
+                    "lead": {"type": "STRING"},
+                    "lead_cites": {"type": "ARRAY", "items": {"type": "INTEGER"}},
+                    "facts": {"type": "ARRAY", "items": {
                         "type": "OBJECT",
                         "properties": {
-                            "text": {"type": "STRING"},
                             "label": {"type": "STRING"},
+                            "value": {"type": "STRING"},
                             "cites": {"type": "ARRAY", "items": {"type": "INTEGER"}},
                         },
-                        "required": ["text"],
+                        "required": ["label", "value"],
                     }},
                 },
                 "required": ["grounded"],
             }
             out = self._generate_json("answer_synthesis", filled, schema)
-            sentences = []
-            for s in (out.get("sentences") or []):
-                text = (s.get("text") or "").strip()
-                if not text:
-                    continue
-                # keep only in-range citation numbers — the model can't invent a source
-                cites = [c for c in (s.get("cites") or []) if isinstance(c, int) and 1 <= c <= n]
-                entry = {"text": text, "cites": cites}
-                # `label` (optional) turns a sentence into a scannable key fact; the lead has none.
-                label = (s.get("label") or "").strip()
-                if label:
-                    entry["label"] = label
-                sentences.append(entry)
+            sentences = _structured_to_sentences(out, n)
             grounded = bool(out.get("grounded")) and bool(sentences)
             return {"sentences": sentences, "grounded": grounded}
         except Exception as exc:  # noqa: BLE001 — degrade to stub, never break the turn
