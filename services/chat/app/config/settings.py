@@ -34,6 +34,10 @@ class Settings:
     gcp_project_id: str | None = os.getenv("GCP_PROJECT_ID") or None
     vertex_location: str = os.getenv("VERTEX_LOCATION", "asia-southeast1")
     model_id: str = os.getenv("MODEL_ID", "gemini-2.5-flash")
+    # Per-call Vertex timeout (ms). The installed google-genai SDK offers no request timeout, so a
+    # slow/stalled generation is capped in-process (thread + future timeout) and degrades to the
+    # deterministic fallback instead of hanging the whole turn (typing dots forever).
+    llm_timeout_ms: int = int(os.getenv("LLM_TIMEOUT_MS", "30000"))
 
     # ── Backend selection (stub vs real) ─────────────────────────────────────
     # Default to the real backend only when a project is configured; otherwise

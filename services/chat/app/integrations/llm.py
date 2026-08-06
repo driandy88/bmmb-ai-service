@@ -18,6 +18,7 @@ guardrail denylist still runs regardless).
 """
 from __future__ import annotations
 
+import concurrent.futures as _futures
 import json
 import re
 from abc import ABC, abstractmethod
@@ -29,6 +30,11 @@ from app.utils.logging import get_logger
 from app.utils.prompts import load_prompt, render, system_prompt
 
 log = get_logger("llm")
+
+# The installed google-genai (0.3.0) hardcodes timeout=None on the HTTP call, so a stalled Vertex
+# response would hang the whole turn (typing dots forever). Run each generation on a small pool and
+# cap it with future.result(timeout=…); on timeout the caller's `except` degrades to the stub.
+_GEN_POOL = _futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="vertex-gen")
 
 
 class LLMClient(ABC):
@@ -327,6 +333,15 @@ class VertexGeminiClient(LLMClient):
         lines = [f"{t.get('role', 'user')}: {t.get('content', '')}" for t in (history or [])]
         return "\n".join(lines) if lines else "(no prior turns)"
 
+    def _generate(self, contents: str, cfg):
+        """generate_content, capped by settings.llm_timeout_ms (the SDK offers no request timeout).
+        Raises TimeoutError on a stalled call, so the caller's `except` degrades to the stub instead
+        of hanging the turn. The orphaned request thread is left to finish on its own (bounded by
+        Vertex's own server-side limit)."""
+        fut = _GEN_POOL.submit(self._client.models.generate_content,
+                               model=self._model, contents=contents, config=cfg)
+        return fut.result(timeout=self._settings.llm_timeout_ms / 1000)
+
     def _generate_json(self, prompt_name: str, filled: str, schema: dict) -> dict:
         from google.genai import types
         cfg = types.GenerateContentConfig(
@@ -335,13 +350,13 @@ class VertexGeminiClient(LLMClient):
             response_schema=schema,
             temperature=0.0,
         )
-        resp = self._client.models.generate_content(model=self._model, contents=filled, config=cfg)
+        resp = self._generate(filled, cfg)
         return json.loads(resp.text)
 
     def _generate_text(self, prompt_name: str, filled: str) -> str:
         from google.genai import types
         cfg = types.GenerateContentConfig(system_instruction=system_prompt(prompt_name), temperature=0.3)
-        resp = self._client.models.generate_content(model=self._model, contents=filled, config=cfg)
+        resp = self._generate(filled, cfg)
         return (resp.text or "").strip()
 
     # -- interface --

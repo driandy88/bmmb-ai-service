@@ -104,6 +104,32 @@ def test_structured_to_sentences_flattens_lead_and_facts():
     assert sents[2]["label"] == "Profit rate"
 
 
+def test_slow_vertex_call_times_out_and_falls_back_instead_of_hanging():
+    # The SDK has no request timeout, so a stalled Vertex call would hang the whole turn. `_generate`
+    # caps it (thread + future timeout); the method's `except` then degrades to the deterministic stub.
+    import time
+    import types as _t
+    from app.integrations.llm import VertexGeminiClient, StubLLMClient
+
+    v = VertexGeminiClient.__new__(VertexGeminiClient)        # bypass __init__ (no GCP creds)
+    v._settings = _t.SimpleNamespace(llm_timeout_ms=50)       # 50ms cap
+    v._model = "gemini-2.5-flash"
+    v._fallback = StubLLMClient()
+
+    class _SlowModels:
+        def generate_content(self, **kw):
+            time.sleep(0.4)                                    # > 50ms -> future.result times out
+            return _t.SimpleNamespace(text="{}")
+
+    v._client = _t.SimpleNamespace(models=_SlowModels())
+
+    chunks = [_chunk("GGSM3 › Financing rate › Profit rate is BFR + 2% per annum.")]
+    started = time.monotonic()
+    out = v.synthesize_answer("what is the profit rate?", chunks)
+    assert time.monotonic() - started < 0.35                  # returned promptly, did not wait 0.4s
+    assert "grounded" in out and "sentences" in out           # fell back to the stub
+
+
 def test_named_program_answers_even_with_funnel_slots_set():
     # The bug fix: a stuck funnel state must NOT block a named-programme question.
     chunks = [_chunk("GGSM3 › Financing rate › Profit rate is BFR + 2% per annum.")]
