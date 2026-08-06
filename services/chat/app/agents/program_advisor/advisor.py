@@ -156,12 +156,12 @@ class ProgramAdvisor:
         if not ans:
             return None
         slots["last_program"] = program
-        cta = f"Would you like to apply for {program}, or speak with our SME team?"
-        sentences = list(ans["sentences"]) + [{"text": cta, "cites": []}]
-        reply = (ans["reply"] + " " + cta).strip()
-        return _turn(reply, slots, stage="program_offer",
+        # No call-to-action sentence: the offer chips (_offer_suggestions) already carry
+        # "Apply for {program}" and "Connect to Sales team", so a "would you like to apply…"
+        # line just duplicates them and reads robotic. End on the grounded answer.
+        return _turn(ans["reply"], slots, stage="program_offer",
                      ui={"type": "none", "payload": {}}, citations=ans["citations"],
-                     sentences=sentences, grounded=True,
+                     sentences=ans["sentences"], grounded=True,
                      suggestions=self._offer_suggestions(program))
 
     def _followup_decision(self, message: str) -> str:
