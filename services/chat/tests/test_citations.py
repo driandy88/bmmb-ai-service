@@ -62,7 +62,7 @@ def test_grounded_offer_drops_redundant_cta_sentence():
 class _LabeledLLM:
     """A synthesiser that returns a plain lead + one labelled key fact."""
 
-    def synthesize_answer(self, query, chunks):
+    def synthesize_answer(self, query, chunks, history=None):
         return {"grounded": True, "sentences": [
             {"text": "GGSM3 helps SMEs fund working capital.", "cites": [1]},
             {"label": "Profit rate", "text": "BFR + 2% per annum", "cites": [1]},
@@ -80,6 +80,22 @@ def test_grounded_answer_keeps_labels_and_builds_readable_reply():
     assert ans["sentences"][0].get("label") is None           # lead: no label
     assert ans["sentences"][1]["label"] == "Profit rate"
     assert "Profit rate: BFR + 2% per annum" in ans["reply"]
+
+
+def test_grounded_answer_threads_conversation_history_to_synthesizer():
+    # History must reach synthesize_answer so a follow-up ("what about GGSM?") can inherit the
+    # attribute from the previous turn and answer only that, instead of recapping the programme.
+    captured = {}
+
+    class _SpyLLM(StubLLMClient):
+        def synthesize_answer(self, query, chunks, history=None):
+            captured["history"] = history
+            return {"grounded": True, "sentences": [{"text": "GGSM3 tenure is up to 5 years.", "cites": [1]}]}
+
+    adv = ProgramAdvisor(_SpyLLM(), FakeRetriever([_chunk("x")], programs=[("GGSM3", "GGSM3 Sales Kit")]))
+    hist = [{"role": "user", "content": "what's the profit rate for MIHP?"}]
+    adv.handle("what is the tenure for GGSM3?", hist, {})
+    assert captured["history"] == hist
 
 
 def test_named_program_answers_even_with_funnel_slots_set():

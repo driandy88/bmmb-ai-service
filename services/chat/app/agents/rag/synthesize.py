@@ -41,13 +41,17 @@ def _citation(n: int, c: Any) -> dict:
 
 def grounded_answer(llm, retriever: Retriever, message: str, corpus: CorpusScope, *,
                     top_k: int = 4, channel: str = "customer",
-                    program_code: Optional[str] = None) -> Optional[dict]:
-    """-> {reply, sentences:[{text,cites}], citations:[…], grounded:True} or None."""
+                    program_code: Optional[str] = None,
+                    history: Optional[list] = None) -> Optional[dict]:
+    """-> {reply, sentences:[{text,cites}], citations:[…], grounded:True} or None.
+
+    `history` lets the synthesiser resolve a follow-up ("what about GGSM?", "and the profit rate?")
+    to the ONE thing the customer wants now, and answer only that instead of recapping the programme."""
     chunks = retriever.retrieve(message, corpus, top_k=top_k,
                                 program_code=program_code, channel=channel)
     if not chunks:
         return None
-    out = llm.synthesize_answer(message, chunks) or {}
+    out = llm.synthesize_answer(message, chunks, history or []) or {}
     if not out.get("grounded"):
         return None
     sentences = []

@@ -62,7 +62,7 @@ class LLMClient(ABC):
         current message — no history, so it cannot resolve pronouns (branch B)."""
 
     @abstractmethod
-    def synthesize_answer(self, query: str, chunks: list) -> dict:
+    def synthesize_answer(self, query: str, chunks: list, history: Optional[list] = None) -> dict:
         """-> {sentences: [{text: str, cites: [int]}], grounded: bool}
         Write a grounded answer to `query` using ONLY the numbered `chunks`
         (1-based) — each sentence cites the chunk number(s) that support it, and
@@ -275,7 +275,7 @@ class StubLLMClient(LLMClient):
         return {"rewritten_query": rewritten.strip() or text,
                 "program_code": program_code, "is_program_dependent": dep}
 
-    def synthesize_answer(self, query: str, chunks: list) -> dict:
+    def synthesize_answer(self, query: str, chunks: list, history: Optional[list] = None) -> dict:
         # Offline/deterministic: no real synthesis — surface a lead sentence from
         # each of the top chunks, each citing itself. Enough to render the chip +
         # Sources UI without Vertex; the Vertex client writes the real prose.
@@ -472,14 +472,15 @@ class VertexGeminiClient(LLMClient):
             log.warning("Vertex generate_clarify failed (%s); using default clarify.", exc)
             return self._fallback.generate_clarify(message, history)
 
-    def synthesize_answer(self, query: str, chunks: list) -> dict:
+    def synthesize_answer(self, query: str, chunks: list, history: Optional[list] = None) -> dict:
         n = len(chunks)
         if not n:
             return {"sentences": [], "grounded": False}
         try:
             listing = "\n\n".join(f"[{i}] ({_chunk_label(c)})\n{_chunk_text(c)}"
                                   for i, c in enumerate(chunks, start=1))
-            filled = render(load_prompt("answer_synthesis"), query=query, chunks=listing)
+            filled = render(load_prompt("answer_synthesis"), query=query, chunks=listing,
+                            history=self._history_text(history or []))
             schema = {
                 "type": "OBJECT",
                 "properties": {
