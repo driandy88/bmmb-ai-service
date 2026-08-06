@@ -50,10 +50,20 @@ def grounded_answer(llm, retriever: Retriever, message: str, corpus: CorpusScope
     out = llm.synthesize_answer(message, chunks) or {}
     if not out.get("grounded"):
         return None
-    sentences = [{"text": s["text"].strip(), "cites": list(s.get("cites") or [])}
-                 for s in (out.get("sentences") or []) if (s.get("text") or "").strip()]
+    sentences = []
+    for s in (out.get("sentences") or []):
+        text = (s.get("text") or "").strip()
+        if not text:
+            continue
+        entry = {"text": text, "cites": list(s.get("cites") or [])}
+        # `label` (optional) marks a key fact for the UI; the lead sentence has none.
+        label = (s.get("label") or "").strip()
+        if label:
+            entry["label"] = label
+        sentences.append(entry)
     if not sentences:
         return None
     citations = [_citation(i, c) for i, c in enumerate(chunks, start=1)]
-    reply = " ".join(s["text"] for s in sentences)
+    # Plain-text reply (history / logging / non-structured channels): "Label: value" reads naturally.
+    reply = " ".join(f"{s['label']}: {s['text']}" if s.get("label") else s["text"] for s in sentences)
     return {"reply": reply, "sentences": sentences, "citations": citations, "grounded": True}

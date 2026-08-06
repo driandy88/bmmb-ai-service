@@ -450,6 +450,7 @@ class VertexGeminiClient(LLMClient):
                         "type": "OBJECT",
                         "properties": {
                             "text": {"type": "STRING"},
+                            "label": {"type": "STRING"},
                             "cites": {"type": "ARRAY", "items": {"type": "INTEGER"}},
                         },
                         "required": ["text"],
@@ -465,7 +466,12 @@ class VertexGeminiClient(LLMClient):
                     continue
                 # keep only in-range citation numbers — the model can't invent a source
                 cites = [c for c in (s.get("cites") or []) if isinstance(c, int) and 1 <= c <= n]
-                sentences.append({"text": text, "cites": cites})
+                entry = {"text": text, "cites": cites}
+                # `label` (optional) turns a sentence into a scannable key fact; the lead has none.
+                label = (s.get("label") or "").strip()
+                if label:
+                    entry["label"] = label
+                sentences.append(entry)
             grounded = bool(out.get("grounded")) and bool(sentences)
             return {"sentences": sentences, "grounded": grounded}
         except Exception as exc:  # noqa: BLE001 — degrade to stub, never break the turn

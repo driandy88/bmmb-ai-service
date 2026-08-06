@@ -45,6 +45,43 @@ def test_named_program_returns_grounded_cited_answer():
     assert cit["n"] == 1 and cit["page"] == 2 and cit["doc_title"] == "MIHP-i Sales Kit"
 
 
+def test_grounded_offer_drops_redundant_cta_sentence():
+    # The offer chips already carry Apply / Connect-to-Sales, so the grounded answer must NOT
+    # append a "would you like to apply…" sentence — it just duplicated the buttons (robotic).
+    chunks = [_chunk("GGSM3 › Financing rate › Profit rate is BFR + 2% per annum.")]
+    adv = ProgramAdvisor(StubLLMClient(), FakeRetriever(chunks, PROGRAMS))
+    res = adv.handle("what's the profit rate for GGSM3?", [], {})
+    blob = (res["reply"] + " " + " ".join(s["text"] for s in res["sentences"])).lower()
+    assert "would you like to apply" not in blob
+    assert "speak with our sme team" not in blob
+    labels = [s["label"] for s in res["suggestions"]]        # buttons still present
+    assert any("Apply" in lbl for lbl in labels)
+    assert any("Sales" in lbl for lbl in labels)
+
+
+class _LabeledLLM:
+    """A synthesiser that returns a plain lead + one labelled key fact."""
+
+    def synthesize_answer(self, query, chunks):
+        return {"grounded": True, "sentences": [
+            {"text": "GGSM3 helps SMEs fund working capital.", "cites": [1]},
+            {"label": "Profit rate", "text": "BFR + 2% per annum", "cites": [1]},
+        ]}
+
+
+def test_grounded_answer_keeps_labels_and_builds_readable_reply():
+    # A labelled sentence is a key fact; the lead has no label. The plain-text reply reads
+    # "Label: value" so history/logging stay legible even without the structured UI.
+    from app.agents.rag.synthesize import grounded_answer
+    from app.agents.rag.retriever import Corpus
+
+    chunks = [_chunk("GGSM3 › Financing rate › Profit rate is BFR + 2% per annum.")]
+    ans = grounded_answer(_LabeledLLM(), FakeRetriever(chunks, PROGRAMS), "tell me about GGSM3", Corpus.PROGRAM)
+    assert ans["sentences"][0].get("label") is None           # lead: no label
+    assert ans["sentences"][1]["label"] == "Profit rate"
+    assert "Profit rate: BFR + 2% per annum" in ans["reply"]
+
+
 def test_named_program_answers_even_with_funnel_slots_set():
     # The bug fix: a stuck funnel state must NOT block a named-programme question.
     chunks = [_chunk("GGSM3 › Financing rate › Profit rate is BFR + 2% per annum.")]
