@@ -12,9 +12,15 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from app.agents.program_advisor.program_match import mentions_program
 from app.orchestrator import routing
 from app.utils import terminology
 from app.utils.suggestions import explore_suggestions
+
+# Intent buckets we're willing to override to a programme query: off-topic, social, and ambiguous.
+# A genuine in-scope intent (apply INS-05, eligibility INS-04, track INS-07…) that happens to name a
+# programme is left alone — only the classifier's "I don't recognise this" buckets get rescued.
+_RESCUABLE_PREFIXES = ("OOS", "SOC", "AMB")
 
 _NONE_UI = {"type": "none", "payload": {}}
 _NO_HANDOFF = {"required": False, "reason": None, "contact": None}
@@ -28,6 +34,13 @@ def guardrail_node(state: dict, deps) -> dict:
 
 def classify_node(state: dict, deps) -> dict:
     intent = deps.classifier.classify(state["message"], state.get("history", []))
+    # Deterministic rescue: the classifier doesn't know the programme acronyms, so "what is GGSM" /
+    # "what is MIHP" intermittently lands in an off-topic / social / ambiguous bucket instead of
+    # INS-02. If the message names a known programme and the LLM landed there, treat it as a
+    # programme query so it reaches the advisor (adversarial still wins — the guardrail ran first).
+    primary = intent.get("primary") or ""
+    if (not primary or primary.startswith(_RESCUABLE_PREFIXES)) and mentions_program(state["message"]):
+        intent = {**intent, "primary": "INS-02", "confidence": max(float(intent.get("confidence") or 0.0), 0.9)}
     return {"intent": intent}
 
 
