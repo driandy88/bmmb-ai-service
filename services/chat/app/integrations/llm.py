@@ -69,6 +69,14 @@ class LLMClient(ABC):
         nothing unsupported is written. grounded=False when the chunks do not
         answer the question (the caller then abstains / falls back). Phase 1."""
 
+    @abstractmethod
+    def generate_clarify(self, message: str, history: list[dict]) -> dict:
+        """-> {question: str, options: [{label: str, value: str}]}
+        A targeted clarifying question + up to 3 in-scope options for an ambiguous
+        SME-financing message (the CLARIFY path). Each option `value` is a natural
+        request re-sent through routing when tapped. {"question": "", "options": []}
+        when it can't clarify within SME financing — the caller uses its default line."""
+
 
 # ── Deterministic stub ───────────────────────────────────────────────────────
 
@@ -277,6 +285,10 @@ class StubLLMClient(LLMClient):
                      for i, c in enumerate(chunks[:2], start=1)]
         return {"sentences": sentences, "grounded": True}
 
+    def generate_clarify(self, message: str, history: list[dict]) -> dict:
+        # Offline: no smart clarify — the caller uses its default R8 line + preset chips.
+        return {"question": "", "options": []}
+
 
 # ── Vertex AI / Gemini ───────────────────────────────────────────────────────
 
@@ -433,6 +445,32 @@ class VertexGeminiClient(LLMClient):
         except Exception as exc:  # noqa: BLE001 — degrade to stub, never break the turn
             log.warning("Vertex rewrite_query failed (%s); using stub.", exc)
             return self._fallback.rewrite_query(message, programs)
+
+    def generate_clarify(self, message: str, history: list[dict]) -> dict:
+        try:
+            filled = render(load_prompt("clarify"), message=message, history=self._history_text(history))
+            schema = {
+                "type": "OBJECT",
+                "properties": {
+                    "question": {"type": "STRING"},
+                    "options": {"type": "ARRAY", "items": {
+                        "type": "OBJECT",
+                        "properties": {"label": {"type": "STRING"}, "value": {"type": "STRING"}},
+                        "required": ["label", "value"],
+                    }},
+                },
+                "required": ["question"],
+            }
+            out = self._generate_json("clarify", filled, schema)
+            options = [
+                {"label": (o.get("label") or "").strip(), "value": (o.get("value") or "").strip()}
+                for o in (out.get("options") or [])
+                if (o.get("label") or "").strip() and (o.get("value") or "").strip()
+            ]
+            return {"question": (out.get("question") or "").strip(), "options": options[:3]}
+        except Exception as exc:  # noqa: BLE001 — degrade to the default clarify, never break the turn
+            log.warning("Vertex generate_clarify failed (%s); using default clarify.", exc)
+            return self._fallback.generate_clarify(message, history)
 
     def synthesize_answer(self, query: str, chunks: list) -> dict:
         n = len(chunks)
