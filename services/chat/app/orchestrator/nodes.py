@@ -75,10 +75,20 @@ def refuse_node(state: dict, deps) -> dict:
 
 
 def clarify_node(state: dict, deps) -> dict:
-    reply = deps.config.responses.wording("R8", financing_product="SME financing")
+    # Smart clarify: a targeted question + tappable in-scope options ("did you mean…?"). Falls back
+    # to the default R8 line + preset chips when the model can't offer a useful in-scope clarify
+    # (or offline). Either way we ask ONCE — `awaiting_clarification` still hands off next turn.
+    smart = deps.llm.generate_clarify(state["message"], state.get("history", []))
+    question = (smart.get("question") or "").strip()
+    options = smart.get("options") or []
+    if question and options:
+        reply, suggestions = question, options
+    else:
+        reply = deps.config.responses.wording("R8", financing_product="SME financing")
+        suggestions = explore_suggestions()
     return {
         "reply": reply, "ui_action": dict(_NONE_UI), "citations": [], "handoff": dict(_NO_HANDOFF),
-        "stage": "clarifying", "awaiting_clarification": True,
+        "stage": "clarifying", "awaiting_clarification": True, "suggestions": suggestions,
         "decision_inputs": {"clarification": True, "primary": state["intent"].get("primary")},
     }
 
