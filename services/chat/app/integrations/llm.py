@@ -496,6 +496,7 @@ class VertexGeminiClient(LLMClient):
                         "properties": {
                             "text": {"type": "STRING"},
                             "label": {"type": "STRING"},
+                            "bullet": {"type": "BOOLEAN"},
                             "cites": {"type": "ARRAY", "items": {"type": "INTEGER"}},
                         },
                         "required": ["text"],
@@ -516,6 +517,10 @@ class VertexGeminiClient(LLMClient):
                 label = (s.get("label") or "").strip()
                 if label:
                     entry["label"] = label
+                # `bullet` (optional) marks a discrete list item — the UI groups runs of these into
+                # a <ul>; the model sets it only when listing parallel items (documents, sectors…).
+                if s.get("bullet"):
+                    entry["bullet"] = True
                 sentences.append(entry)
             grounded = bool(out.get("grounded")) and bool(sentences)
             return {"sentences": sentences, "grounded": grounded}

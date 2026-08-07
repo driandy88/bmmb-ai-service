@@ -39,6 +39,21 @@ def _citation(n: int, c: Any) -> dict:
     }
 
 
+def _plain_reply(sentences: list) -> str:
+    """Flatten the structured sentences into a plain-text reply for history / logging / channels
+    without the structured UI. Bullet items render on their own "- " line so a list still reads as
+    a list; labelled facts read "Label: value"; everything else joins as prose."""
+    parts = []
+    for s in sentences:
+        if s.get("bullet"):
+            parts.append(f"\n- {s['text']}")
+        elif s.get("label"):
+            parts.append(f" {s['label']}: {s['text']}")
+        else:
+            parts.append(f" {s['text']}")
+    return "".join(parts).strip()
+
+
 def grounded_answer(llm, retriever: Retriever, message: str, corpus: CorpusScope, *,
                     top_k: int = 4, channel: str = "customer",
                     program_code: Optional[str] = None,
@@ -64,10 +79,12 @@ def grounded_answer(llm, retriever: Retriever, message: str, corpus: CorpusScope
         label = (s.get("label") or "").strip()
         if label:
             entry["label"] = label
+        # `bullet` (optional) marks a discrete list item — the UI groups a run of these into a <ul>.
+        if s.get("bullet"):
+            entry["bullet"] = True
         sentences.append(entry)
     if not sentences:
         return None
     citations = [_citation(i, c) for i, c in enumerate(chunks, start=1)]
-    # Plain-text reply (history / logging / non-structured channels): "Label: value" reads naturally.
-    reply = " ".join(f"{s['label']}: {s['text']}" if s.get("label") else s["text"] for s in sentences)
+    reply = _plain_reply(sentences)
     return {"reply": reply, "sentences": sentences, "citations": citations, "grounded": True}
