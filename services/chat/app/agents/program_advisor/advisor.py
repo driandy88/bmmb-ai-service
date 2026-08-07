@@ -116,19 +116,22 @@ class ProgramAdvisor:
         short = len((message or "").split()) <= 6
         return short and (self._match_purpose(message) is not None or self._parse_amount(message) is not None)
 
-    def _scoped_program(self, message: str) -> Optional[str]:
-        """The specific programme this message names, resolved against the LIVE index
-        via the query-rewrite program extraction (so it survives the products.yaml ↔
-        index naming drift, §6a branch A). None if no programme is named."""
+    def _scoped_program(self, message: str, history: Optional[list] = None) -> tuple[Optional[str], str]:
+        """-> (program_code, resolved_query). The history-aware rewrite resolves the programme this
+        message names OR inherits from the conversation (§6a), AND condenses a follow-up ("what about
+        GGSM?", "and the documents?") into a standalone query used for retrieval + synthesis. Program
+        is None when none applies; resolved_query falls back to the raw message."""
         programs = getattr(self._retriever, "programs", lambda: [])() or []
         if not programs:
-            return None
+            return None, message
         try:
-            rw = self._llm.rewrite_query(message, programs)
+            rw = self._llm.rewrite_query(message, programs, history)
         except Exception:  # never break the turn on a rewrite failure
-            return None
+            return None, message
         code = rw.get("program_code")
-        return code if code in {c for c, _ in programs} else None
+        code = code if code in {c for c, _ in programs} else None
+        resolved = (rw.get("rewritten_query") or "").strip() or message
+        return code, resolved
 
     @staticmethod
     def _norm_program(code: str) -> str:
@@ -219,7 +222,10 @@ class ProgramAdvisor:
         # reused below. A GENERAL question names none and keeps the funnel (§6a:
         # never silently pick one). A bare funnel answer (lone purpose/amount)
         # skips the rewrite so the funnel flows without an extra LLM call.
-        program = None if self._is_funnel_nav(message) else self._scoped_program(message)
+        if self._is_funnel_nav(message):
+            program, resolved = None, message
+        else:
+            program, resolved = self._scoped_program(message, history)
 
         # Continuation of a grounded answer's "apply / talk to our team" offer:
         # a bare reply that names no new programme is read as proceed/decline
@@ -247,7 +253,7 @@ class ProgramAdvisor:
                 # last_program so the grounded index is scoped to it even though the message
                 # names nothing. This is the anaphora the stateless retriever can't do alone;
                 # here we HAVE last_program in slots.
-                offer = self._grounded_offer(message, prog, slots, history)
+                offer = self._grounded_offer(resolved, prog, slots, history)
                 if offer:
                     return offer
                 # Nothing relevant to this programme and not asking to browse — keep the
@@ -261,7 +267,7 @@ class ProgramAdvisor:
         # direct question, or the "Details" button), answer it with a grounded,
         # cited answer AND offer the next step so the thread doesn't dead-end.
         if program:
-            offer = self._grounded_offer(message, program, slots, history)
+            offer = self._grounded_offer(resolved, program, slots, history)
             if offer:
                 return offer
 

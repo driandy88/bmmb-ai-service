@@ -98,6 +98,34 @@ def test_grounded_answer_threads_conversation_history_to_synthesizer():
     assert captured["history"] == hist
 
 
+def test_condensed_followup_query_reaches_retrieval():
+    # Anaphora root fix: after "documents for MIHP?", "what about GGSM?" is CONDENSED by the
+    # history-aware rewrite into a standalone "documents required for GGSM3". That condensed query —
+    # not the raw "what about GGSM?" — must be what retrieval + synthesis see, so the follow-up
+    # inherits the ATTRIBUTE (documents) and the resolved programme instead of dumping the whole kit.
+    seen = {}
+
+    class _CondenseLLM(StubLLMClient):
+        def rewrite_query(self, message, programs, history=None):
+            seen["history"] = history
+            return {"rewritten_query": "documents required for GGSM3",
+                    "program_code": "GGSM3", "is_program_dependent": True}
+
+    class _SpyRetriever(FakeRetriever):
+        def retrieve(self, query, corpus, top_k=5, *, program_code=None, channel="customer"):
+            seen["query"] = query
+            return self._chunks[:top_k]
+
+    adv = ProgramAdvisor(_CondenseLLM(),
+                         _SpyRetriever([_chunk("GGSM3 › documents › IC, SSM, 6-month bank statements.")],
+                                       PROGRAMS))
+    hist = [{"role": "user", "content": "what documents do I need for MIHP?"}]
+    res = adv.handle("what about GGSM?", hist, {})
+    assert res["grounded"] is True
+    assert seen["query"] == "documents required for GGSM3"   # condensed, not the raw "what about GGSM?"
+    assert seen["history"] == hist                            # the rewrite is history-aware
+
+
 def test_named_program_answers_even_with_funnel_slots_set():
     # The bug fix: a stuck funnel state must NOT block a named-programme question.
     chunks = [_chunk("GGSM3 › Financing rate › Profit rate is BFR + 2% per annum.")]

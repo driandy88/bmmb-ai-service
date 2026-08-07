@@ -54,12 +54,15 @@ class LLMClient(ABC):
         unavailable or fails."""
 
     @abstractmethod
-    def rewrite_query(self, message: str, programs: list[tuple[str, str]]) -> dict:
+    def rewrite_query(self, message: str, programs: list[tuple[str, str]],
+                      history: Optional[list] = None) -> dict:
         """-> {rewritten_query: str, program_code: str|None, is_program_dependent: bool}
         Normalise customer vocabulary to bank vocabulary (loan->financing,
         interest->profit rate) and extract an explicitly-named programme (§6a
-        branch A). `programs` = [(code, title)] from the live index. Sees only the
-        current message — no history, so it cannot resolve pronouns (branch B)."""
+        branch A). `programs` = [(code, title)] from the live index. With `history`,
+        CONDENSE a follow-up ("what about GGSM?", "and the documents?") into a full
+        standalone `rewritten_query` using the prior turns, so retrieval + synthesis
+        both see the real intent (branch B)."""
 
     @abstractmethod
     def synthesize_answer(self, query: str, chunks: list, history: Optional[list] = None) -> dict:
@@ -258,7 +261,8 @@ class StubLLMClient(LLMClient):
         # Offline: the agent's deterministic text IS the reply.
         return fallback
 
-    def rewrite_query(self, message: str, programs: list[tuple[str, str]]) -> dict:
+    def rewrite_query(self, message: str, programs: list[tuple[str, str]],
+                      history: Optional[list] = None) -> dict:
         text = message or ""
         low = text.lower()
         rewritten = text
@@ -420,11 +424,13 @@ class VertexGeminiClient(LLMClient):
             log.warning("Vertex compose(%s) failed (%s); using fallback text.", prompt_name, exc)
             return fallback
 
-    def rewrite_query(self, message: str, programs: list[tuple[str, str]]) -> dict:
+    def rewrite_query(self, message: str, programs: list[tuple[str, str]],
+                      history: Optional[list] = None) -> dict:
         try:
             codes = [c for c, _ in programs]
             listing = "\n".join(f"  {c} — {t}" for c, t in programs) or "  (none configured)"
-            filled = render(load_prompt("query_rewrite"), programs=listing, message=message)
+            filled = render(load_prompt("query_rewrite"), programs=listing, message=message,
+                            history=self._history_text(history or []))
             pc_schema = ({"type": "STRING", "enum": codes, "nullable": True} if codes
                          else {"type": "STRING", "nullable": True})
             schema = {
