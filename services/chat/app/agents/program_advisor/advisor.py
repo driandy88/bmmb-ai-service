@@ -174,13 +174,16 @@ class ProgramAdvisor:
         return bool(_OTHER_PROGRAMS_RE.search(message or ""))
 
     def _grounded_offer(self, message: str, program: str, slots: dict,
-                        history: Optional[list] = None) -> Optional[dict]:
+                        history: Optional[list] = None, *,
+                        retrieval_query: Optional[str] = None) -> Optional[dict]:
         """A grounded, cited answer about `program` + the apply/talk offer — or None when
         the index has nothing relevant. Shared by a NAMED-programme question and, in the
-        offer stage, an anaphoric follow-up that inherits `last_program`. `history` lets the
-        synthesiser resolve "what about GGSM?" / "and the profit rate?" to the one attribute asked."""
+        offer stage, an anaphoric follow-up that inherits `last_program`. `message` is the
+        customer's real question (the synthesiser resolves "what about GGSM?" against `history`);
+        `retrieval_query` is the standalone rewrite used only to fetch chunks."""
         ans = grounded_answer(self._llm, self._retriever, message, Corpus.PROGRAM,
-                              top_k=4, program_code=program, history=history)
+                              top_k=4, program_code=program, history=history,
+                              retrieval_query=retrieval_query)
         if not ans:
             return None
         slots["last_program"] = program
@@ -253,7 +256,7 @@ class ProgramAdvisor:
                 # last_program so the grounded index is scoped to it even though the message
                 # names nothing. This is the anaphora the stateless retriever can't do alone;
                 # here we HAVE last_program in slots.
-                offer = self._grounded_offer(resolved, prog, slots, history)
+                offer = self._grounded_offer(message, prog, slots, history, retrieval_query=resolved)
                 if offer:
                     return offer
                 # Nothing relevant to this programme and not asking to browse — keep the
@@ -267,7 +270,7 @@ class ProgramAdvisor:
         # direct question, or the "Details" button), answer it with a grounded,
         # cited answer AND offer the next step so the thread doesn't dead-end.
         if program:
-            offer = self._grounded_offer(resolved, program, slots, history)
+            offer = self._grounded_offer(message, program, slots, history, retrieval_query=resolved)
             if offer:
                 return offer
 
