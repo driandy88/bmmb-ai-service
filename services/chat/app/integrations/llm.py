@@ -54,15 +54,18 @@ class LLMClient(ABC):
         unavailable or fails."""
 
     @abstractmethod
-    def rewrite_query(self, message: str, programs: list[tuple[str, str]]) -> dict:
+    def rewrite_query(self, message: str, programs: list[tuple[str, str]],
+                      history: Optional[list] = None) -> dict:
         """-> {rewritten_query: str, program_code: str|None, is_program_dependent: bool}
         Normalise customer vocabulary to bank vocabulary (loan->financing,
         interest->profit rate) and extract an explicitly-named programme (§6a
-        branch A). `programs` = [(code, title)] from the live index. Sees only the
-        current message — no history, so it cannot resolve pronouns (branch B)."""
+        branch A). `programs` = [(code, title)] from the live index. With `history`,
+        CONDENSE a follow-up ("what about GGSM?", "and the documents?") into a full
+        standalone `rewritten_query` using the prior turns, so retrieval + synthesis
+        both see the real intent (branch B)."""
 
     @abstractmethod
-    def synthesize_answer(self, query: str, chunks: list) -> dict:
+    def synthesize_answer(self, query: str, chunks: list, history: Optional[list] = None) -> dict:
         """-> {sentences: [{text: str, cites: [int]}], grounded: bool}
         Write a grounded answer to `query` using ONLY the numbered `chunks`
         (1-based) — each sentence cites the chunk number(s) that support it, and
@@ -258,7 +261,8 @@ class StubLLMClient(LLMClient):
         # Offline: the agent's deterministic text IS the reply.
         return fallback
 
-    def rewrite_query(self, message: str, programs: list[tuple[str, str]]) -> dict:
+    def rewrite_query(self, message: str, programs: list[tuple[str, str]],
+                      history: Optional[list] = None) -> dict:
         text = message or ""
         low = text.lower()
         rewritten = text
@@ -275,7 +279,7 @@ class StubLLMClient(LLMClient):
         return {"rewritten_query": rewritten.strip() or text,
                 "program_code": program_code, "is_program_dependent": dep}
 
-    def synthesize_answer(self, query: str, chunks: list) -> dict:
+    def synthesize_answer(self, query: str, chunks: list, history: Optional[list] = None) -> dict:
         # Offline/deterministic: no real synthesis — surface a lead sentence from
         # each of the top chunks, each citing itself. Enough to render the chip +
         # Sources UI without Vertex; the Vertex client writes the real prose.
@@ -420,11 +424,13 @@ class VertexGeminiClient(LLMClient):
             log.warning("Vertex compose(%s) failed (%s); using fallback text.", prompt_name, exc)
             return fallback
 
-    def rewrite_query(self, message: str, programs: list[tuple[str, str]]) -> dict:
+    def rewrite_query(self, message: str, programs: list[tuple[str, str]],
+                      history: Optional[list] = None) -> dict:
         try:
             codes = [c for c, _ in programs]
             listing = "\n".join(f"  {c} — {t}" for c, t in programs) or "  (none configured)"
-            filled = render(load_prompt("query_rewrite"), programs=listing, message=message)
+            filled = render(load_prompt("query_rewrite"), programs=listing, message=message,
+                            history=self._history_text(history or []))
             pc_schema = ({"type": "STRING", "enum": codes, "nullable": True} if codes
                          else {"type": "STRING", "nullable": True})
             schema = {
@@ -472,14 +478,15 @@ class VertexGeminiClient(LLMClient):
             log.warning("Vertex generate_clarify failed (%s); using default clarify.", exc)
             return self._fallback.generate_clarify(message, history)
 
-    def synthesize_answer(self, query: str, chunks: list) -> dict:
+    def synthesize_answer(self, query: str, chunks: list, history: Optional[list] = None) -> dict:
         n = len(chunks)
         if not n:
             return {"sentences": [], "grounded": False}
         try:
             listing = "\n\n".join(f"[{i}] ({_chunk_label(c)})\n{_chunk_text(c)}"
                                   for i, c in enumerate(chunks, start=1))
-            filled = render(load_prompt("answer_synthesis"), query=query, chunks=listing)
+            filled = render(load_prompt("answer_synthesis"), query=query, chunks=listing,
+                            history=self._history_text(history or []))
             schema = {
                 "type": "OBJECT",
                 "properties": {
@@ -489,6 +496,7 @@ class VertexGeminiClient(LLMClient):
                         "properties": {
                             "text": {"type": "STRING"},
                             "label": {"type": "STRING"},
+                            "bullet": {"type": "BOOLEAN"},
                             "cites": {"type": "ARRAY", "items": {"type": "INTEGER"}},
                         },
                         "required": ["text"],
@@ -509,6 +517,10 @@ class VertexGeminiClient(LLMClient):
                 label = (s.get("label") or "").strip()
                 if label:
                     entry["label"] = label
+                # `bullet` (optional) marks a discrete list item — the UI groups runs of these into
+                # a <ul>; the model sets it only when listing parallel items (documents, sectors…).
+                if s.get("bullet"):
+                    entry["bullet"] = True
                 sentences.append(entry)
             grounded = bool(out.get("grounded")) and bool(sentences)
             return {"sentences": sentences, "grounded": grounded}

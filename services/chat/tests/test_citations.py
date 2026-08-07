@@ -62,7 +62,7 @@ def test_grounded_offer_drops_redundant_cta_sentence():
 class _LabeledLLM:
     """A synthesiser that returns a plain lead + one labelled key fact."""
 
-    def synthesize_answer(self, query, chunks):
+    def synthesize_answer(self, query, chunks, history=None):
         return {"grounded": True, "sentences": [
             {"text": "GGSM3 helps SMEs fund working capital.", "cites": [1]},
             {"label": "Profit rate", "text": "BFR + 2% per annum", "cites": [1]},
@@ -80,6 +80,77 @@ def test_grounded_answer_keeps_labels_and_builds_readable_reply():
     assert ans["sentences"][0].get("label") is None           # lead: no label
     assert ans["sentences"][1]["label"] == "Profit rate"
     assert "Profit rate: BFR + 2% per annum" in ans["reply"]
+
+
+class _BulletLLM:
+    """A synthesiser that lists documents — a lead-in sentence, then one bullet per item."""
+
+    def synthesize_answer(self, query, chunks, history=None):
+        return {"grounded": True, "sentences": [
+            {"text": "For GGSM3 you'll need to prepare:", "cites": [1]},
+            {"text": "A copy of your IC and the company's SSM registration.", "cites": [1], "bullet": True},
+            {"text": "Six months of business bank statements.", "cites": [1], "bullet": True},
+        ]}
+
+
+def test_grounded_answer_carries_bullet_flag_and_renders_list_reply():
+    # Adaptive formatting: when the synthesiser lists discrete items it flags each with bullet=True.
+    # The flag must survive into sentences[] (the UI groups a run of them into a <ul>), and the
+    # plain-text reply must render each on its own "- " line so a list still reads as a list.
+    from app.agents.rag.synthesize import grounded_answer
+    from app.agents.rag.retriever import Corpus
+
+    chunks = [_chunk("GGSM3 › documents › IC, SSM, 6-month bank statements.")]
+    ans = grounded_answer(_BulletLLM(), FakeRetriever(chunks, PROGRAMS), "what documents for GGSM3?", Corpus.PROGRAM)
+    assert ans["sentences"][0].get("bullet") is None          # lead-in: prose, not a bullet
+    assert ans["sentences"][1]["bullet"] is True
+    assert ans["sentences"][2]["bullet"] is True
+    assert "\n- A copy of your IC" in ans["reply"]             # bullets on their own lines
+    assert "\n- Six months of business bank statements." in ans["reply"]
+
+
+def test_grounded_answer_threads_conversation_history_to_synthesizer():
+    # History must reach synthesize_answer so a follow-up ("what about GGSM?") can inherit the
+    # attribute from the previous turn and answer only that, instead of recapping the programme.
+    captured = {}
+
+    class _SpyLLM(StubLLMClient):
+        def synthesize_answer(self, query, chunks, history=None):
+            captured["history"] = history
+            return {"grounded": True, "sentences": [{"text": "GGSM3 tenure is up to 5 years.", "cites": [1]}]}
+
+    adv = ProgramAdvisor(_SpyLLM(), FakeRetriever([_chunk("x")], programs=[("GGSM3", "GGSM3 Sales Kit")]))
+    hist = [{"role": "user", "content": "what's the profit rate for MIHP?"}]
+    adv.handle("what is the tenure for GGSM3?", hist, {})
+    assert captured["history"] == hist
+
+
+def test_condensed_followup_query_reaches_retrieval():
+    # Anaphora root fix: after "documents for MIHP?", "what about GGSM?" is CONDENSED by the
+    # history-aware rewrite into a standalone "documents required for GGSM3". That condensed query —
+    # not the raw "what about GGSM?" — must be what retrieval + synthesis see, so the follow-up
+    # inherits the ATTRIBUTE (documents) and the resolved programme instead of dumping the whole kit.
+    seen = {}
+
+    class _CondenseLLM(StubLLMClient):
+        def rewrite_query(self, message, programs, history=None):
+            seen["history"] = history
+            return {"rewritten_query": "documents required for GGSM3",
+                    "program_code": "GGSM3", "is_program_dependent": True}
+
+    class _SpyRetriever(FakeRetriever):
+        def retrieve(self, query, corpus, top_k=5, *, program_code=None, channel="customer"):
+            seen["query"] = query
+            return self._chunks[:top_k]
+
+    adv = ProgramAdvisor(_CondenseLLM(),
+                         _SpyRetriever([_chunk("GGSM3 › documents › IC, SSM, 6-month bank statements.")],
+                                       PROGRAMS))
+    hist = [{"role": "user", "content": "what documents do I need for MIHP?"}]
+    res = adv.handle("what about GGSM?", hist, {})
+    assert res["grounded"] is True
+    assert seen["query"] == "documents required for GGSM3"   # condensed, not the raw "what about GGSM?"
+    assert seen["history"] == hist                            # the rewrite is history-aware
 
 
 def test_named_program_answers_even_with_funnel_slots_set():
@@ -205,3 +276,20 @@ def test_envelope_surfaces_grounded_sentences_and_citations():
     assert resp.sentences[0].cites == [1]
     assert resp.citations[0].n == 1 and resp.citations[0].page == 2
     assert resp.citations[0].doc_title == "MIHP-i Sales Kit"
+
+
+def test_envelope_carries_bullet_flag_to_response():
+    # The bullet flag must survive AnswerSentence (extra fields are dropped by default) so the UI
+    # can group items into a <ul>. A prose sentence has bullet=None; a list item has bullet=True.
+    from app.orchestrator.graph import _assemble
+    final = {
+        "session_id": "s1", "reply": "You'll need to prepare:\n- Your IC and SSM.",
+        "sentences": [{"text": "You'll need to prepare:", "cites": [1]},
+                      {"text": "Your IC and SSM.", "cites": [1], "bullet": True}],
+        "grounded": True, "citations": [],
+        "intent": {"primary": "INS-02", "confidence": 0.9},
+        "trace_id": "t", "route": "", "rule_version": "", "timestamp": "", "decision_inputs": {},
+    }
+    resp = _assemble(final, taxonomy=None)
+    assert resp.sentences[0].bullet is None       # lead-in: prose
+    assert resp.sentences[1].bullet is True        # list item

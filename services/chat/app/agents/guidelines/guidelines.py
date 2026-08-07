@@ -35,7 +35,7 @@ class GuidelinesAgent:
         # Grounded, cited answer over the Shariah/guidelines corpus (Phase 1). Returns
         # None while the corpus is empty (Sheet 4 pending) or nothing grounds it.
         ans = grounded_answer(self._llm, self._retriever, message,
-                              Corpus.GUIDELINES_SHARIAH, top_k=4)
+                              Corpus.GUIDELINES_SHARIAH, top_k=4, history=history)
         if ans:
             return {
                 "reply": ans["reply"],

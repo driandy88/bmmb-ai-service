@@ -110,6 +110,9 @@ class AnswerSentence(BaseModel):
     (§ Phase 1). Present only on grounded RAG turns; `cites` map to Citation.n."""
     text: str
     cites: list[int] = Field(default_factory=list)
+    # True when this sentence is one discrete item in a list (a required document, an eligible
+    # sector…) — the UI groups a consecutive run of these into a <ul>. Absent for prose.
+    bullet: Optional[bool] = None
 
 
 class Suggestion(BaseModel):
