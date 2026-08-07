@@ -57,12 +57,16 @@ def _plain_reply(sentences: list) -> str:
 def grounded_answer(llm, retriever: Retriever, message: str, corpus: CorpusScope, *,
                     top_k: int = 4, channel: str = "customer",
                     program_code: Optional[str] = None,
-                    history: Optional[list] = None) -> Optional[dict]:
+                    history: Optional[list] = None,
+                    retrieval_query: Optional[str] = None) -> Optional[dict]:
     """-> {reply, sentences:[{text,cites}], citations:[…], grounded:True} or None.
 
-    `history` lets the synthesiser resolve a follow-up ("what about GGSM?", "and the profit rate?")
-    to the ONE thing the customer wants now, and answer only that instead of recapping the programme."""
-    chunks = retriever.retrieve(message, corpus, top_k=top_k,
+    `message` is the customer's ACTUAL question — it goes to the synthesiser, which resolves a
+    follow-up ("what about GGSM?", "and the profit rate?") against `history` and answers only that.
+    `retrieval_query` (optional) is a standalone rewrite used ONLY to FETCH chunks — better recall on
+    a terse follow-up — and is never shown to the synthesiser, so a broad rewrite can't wash out the
+    anaphoric intent and turn a focused question into a whole-programme dump."""
+    chunks = retriever.retrieve(retrieval_query or message, corpus, top_k=top_k,
                                 program_code=program_code, channel=channel)
     if not chunks:
         return None

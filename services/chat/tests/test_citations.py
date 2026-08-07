@@ -153,6 +153,38 @@ def test_condensed_followup_query_reaches_retrieval():
     assert seen["history"] == hist                            # the rewrite is history-aware
 
 
+def test_synthesis_sees_original_message_even_when_rewrite_broadens():
+    # Case 2 (anaphora focus): the real failure is the rewrite extracting the PROGRAMME but dropping
+    # the ATTRIBUTE — "what about GGSM?" -> "GGSM3 information". If that broadened query fed the
+    # synthesiser, it would dump the whole programme. Fix: retrieval may use the (broad) rewrite for
+    # recall, but the synthesiser must receive the customer's ORIGINAL message + history so it
+    # resolves the follow-up to the one attribute asked.
+    seen = {}
+
+    class _BroadeningLLM(StubLLMClient):
+        def rewrite_query(self, message, programs, history=None):
+            return {"rewritten_query": "GGSM3 programme information",  # programme kept, attribute lost
+                    "program_code": "GGSM3", "is_program_dependent": True}
+
+        def synthesize_answer(self, query, chunks, history=None):
+            seen["synth_query"] = query
+            seen["synth_history"] = history
+            return {"grounded": True, "sentences": [{"text": "GGSM3's profit rate is BFR + 2%.", "cites": [1]}]}
+
+    class _SpyRetriever(FakeRetriever):
+        def retrieve(self, query, corpus, top_k=5, *, program_code=None, channel="customer"):
+            seen["retrieval_query"] = query
+            return self._chunks[:top_k]
+
+    adv = ProgramAdvisor(_BroadeningLLM(),
+                         _SpyRetriever([_chunk("GGSM3 › financing rate › BFR + 2%.")], PROGRAMS))
+    hist = [{"role": "user", "content": "what's the profit rate for MIHP?"}]
+    adv.handle("what about GGSM?", hist, {})
+    assert seen["synth_query"] == "what about GGSM?"                # synthesis sees the REAL question
+    assert seen["synth_history"] == hist                            # ...with history, to resolve it
+    assert seen["retrieval_query"] == "GGSM3 programme information"  # retrieval still used the rewrite
+
+
 def test_named_program_answers_even_with_funnel_slots_set():
     # The bug fix: a stuck funnel state must NOT block a named-programme question.
     chunks = [_chunk("GGSM3 › Financing rate › Profit rate is BFR + 2% per annum.")]
