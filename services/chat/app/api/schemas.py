@@ -184,3 +184,11 @@ class HealthResponse(BaseModel):
     llm_backend: str
     rag_backend: str
     checks: dict[str, str] = Field(default_factory=dict)
+
+
+class SourceDocResponse(BaseModel):
+    """Citation → source preview (Tier 1). `url` opens the original PDF; the client
+    appends `#page=N` from the citation to jump to the cited page."""
+    doc_id: str
+    doc_title: str
+    url: str
