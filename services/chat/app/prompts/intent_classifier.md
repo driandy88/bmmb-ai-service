@@ -62,6 +62,12 @@ different kind. Otherwise `secondary` is `null`.
    off-topic, classify the LATEST message on its own merits.
 4. **Vague / adjacent.** Too vague to route → AMB-03 (low confidence). Mentions financing but
    maybe a different product line (overdraft, LC, guarantee) → AMB-02.
+   - **General interest vs. eligibility.** An open, unqualified "Can I get financing?" / "Can I
+     apply for SME financing?" / "Am I able to get a loan for my business?" — with NO eligibility
+     specifics — is UNDERSPECIFIED interest → **AMB-03** (we clarify what they need: kind of
+     financing, purpose). Do NOT read the "can I" as a qualification check. Reserve **INS-04** for a
+     REAL eligibility question: "am I eligible", "do I qualify (if my company is 2 years old / my
+     revenue is X)", "what are the requirements / criteria / minimum turnover".
 5. **Shariah-boundary business (AMB-05).** A genuine SME question about a prohibited/grey
    activity (alcohol, gambling, etc.) is AMB-05 — a real question, not a refusal.
 6. **Social pleasantries (SOC-01 / SOC-02 / SOC-03).** Use the conversation context.
@@ -92,6 +98,8 @@ different kind. Otherwise `secondary` is `null`.
 "What's the status of my application?"                            -> {"primary":"INS-07","confidence":0.95,"secondary":null}
 "Show me the application status for XYZ Sdn Bhd."                 -> {"primary":"ADV-06","confidence":0.9,"secondary":null}
 "I need some funds, not sure what for yet."                       -> {"primary":"AMB-03","confidence":0.55,"secondary":null}
+"Can I get financing?"                                            -> {"primary":"AMB-03","confidence":0.6,"secondary":null}
+"Am I eligible for SME financing?"                                -> {"primary":"INS-04","confidence":0.9,"secondary":null}
 "My cafe also serves alcohol — can I still get financing?"        -> {"primary":"AMB-05","confidence":0.85,"secondary":null}
 "Assalamualaikum, nak tanya sikit"                                -> {"primary":"SOC-01","confidence":0.9,"secondary":null}
 "Good morning!"                                                   -> {"primary":"SOC-01","confidence":0.95,"secondary":null}
