@@ -94,3 +94,25 @@ def test_continuation_never_overrides_adversarial():
     d = decide(primary="INS-04", confidence=0.9, flagged=True, category="ADV-01",
                active="ROUTE-ELIGIBILITY")
     assert d.action == routing.REFUSE
+
+
+def test_contact_flow_yields_to_ambiguous_financing_question():
+    # Mid sales-contact flow (awaiting a location), "can I get financing?" classifies AMB-03 — that's
+    # a financing question, not a location, so break out and CLARIFY instead of dumping the default
+    # contact. (The awkward "No problem — here's the contact" bug.)
+    d = decide(primary="AMB-03", confidence=0.9, active="ROUTE-BRANCH")
+    assert d.action == routing.CLARIFY
+
+
+def test_contact_flow_keeps_flow_on_location_answer():
+    # A real location answer ("Penang") isn't a financing intent (None / low-confidence / OOS), so
+    # the contact flow stays sticky and resolves the contact.
+    d = decide(primary=None, confidence=0.3, active="ROUTE-BRANCH")
+    assert d.action == routing.DISPATCH and d.primary_ref == "ROUTE-BRANCH"
+
+
+def test_slotfill_flow_stays_sticky_on_ambiguous_answer():
+    # Only the contact flow yields; true slot-fills (funnel / eligibility) legitimately take bare,
+    # ambiguous answers, so an AMB reply there continues the flow rather than clarifying.
+    d = decide(primary="AMB-03", confidence=0.9, active="ROUTE-ELIGIBILITY")
+    assert d.action == routing.DISPATCH and d.primary_ref == "ROUTE-ELIGIBILITY"

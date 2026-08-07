@@ -153,7 +153,19 @@ def decide(
             and confidence >= threshold
             and primary_row.response_ref != active_flow_route
         )
-        if not switched:
+        # The sales-contact flow only expects a LOCATION (or "just connect me"). If the customer
+        # instead asks an ambiguous financing question — "can I get financing?" (AMB-03), "do you
+        # have an overdraft?" (AMB-02) — that is NOT a location, so let it break out and be
+        # clarified/answered rather than being swallowed into the default "here's the contact".
+        # A real location ("Penang") classifies as neither in-scope nor ambiguous, so it keeps
+        # flowing; and the true slot-fills (funnel/eligibility) legitimately take bare, ambiguous
+        # answers, so they stay sticky — only the contact flow yields here.
+        interrupted = (
+            active_flow_route == "ROUTE-BRANCH"
+            and primary_row is not None
+            and primary_row.type == "ambiguous"
+        )
+        if not switched and not interrupted:
             handler, label = ROUTE_TABLE[active_flow_route]
             return RoutingDecision(
                 action=DISPATCH, route_label=f"{label} (cont.)",
