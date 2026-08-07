@@ -236,7 +236,8 @@ def _run_handler(deps, ref: str, state: dict) -> dict:
         return deps.sales_handoff.handle(msg, hist, reason=None, channel=state.get("channel", "customer"),
                                          stage=state.get("stage"))
     if ref == "ROUTE-PROGRAM":
-        return deps.program_advisor.handle(msg, hist, slots, stage=state.get("stage"))
+        return deps.program_advisor.handle(msg, hist, slots, stage=state.get("stage"),
+                                           intent=state.get("intent"))
     if ref in ("ROUTE-GUIDELINES", "ROUTE-SHARIAH"):
         return deps.guidelines.handle(msg, hist)
     if ref == "ROUTE-ELIGIBILITY":

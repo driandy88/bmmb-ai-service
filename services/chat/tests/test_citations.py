@@ -221,6 +221,19 @@ def test_program_offer_other_programmes_opens_funnel():
     assert "last_program" not in res["slots"]          # moved off the old programme
 
 
+def test_program_offer_discovery_question_opens_funnel():
+    # A4: after answering about GGSM3 (offer stage), a general "what SME financing programmes do you
+    # offer?" is a fresh catalog question (INS-02, not programme-dependent) — open the discovery
+    # funnel instead of the awkward "would you like to apply for GGSM3, or ask anything else?".
+    adv = ProgramAdvisor(StubLLMClient(), FakeRetriever([_chunk("x")], PROGRAMS))
+    res = adv.handle("what SME financing programmes do you offer?", [],
+                     {"last_program": "GGSM3"}, stage="program_offer",
+                     intent={"primary": "INS-02", "confidence": 0.9})
+    assert res["ui_action"]["type"] == "show_program_options"   # funnel, not a reprompt
+    assert not res.get("grounded")
+    assert "last_program" not in res["slots"]                    # moved off the old programme
+
+
 def test_program_offer_stray_reply_still_reprompts():
     # A stray reply that is neither answerable nor a browse request keeps the original
     # gentle re-prompt (unchanged behaviour) rather than dropping into the funnel.

@@ -116,22 +116,26 @@ class ProgramAdvisor:
         short = len((message or "").split()) <= 6
         return short and (self._match_purpose(message) is not None or self._parse_amount(message) is not None)
 
-    def _scoped_program(self, message: str, history: Optional[list] = None) -> tuple[Optional[str], str]:
-        """-> (program_code, resolved_query). The history-aware rewrite resolves the programme this
-        message names OR inherits from the conversation (§6a), AND condenses a follow-up ("what about
-        GGSM?", "and the documents?") into a standalone query used for retrieval + synthesis. Program
-        is None when none applies; resolved_query falls back to the raw message."""
+    def _scoped_program(self, message: str,
+                        history: Optional[list] = None) -> tuple[Optional[str], str, bool]:
+        """-> (program_code, resolved_query, program_dependent). The history-aware rewrite resolves
+        the programme this message names OR inherits from the conversation (§6a), AND condenses a
+        follow-up ("what about GGSM?", "and the documents?") into a standalone query used for
+        retrieval. Program is None when none applies; resolved_query falls back to the raw message.
+        `program_dependent` is the rewrite's read of whether the answer differs by programme (an
+        attribute — tenure/rate/documents) vs. a programme-agnostic or catalog question; at the offer
+        stage it tells an attribute follow-up apart from a browse/discovery ask."""
         programs = getattr(self._retriever, "programs", lambda: [])() or []
         if not programs:
-            return None, message
+            return None, message, False
         try:
             rw = self._llm.rewrite_query(message, programs, history)
         except Exception:  # never break the turn on a rewrite failure
-            return None, message
+            return None, message, False
         code = rw.get("program_code")
         code = code if code in {c for c, _ in programs} else None
         resolved = (rw.get("rewritten_query") or "").strip() or message
-        return code, resolved
+        return code, resolved, bool(rw.get("is_program_dependent"))
 
     @staticmethod
     def _norm_program(code: str) -> str:
@@ -217,18 +221,20 @@ class ProgramAdvisor:
             ui={"type": "open_application_link", "payload": {"url": url, "program": program}},
         )
 
-    def handle(self, message: str, history: list[dict], slots: dict, *, stage: Optional[str] = None) -> dict:
+    def handle(self, message: str, history: list[dict], slots: dict, *,
+               stage: Optional[str] = None, intent: Optional[dict] = None) -> dict:
         funnel = self._cfg.products["funnel"]
         slots = dict(slots or {})
+        intent_primary = (intent or {}).get("primary")
 
         # Which specific programme (if any) this turn names — computed once and
         # reused below. A GENERAL question names none and keeps the funnel (§6a:
         # never silently pick one). A bare funnel answer (lone purpose/amount)
         # skips the rewrite so the funnel flows without an extra LLM call.
         if self._is_funnel_nav(message):
-            program, resolved = None, message
+            program, resolved, program_dependent = None, message, False
         else:
-            program, resolved = self._scoped_program(message, history)
+            program, resolved, program_dependent = self._scoped_program(message, history)
 
         # Continuation of a grounded answer's "apply / talk to our team" offer:
         # a bare reply that names no new programme is read as proceed/decline
@@ -244,10 +250,16 @@ class ProgramAdvisor:
                              "or another programme. A few things I can help with —",
                              slots, stage="program_done", ui={"type": "none", "payload": {}},
                              suggestions=explore_suggestions(prog))
-            # A request to browse OTHER programmes leaves the current one and opens the
-            # discovery funnel below — otherwise "what else do you have?" dead-ended on an
-            # offer to apply for the very programme they were trying to move on from.
-            if self._wants_other_programs(message):
+            # A request to browse programmes leaves the current one and opens the discovery funnel
+            # below — otherwise "what else do you have?" / "what SME financing do you offer?"
+            # dead-ended on an offer to apply for the very programme they were moving on from. Two
+            # signals, both the model's: the explicit "other programmes" phrasing, OR a fresh
+            # programme question (INS-02) that is NOT programme-dependent — i.e. a catalog/listing
+            # ask, not an attribute follow-up ("and the tenure?") about the programme in play.
+            browse = self._wants_other_programs(message) or (
+                intent_primary == "INS-02" and not program_dependent
+            )
+            if browse:
                 slots.pop("last_program", None)
                 # fall through to the funnel
             else:
