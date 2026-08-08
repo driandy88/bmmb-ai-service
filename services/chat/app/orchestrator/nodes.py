@@ -21,12 +21,6 @@ from app.utils.suggestions import explore_suggestions
 # A genuine in-scope intent (apply INS-05, eligibility INS-04, track INS-07…) that happens to name a
 # programme is left alone — only the classifier's "I don't recognise this" buckets get rescued.
 _RESCUABLE_PREFIXES = ("OOS", "SOC", "AMB")
-# …but a CONFIDENT, specific "other product" call — other bank products / non-SME financing /
-# competitor / advice — is a real classification, not an "I don't recognise this". A programme name
-# in "fixed deposit rate for GGSM" is incidental, so it must NOT hijack the turn into a programme
-# query. The vague off-topic (OOS-05/06/07) / ambiguous buckets, where an unrecognised acronym like
-# "what is GGSM" actually lands, still rescue.
-_SPECIFIC_OTHER_PRODUCT = frozenset({"OOS-01", "OOS-02", "OOS-03", "OOS-04"})
 
 _NONE_UI = {"type": "none", "payload": {}}
 _NO_HANDOFF = {"required": False, "reason": None, "contact": None}
@@ -45,14 +39,16 @@ def classify_node(state: dict, deps) -> dict:
     # INS-02. If the message names a known programme and the LLM landed there, treat it as a
     # programme query so it reaches the advisor (adversarial still wins — the guardrail ran first).
     primary = intent.get("primary") or ""
-    confidence = float(intent.get("confidence") or 0.0)
-    threshold = getattr(getattr(deps, "settings", None), "confidence_threshold", 0.7)
     rescuable = (not primary or primary.startswith(_RESCUABLE_PREFIXES))
-    # Yield to a confident "this is a specific OTHER product" call — don't let a stray programme name
-    # ("…for GGSM") turn a fixed-deposit / personal-loan question into a programme query.
-    confident_other_product = primary in _SPECIFIC_OTHER_PRODUCT and confidence >= threshold
-    if rescuable and not confident_other_product and mentions_program(state["message"]):
-        intent = {**intent, "primary": "INS-02", "confidence": max(confidence, 0.9)}
+    # …but YIELD when the classifier landed on a specific, recognisable off-topic topic (fixed
+    # deposit, personal loan, a competitor, investment advice — flagged `specific_topic` in
+    # intents.yaml). There the programme name is incidental ("fixed deposit rate for GGSM"), so it
+    # must not hijack the turn into a programme query. The config declares which intents these are —
+    # the classifier makes the call, the taxonomy names the boundary; nothing hard-coded here.
+    row = deps.config.taxonomy.get(primary)
+    specific_topic = bool(row and row.specific_topic)
+    if rescuable and not specific_topic and mentions_program(state["message"]):
+        intent = {**intent, "primary": "INS-02", "confidence": max(float(intent.get("confidence") or 0.0), 0.9)}
     return {"intent": intent}
 
 

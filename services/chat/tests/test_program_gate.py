@@ -3,14 +3,17 @@ off-topic (the classifier is blind to the acronyms) so it reaches the programme 
 import types
 
 from app.agents.program_advisor.program_match import mentions_program
+from app.config.loader import load_config
 from app.orchestrator.nodes import classify_node
+
+_cfg = load_config()
 
 
 def _deps(primary, confidence=0.9):
     classifier = types.SimpleNamespace(
         classify=lambda msg, hist: {"primary": primary, "confidence": confidence, "secondary": None}
     )
-    return types.SimpleNamespace(classifier=classifier)
+    return types.SimpleNamespace(classifier=classifier, config=_cfg)
 
 
 def test_mentions_program_detects_acronyms_and_naming_drift():
@@ -40,16 +43,16 @@ def test_classify_leaves_non_programme_offtopic_alone():
     assert out["intent"]["primary"] == "OOS-01"
 
 
-def test_classify_yields_to_confident_other_product_named_with_a_programme():
-    # "fixed deposit rate for GGSM?" is confidently OTHER products (OOS-01) — the stray "GGSM" must
-    # not hijack it into a programme query; it stays out-of-scope (→ the smart deflection).
-    out = classify_node(
-        {"message": "what's your fixed deposit rate for GGSM?", "history": []}, _deps("OOS-01", 0.9)
-    )
+def test_classify_yields_to_specific_topic_named_with_a_programme():
+    # "fixed deposit rate for GGSM?" is a specific-topic OOS intent (OOS-01, specific_topic in
+    # intents.yaml) — the stray "GGSM" must not hijack it into a programme query; it stays
+    # out-of-scope (→ the smart deflection). Config declares the boundary, not code.
+    out = classify_node({"message": "what's your fixed deposit rate for GGSM?", "history": []}, _deps("OOS-01"))
     assert out["intent"]["primary"] == "OOS-01"
 
 
-def test_classify_still_rescues_low_confidence_acronym():
-    # Safety: a WEAK product guess for an unrecognised acronym still gets rescued to the advisor.
-    out = classify_node({"message": "what is GGSM", "history": []}, _deps("OOS-01", 0.4))
+def test_classify_still_rescues_vague_offtopic_naming_a_programme():
+    # A vague off-topic bucket (OOS-05, not specific_topic) — where an unrecognised acronym lands —
+    # still rescues to the advisor even at high confidence.
+    out = classify_node({"message": "tell me a joke about GGSM", "history": []}, _deps("OOS-05", 0.95))
     assert out["intent"]["primary"] == "INS-02"
