@@ -26,9 +26,21 @@ def response_style() -> str:
     return load_prompt("response_style")
 
 
+def _optional_prompt(name: str) -> str:
+    """load_prompt, but an absent file is not an error — returns "". Lets a swappable
+    preamble (e.g. behaviour.md) be added or removed without touching code."""
+    try:
+        return load_prompt(name)
+    except FileNotFoundError:
+        return ""
+
+
 def system_prompt(name: str) -> str:
-    """response_style + the named task prompt, joined as one system instruction."""
-    return f"{response_style()}\n\n---\n\n{load_prompt(name)}"
+    """response_style (safety) + behaviour (the swappable brand voice) + the named task prompt,
+    joined as one system instruction. Editing prompts/behaviour.md re-skins the assistant's
+    demeanour everywhere; deleting it degrades gracefully to the safety preamble alone."""
+    parts = [response_style(), _optional_prompt("behaviour"), load_prompt(name)]
+    return "\n\n---\n\n".join(p for p in parts if p)
 
 
 def render(template: str, **vars: object) -> str:
