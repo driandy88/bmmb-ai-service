@@ -170,7 +170,7 @@ class ProgramAdvisor:
         return sorted(best, key=lambda c: best[c], reverse=True)
 
     def _disambiguate(self, candidates: list, slots: dict, message: str,
-                      history: Optional[list] = None) -> dict:
+                      history: Optional[list] = None, resolved: str = "") -> dict:
         """Ask which programme a mistyped / ambiguous name meant — a tappable chip per candidate, so
         the customer confirms instead of us guessing (or funnelling). The MODEL phrases the question
         (short, natural, straight to the point); `compose` falls back to a concise default offline."""
@@ -185,15 +185,18 @@ class ProgramAdvisor:
             "programme_disambiguate", message=message, history=history or [],
             fallback=f"Did you mean {joined}?", candidates="\n".join(f"- {n}" for n in names),
         )
-        # Each chip re-sends the customer's OWN message with just the mistyped name corrected
-        # ("what about MHIP" -> "what about MIHP-I"), NOT a generic "tell me about". That keeps the
-        # follow-up framing, so the history-aware pipeline still answers whatever they were on
-        # (e.g. tenure) rather than resetting to a full overview.
-        typo = self._ambiguous_token(message, candidates)
+        # Each chip re-sends the customer's intent with just the mistyped name corrected, NOT a
+        # generic "tell me about". Prefer the REWRITE's resolution of THIS turn (`resolved`, e.g.
+        # "documents for MHIP") over the raw message: it was just computed with clean history, so it
+        # still carries what they were actually on (documents / tenure / …). Baking that into the chip
+        # means the pick answers "documents for MIHP-i" directly — the pipeline never has to re-derive
+        # the topic across this clarify turn, which is exactly where it gets dropped to a bare overview.
+        base = resolved if self._ambiguous_token(resolved, candidates) else message
+        typo = self._ambiguous_token(base, candidates)
 
         def _pick(code: str) -> str:
             if typo:
-                return re.sub(re.escape(typo), code, message, count=1, flags=re.I)
+                return re.sub(re.escape(typo), code, base, count=1, flags=re.I)
             return f"Tell me about {code}"
 
         suggestions = [{"label": _name(c), "value": _pick(c)} for c in candidates]
@@ -316,7 +319,7 @@ class ProgramAdvisor:
         # don't dump into the funnel — ask which one. The rewrite (LLM) reads the near-matches; we
         # only clarify when it couldn't settle on one AND there are ≥2 candidates.
         if not program and len(candidates) >= 2:
-            return self._disambiguate(candidates, slots, message, history)
+            return self._disambiguate(candidates, slots, message, history, resolved)
 
         # Continuation of a grounded answer's "apply / talk to our team" offer:
         # a bare reply that names no new programme is read as proceed/decline
