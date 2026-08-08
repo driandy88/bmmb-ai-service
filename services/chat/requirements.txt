@@ -15,6 +15,10 @@ langchain-core==0.3.*
 # Vertex AI (Gemini) — used only by LLM_BACKEND=vertex.
 google-genai==0.3.*
 
+# GCS — used only by the citation source preview (SOURCE_PREVIEW_MODE=signed|proxy) to
+# sign / stream the original Sales-Kit PDFs. Imported lazily; not needed offline (mode=off).
+google-cloud-storage==2.*
+
 # Cloud SQL — used only by the Postgres checkpointer / audit durability layer
 # (SESSION_STORE_BACKEND=postgres, AUDIT_BACKEND=cloudsql).
 cloud-sql-python-connector[pg8000]==1.*

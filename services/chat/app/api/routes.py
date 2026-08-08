@@ -12,9 +12,9 @@ import re
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
-from app.api.schemas import ChatRequest, ChatResponse, HealthResponse
+from app.api.schemas import ChatRequest, ChatResponse, HealthResponse, SourceDocResponse
 from app.config.settings import get_settings
 
 router = APIRouter()
@@ -160,4 +160,51 @@ def health(request: Request) -> HealthResponse:
 
     return HealthResponse(
         status=status, llm_backend=settings.llm_backend, rag_backend=settings.rag_backend, checks=checks,
+    )
+
+
+# ── Citation source preview (Tier 1) ─────────────────────────────────────────
+
+def get_source_preview(app):
+    """Lazily build + cache the source-preview resolver on app.state."""
+    sp = getattr(app.state, "source_preview", None)
+    if sp is None:
+        from app.integrations.source_preview import SourcePreview
+        sp = SourcePreview(get_settings())
+        app.state.source_preview = sp
+    return sp
+
+
+@router.get("/chat/source", response_model=SourceDocResponse)
+def chat_source(doc_id: str, request: Request, channel: str = "customer") -> SourceDocResponse:
+    """Resolve a citation's `doc_id` to a URL the browser can open at the cited page.
+    Allowlist + access-tier gated; the client appends `#page=N` from the citation."""
+    sp = get_source_preview(request.app)
+    doc = sp.resolve(doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Unknown source document.")
+    if not sp.allowed(doc, channel):
+        raise HTTPException(status_code=403, detail="Source not available on this channel.")
+    url = sp.url_for(doc, channel)
+    if not url:
+        raise HTTPException(status_code=503, detail="Source preview is not available.")
+    return SourceDocResponse(doc_id=doc.doc_id, doc_title=doc.title, url=url)
+
+
+@router.get("/chat/source/raw")
+def chat_source_raw(doc_id: str, request: Request, channel: str = "customer") -> Response:
+    """Stream the source PDF bytes (proxy mode / signed-URL fallback). Same allowlist + gate."""
+    sp = get_source_preview(request.app)
+    doc = sp.resolve(doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Unknown source document.")
+    if not sp.allowed(doc, channel):
+        raise HTTPException(status_code=403, detail="Source not available on this channel.")
+    data = sp.download(doc)
+    if data is None:
+        raise HTTPException(status_code=503, detail="Source preview is not available.")
+    return Response(
+        content=data, media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{doc.doc_id}.pdf"',
+                 "Cache-Control": "private, max-age=600"},
     )

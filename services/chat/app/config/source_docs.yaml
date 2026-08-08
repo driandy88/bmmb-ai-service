@@ -1,0 +1,33 @@
+# Servable source documents for the citation → PDF preview (Tier 1).
+#
+# This is an explicit ALLOWLIST + access-tier boundary. Only docs listed here can be
+# signed/streamed to a browser; `access_tier: internal` is NEVER served to the customer
+# channel. `doc_id` matches the value carried in each citation (chunk metadata). Keep in
+# sync with services/rag-ingestion/config/documents.yaml when a new kit is ingested.
+docs:
+  mihp_i:
+    source_uri: gs://bmmb-rag-sources/SalesKit_MIHP-i.pdf
+    title: Muamalat Industrial Hire Purchase (MIHP-i) Sales Kit
+    access_tier: customer
+  mhp_i:
+    source_uri: gs://bmmb-rag-sources/SalesKit_MHP-i.pdf
+    title: Muamalat Hire Purchase-i (MHP-i) Sales Kit
+    access_tier: customer
+  ggsm3:
+    source_uri: gs://bmmb-rag-sources/SalesKit_GGSM3.pdf
+    title: Government Guarantee Scheme Madani 3 (GGSM3) Sales Kit
+    access_tier: customer
+  sjum:
+    source_uri: gs://bmmb-rag-sources/SalesKit_SJUM.pdf
+    title: Skim Jaminan Usahawan MARA (SJUM) Sales Kit
+    access_tier: customer
+  proud:
+    source_uri: gs://bmmb-rag-sources/SalesKit_PROUD.pdf
+    title: Program Untuk Dealer (PROUD) Sales Kit
+    access_tier: customer
+  # Internal filtering criteria — access_tier internal: the customer channel must NEVER
+  # retrieve OR preview this. Listed so the gate is explicit and tested.
+  commercial_financing_internal_criteria:
+    source_uri: gs://bmmb-rag-sources/TALK_PP_COMMERCIAL_FINANCING_SOLUTION.pdf
+    title: Commercial Financing — Internal Filtering Criteria
+    access_tier: internal

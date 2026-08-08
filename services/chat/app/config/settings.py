@@ -68,6 +68,13 @@ class Settings:
     new_application_url: str = os.getenv("NEW_APPLICATION_URL", "https://apply.muamalat.example/sme/new")
     handoff_hours: str = os.getenv("HANDOFF_HOURS", "Mon–Fri, 9:00am–5:00pm")
 
+    # ── Citation source preview (Tier 1) ─────────────────────────────────────
+    #   signed | proxy | off  (see integrations/source_preview.py). Off offline/stub.
+    source_preview_mode: str = os.getenv(
+        "SOURCE_PREVIEW_MODE", "signed" if os.getenv("GCP_PROJECT_ID") else "off"
+    ).strip().lower()
+    source_url_ttl_seconds: int = int(os.getenv("SOURCE_URL_TTL_SECONDS", "900"))
+
     # ── API ──────────────────────────────────────────────────────────────────
     allowed_origins: str = os.getenv("ALLOWED_ORIGINS", "*")
 
@@ -112,4 +119,6 @@ def get_settings() -> Settings:
         raise RuntimeError(f"RAG_BACKEND must be 'stub'|'vertex'|'pgvector', got {s.rag_backend!r}")
     if s.extraction_backend not in ("stub", "http"):
         raise RuntimeError(f"EXTRACTION_BACKEND must be 'stub' or 'http', got {s.extraction_backend!r}")
+    if s.source_preview_mode not in ("signed", "proxy", "off"):
+        raise RuntimeError(f"SOURCE_PREVIEW_MODE must be 'signed'|'proxy'|'off', got {s.source_preview_mode!r}")
     return s
