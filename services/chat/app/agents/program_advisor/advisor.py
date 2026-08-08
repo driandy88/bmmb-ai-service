@@ -185,9 +185,33 @@ class ProgramAdvisor:
             "programme_disambiguate", message=message, history=history or [],
             fallback=f"Did you mean {joined}?", candidates="\n".join(f"- {n}" for n in names),
         )
-        suggestions = [{"label": _name(c), "value": f"Tell me about {c}"} for c in candidates]
+        # Each chip re-sends the customer's OWN message with just the mistyped name corrected
+        # ("what about MHIP" -> "what about MIHP-I"), NOT a generic "tell me about". That keeps the
+        # follow-up framing, so the history-aware pipeline still answers whatever they were on
+        # (e.g. tenure) rather than resetting to a full overview.
+        typo = self._ambiguous_token(message, candidates)
+
+        def _pick(code: str) -> str:
+            if typo:
+                return re.sub(re.escape(typo), code, message, count=1, flags=re.I)
+            return f"Tell me about {code}"
+
+        suggestions = [{"label": _name(c), "value": _pick(c)} for c in candidates]
         return _turn(reply, slots, stage="program_done", ui={"type": "none", "payload": {}},
                      suggestions=suggestions)
+
+    @staticmethod
+    def _ambiguous_token(message: str, candidates: list) -> Optional[str]:
+        """The mistyped programme word in the message — the token most similar to the candidates'
+        cores — so a chip can swap just that word for the chosen code and leave the rest of the
+        customer's phrasing (and thus the topic) intact. None if nothing in the message is close."""
+        cores = [re.sub(r"[-\s]?(?:i|\d+)$", "", c, flags=re.I).upper() for c in candidates]
+        best, token = 0.0, None
+        for tok in re.findall(r"[A-Za-z]{3,}", message):
+            score = max(difflib.SequenceMatcher(None, tok.upper(), core).ratio() for core in cores)
+            if score > best:
+                best, token = score, tok
+        return token if best >= 0.6 else None
 
     @staticmethod
     def _norm_program(code: str) -> str:

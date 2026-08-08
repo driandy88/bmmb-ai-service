@@ -273,8 +273,12 @@ def test_mistyped_ambiguous_programme_asks_which_one():
     assert res["ui_action"]["type"] == "none"                   # a clarify, NOT the funnel
     assert not res.get("grounded")
     assert "did you mean" in res["reply"].lower()
+    labels = [s["label"] for s in res["suggestions"]]
+    assert any("MIHP-i" in l for l in labels) and any("MHP-i" in l for l in labels)  # both offered as chips
+    # each chip re-sends the customer's OWN wording with just the name corrected — keeps the topic
     values = [s["value"] for s in res["suggestions"]]
-    assert "Tell me about MIHP-I" in values and "Tell me about MHP-I" in values   # both offered as chips
+    assert "what about MIHP-I?" in values and "what about MHP-I?" in values
+    assert not any("Tell me about" in v for v in values)   # NOT reset to a generic overview
 
 
 def test_mistyped_name_clarifies_via_deterministic_fallback():
@@ -289,7 +293,7 @@ def test_mistyped_name_clarifies_via_deterministic_fallback():
     assert res["ui_action"]["type"] == "none"                   # a clarify, NOT the funnel
     assert not res.get("grounded")
     values = [s["value"] for s in res["suggestions"]]
-    assert "Tell me about MIHP-I" in values and "Tell me about MHP-I" in values
+    assert "what about MIHP-I?" in values and "what about MHP-I?" in values   # corrected follow-up, topic kept
     # and a normal, correctly-named question is NOT dragged into a typo clarify
     ok = adv.handle("what is the tenure for GGSM3?", [], {})
     assert ok.get("grounded") is True
