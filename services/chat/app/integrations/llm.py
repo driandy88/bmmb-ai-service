@@ -100,6 +100,9 @@ _UNDERSTAND_DEFAULTS: dict = {
     "disambiguation": {"needed": False, "candidates": []},
     "clarify": {"needed": False, "question": ""}, "funnel": {"purpose_id": None, "amount_rm": None},
     "offer_response": "none", "out_of_scope_topic": None, "confidence": 0.0,
+    # Phase 2: the taxonomy classification that decide() routes on (cat_ids). Same shape as
+    # classify_intent, so understand() can replace it — one read feeds routing AND the advisor.
+    "intent": {"primary": None, "secondary": None, "confidence": 0.0},
 }
 
 
@@ -107,18 +110,22 @@ def normalize_understanding(sig: Optional[dict]) -> dict:
     """Fill every field so callers never KeyError, whatever the backing returned."""
     out = dict(_UNDERSTAND_DEFAULTS)
     out.update(sig or {})
-    for k in ("disambiguation", "clarify", "funnel"):
+    for k in ("disambiguation", "clarify", "funnel", "intent"):
         merged = dict(_UNDERSTAND_DEFAULTS[k]); merged.update(out.get(k) or {}); out[k] = merged
     return out
 
 
-def understand_schema(codes: list[str]) -> dict:
-    """google.genai response schema for `understand`; program_code / candidates constrained to `codes`."""
+def understand_schema(codes: list[str], cat_ids: Optional[list[str]] = None) -> dict:
+    """google.genai response schema for `understand`; program_code / candidates constrained to `codes`,
+    and (Phase 2) intent.primary / secondary constrained to the taxonomy `cat_ids`."""
     code_str = {"type": "STRING", "enum": codes, "nullable": True} if codes else {"type": "STRING", "nullable": True}
     code_item = {"type": "STRING", "enum": codes} if codes else {"type": "STRING"}
+    cat_str = {"type": "STRING", "enum": cat_ids, "nullable": True} if cat_ids else {"type": "STRING", "nullable": True}
     return {
         "type": "OBJECT",
         "properties": {
+            "intent": {"type": "OBJECT", "properties": {
+                "primary": cat_str, "secondary": cat_str, "confidence": {"type": "NUMBER"}}},
             "reads_as": {"type": "STRING"},
             "turn_type": {"type": "STRING", "enum": [
                 "program_info", "compare", "recommend", "eligibility", "offer_response",
@@ -427,6 +434,9 @@ class StubLLMClient(LLMClient):
             "funnel": {"purpose_id": purpose, "amount_rm": amount},
             "offer_response": offer,
             "confidence": 0.8,
+            # Phase 2: routing intent is DELEGATED to classify_intent, so the understand path routes
+            # identically to the current path offline — the Vertex prompt does this in one shot.
+            "intent": self.classify_intent(message, history or []),
         })
 
 
@@ -596,18 +606,30 @@ class VertexGeminiClient(LLMClient):
                    programs: Optional[list[tuple[str, str]]] = None, stage: str = "") -> dict:
         programs = programs or []
         try:
+            tax = load_config().taxonomy
+            cat_ids = tax.ids()
+            by_type: dict[str, list] = {}
+            for r in tax.rows:
+                by_type.setdefault(r.type, []).append(r)
+            taxonomy = "\n".join(
+                f"[{t.upper()}]\n" + "\n".join(f"  {r.cat_id}: {r.category} — {r.definition}" for r in rows)
+                for t, rows in by_type.items())
             codes = [c for c, _ in programs]
             listing = "\n".join(f"  {c} — {t}" for c, t in programs) or "  (none configured)"
-            filled = render(load_prompt("understand"), programs=listing, message=message,
+            filled = render(load_prompt("understand"), programs=listing, taxonomy=taxonomy, message=message,
                             history=self._history_text(history or []), stage=stage or "(none)")
-            out = self._generate_json("understand", filled, understand_schema(codes))
-            code_set = set(codes)
+            out = self._generate_json("understand", filled, understand_schema(codes, cat_ids))
+            code_set, cat_set = set(codes), set(cat_ids)
             sig = normalize_understanding(out)
-            # honour the index: never let the model hand back a program_code we can't serve
+            # honour the index / taxonomy: never hand back a program_code or cat_id we can't serve
             if sig["program_code"] not in code_set:
                 sig["program_code"] = None
             sig["disambiguation"]["candidates"] = [c for c in sig["disambiguation"]["candidates"] if c in code_set]
             sig["compare_programs"] = [c for c in sig["compare_programs"] if c in code_set]
+            if sig["intent"]["primary"] not in cat_set:
+                sig["intent"]["primary"] = None
+            if sig["intent"]["secondary"] not in cat_set:
+                sig["intent"]["secondary"] = None
             return sig
         except Exception as exc:  # noqa: BLE001 — degrade to stub, never break the turn
             log.warning("Vertex understand failed (%s); using stub.", exc)

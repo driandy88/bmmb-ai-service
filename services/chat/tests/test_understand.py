@@ -130,3 +130,37 @@ def test_clarify_when_genuinely_unsure():
     res = _adv(_LLM()).handle("how much can I get?", [], {})
     assert "what will the financing be for" in res["reply"].lower()
     assert not res.get("grounded")
+
+
+# ── Phase 2: one read feeds routing AND the advisor ───────────────────────────
+def test_handle_reuses_the_passed_understanding_without_recomputing():
+    # In Phase 2 the signal is computed once in classify_node and threaded to the advisor. If it's
+    # passed, the advisor must NOT call understand() again.
+    class _NoUnderstand(StubLLMClient):
+        def understand(self, *a, **k):
+            raise AssertionError("understand() must not be called when the signal is passed in")
+    sig = normalize_understanding({"turn_type": "program_info", "program_code": "MIHP-I",
+                                   "program_status": "indexed", "attribute": "documents",
+                                   "retrieval_query": "documents required for MIHP-i"})
+    adv = ProgramAdvisor(_NoUnderstand(), FakeRetriever([_chunk("MIHP-i docs")], PROGS))
+    res = adv.handle("documents for MIHP-i", [], {}, understanding=sig)
+    assert res["grounded"] is True
+
+
+def test_classify_via_understand_stores_signal_and_keeps_routing_parity():
+    # classify_node with the flag ON produces the same routing intent as the classic path, and stores
+    # the one-read signal for the advisor to reuse. (Stub delegates intent to classify_intent.)
+    from types import SimpleNamespace
+    from app.config.loader import load_config
+    from app.agents.intent_classifier.classifier import IntentClassifier
+    from app.orchestrator.nodes import classify_node
+
+    stub, cfg, ret = StubLLMClient(), load_config(), FakeRetriever([_chunk("x")], PROGS)
+    state = {"message": "what is the profit rate for MIHP-I?", "history": [], "stage": None}
+    on = SimpleNamespace(settings=SimpleNamespace(use_understand=True), llm=stub, retriever=ret,
+                         classifier=IntentClassifier(stub), config=cfg)
+    off = SimpleNamespace(settings=SimpleNamespace(use_understand=False), llm=stub, retriever=ret,
+                          classifier=IntentClassifier(stub), config=cfg)
+    out_on, out_off = classify_node(dict(state), on), classify_node(dict(state), off)
+    assert out_on["understanding"]["intent"]                # the one-read signal is captured
+    assert out_on["intent"] == out_off["intent"]            # routing is identical to the classic path

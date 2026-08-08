@@ -47,10 +47,15 @@ invent its facts.
    mohon", "tak nak dulu", "kadar untung"). Understand both; always write `retrieval_query` /
    `clarify.question` in English.
 7. **Never invent facts.** You extract intent + a retrieval query; the FACTS come from the Sales Kit.
+8. **Classify the turn for routing.** Also set `intent.primary` (and `secondary` when a second,
+   different-type intent is clearly present) to the best-fitting category id from the Taxonomy below,
+   with a `confidence` 0-1. This is what decides which handler runs — be precise. Adversarial turns
+   still get caught by a separate guardrail, but classify them here too when obvious.
 
 ## Output — return ONLY this JSON
 ```json
 {
+  "intent": { "primary": "<cat_id or null>", "secondary": "<cat_id or null>", "confidence": 0.0 },
   "reads_as": "<one plain line: what the customer is doing this turn>",
   "turn_type": "program_info | compare | recommend | eligibility | offer_response | out_of_scope | smalltalk | unclear",
   "program_code": "<a code from the list, or null>",
@@ -79,6 +84,9 @@ Import · 4=Machinery/Vehicles/Equipment · 5=Project/Contract.
 
 ## Programmes in the live index (the only valid program_code values you can DETAIL)
 {programs}
+
+## Taxonomy (the only valid intent.primary / intent.secondary values)
+{taxonomy}
 
 ## Conversation so far
 {history}
