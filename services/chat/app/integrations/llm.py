@@ -56,13 +56,15 @@ class LLMClient(ABC):
     @abstractmethod
     def rewrite_query(self, message: str, programs: list[tuple[str, str]],
                       history: Optional[list] = None) -> dict:
-        """-> {rewritten_query: str, program_code: str|None, is_program_dependent: bool}
+        """-> {rewritten_query: str, program_code: str|None, program_candidates: [code],
+              is_program_dependent: bool}
         Normalise customer vocabulary to bank vocabulary (loan->financing,
         interest->profit rate) and extract an explicitly-named programme (§6a
         branch A). `programs` = [(code, title)] from the live index. With `history`,
         CONDENSE a follow-up ("what about GGSM?", "and the documents?") into a full
-        standalone `rewritten_query` using the prior turns, so retrieval + synthesis
-        both see the real intent (branch B)."""
+        standalone `rewritten_query` using the prior turns (branch B). `program_candidates`
+        lists the listed programmes a mistyped / ambiguous name is close to (e.g. "MHIP"
+        → [MIHP-I, MHP-I]) when no single one is confident — the advisor asks which."""
 
     @abstractmethod
     def synthesize_answer(self, query: str, chunks: list, history: Optional[list] = None) -> dict:
@@ -276,8 +278,8 @@ class StubLLMClient(LLMClient):
                 break
         dep = bool(re.search(r"\b(rate|profit rate|amount|size|how much|tenure|margin|"
                              r"guarantee|eligib|qualify)\b", low))
-        return {"rewritten_query": rewritten.strip() or text,
-                "program_code": program_code, "is_program_dependent": dep}
+        return {"rewritten_query": rewritten.strip() or text, "program_code": program_code,
+                "program_candidates": [], "is_program_dependent": dep}
 
     def synthesize_answer(self, query: str, chunks: list, history: Optional[list] = None) -> dict:
         # Offline/deterministic: no real synthesis — surface a lead sentence from
@@ -433,19 +435,23 @@ class VertexGeminiClient(LLMClient):
                             history=self._history_text(history or []))
             pc_schema = ({"type": "STRING", "enum": codes, "nullable": True} if codes
                          else {"type": "STRING", "nullable": True})
+            cand_item = ({"type": "STRING", "enum": codes} if codes else {"type": "STRING"})
             schema = {
                 "type": "OBJECT",
                 "properties": {
                     "rewritten_query": {"type": "STRING"},
                     "program_code": pc_schema,
+                    "program_candidates": {"type": "ARRAY", "items": cand_item},
                     "is_program_dependent": {"type": "BOOLEAN"},
                 },
                 "required": ["rewritten_query"],
             }
             out = self._generate_json("query_rewrite", filled, schema)
+            code_set = set(codes)
             return {
                 "rewritten_query": (out.get("rewritten_query") or message).strip(),
                 "program_code": out.get("program_code") or None,
+                "program_candidates": [c for c in (out.get("program_candidates") or []) if c in code_set],
                 "is_program_dependent": bool(out.get("is_program_dependent", False)),
             }
         except Exception as exc:  # noqa: BLE001 — degrade to stub, never break the turn
