@@ -39,6 +39,11 @@ class IntentRow:
     response_ref: str
     type: str                       # in_scope | out_of_scope | adversarial | ambiguous
     status: Optional[str] = None    # e.g. "tbd" -> safe default until wording provided
+    # A specific, recognisable off-topic topic (fixed deposit, personal loan, a competitor,
+    # investment advice) rather than vague "I don't recognise this" chit-chat. When the classifier
+    # confidently picks one of these, a programme name in the message is incidental — the
+    # programme-name rescue (nodes.classify_node) yields instead of hijacking it into a query.
+    specific_topic: bool = False
 
     @property
     def is_route(self) -> bool:
@@ -69,6 +74,7 @@ def _build_taxonomy(raw: list[dict]) -> Taxonomy:
             response_ref=str(r["response_ref"]).strip(),
             type=str(r["type"]).strip(),
             status=(str(r["status"]).strip() if r.get("status") else None),
+            specific_topic=bool(r.get("specific_topic", False)),
         )
         for r in raw
     ]

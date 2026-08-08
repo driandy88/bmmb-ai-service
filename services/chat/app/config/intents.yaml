@@ -61,18 +61,21 @@
   definition: Retail/deposit products unrelated to SME financing (savings, FD, cards, current a/c).
   response_ref: R1
   type: out_of_scope
+  specific_topic: true
 
 - cat_id: OOS-02
   category: Non-SME financing
   definition: Consumer financing outside SME scope (personal loan, mortgage, car, education).
   response_ref: R1
   type: out_of_scope
+  specific_topic: true
 
 - cat_id: OOS-03
   category: Competitor comparison
   definition: Asking the bot to compare BMMB against other banks.
   response_ref: R2
   type: out_of_scope
+  specific_topic: true
   status: tbd            # Sheet 1.1 note: sales-script wording pending (Mazuri)
 
 - cat_id: OOS-04
@@ -80,6 +83,7 @@
   definition: Advisory outside the bot's function (stocks, property, what to invest in).
   response_ref: R3
   type: out_of_scope
+  specific_topic: true
 
 - cat_id: OOS-05
   category: General knowledge / chit-chat
