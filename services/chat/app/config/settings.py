@@ -58,6 +58,12 @@ class Settings:
     # (notebook Part C). Below this the bot must clarify (R8), never guess.
     confidence_threshold: float = float(os.getenv("CONFIDENCE_THRESHOLD", "0.7"))
 
+    # ── Phase 1: one-understanding path (off by default) ─────────────────────
+    # When on, program_advisor reads the whole turn with a single LLM `understand`
+    # call instead of the rewrite + keyword interpreters. Off = the current path,
+    # byte-for-byte. Flip in staging, shadow, then production; revert = flip back.
+    use_understand: bool = field(default_factory=lambda: _flag("USE_UNDERSTAND", False))
+
     # ── Short-memory windowing (§5.1) ────────────────────────────────────────
     # The server ALWAYS re-trims client-supplied history to these bounds; never
     # trust the client to keep it short.
