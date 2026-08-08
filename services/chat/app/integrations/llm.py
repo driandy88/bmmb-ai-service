@@ -82,6 +82,96 @@ class LLMClient(ABC):
         request re-sent through routing when tapped. {"question": "", "options": []}
         when it can't clarify within SME financing — the caller uses its default line."""
 
+    @abstractmethod
+    def understand(self, message: str, history: Optional[list] = None, *,
+                   programs: Optional[list[tuple[str, str]]] = None, stage: str = "") -> dict:
+        """Phase-1 one-shot read of the whole turn -> the structured signal in
+        `normalize_understanding` (turn_type, program_code, attribute, retrieval_query,
+        disambiguation, clarify, funnel, offer_response, …). Resolves follow-ups against
+        `history`, reads Malay + English, and never invents product facts. `programs` =
+        [(code, title)] from the live index (constrains program_code). Used by
+        program_advisor when settings.use_understand is on; the current path is unaffected."""
+
+
+# ── The "understanding" signal (Phase 1) ─────────────────────────────────────
+_UNDERSTAND_DEFAULTS: dict = {
+    "reads_as": "", "turn_type": "program_info", "program_code": None, "program_status": "none",
+    "compare_programs": [], "attribute": None, "retrieval_query": None,
+    "disambiguation": {"needed": False, "candidates": []},
+    "clarify": {"needed": False, "question": ""}, "funnel": {"purpose_id": None, "amount_rm": None},
+    "offer_response": "none", "out_of_scope_topic": None, "confidence": 0.0,
+}
+
+
+def normalize_understanding(sig: Optional[dict]) -> dict:
+    """Fill every field so callers never KeyError, whatever the backing returned."""
+    out = dict(_UNDERSTAND_DEFAULTS)
+    out.update(sig or {})
+    for k in ("disambiguation", "clarify", "funnel"):
+        merged = dict(_UNDERSTAND_DEFAULTS[k]); merged.update(out.get(k) or {}); out[k] = merged
+    return out
+
+
+def understand_schema(codes: list[str]) -> dict:
+    """google.genai response schema for `understand`; program_code / candidates constrained to `codes`."""
+    code_str = {"type": "STRING", "enum": codes, "nullable": True} if codes else {"type": "STRING", "nullable": True}
+    code_item = {"type": "STRING", "enum": codes} if codes else {"type": "STRING"}
+    return {
+        "type": "OBJECT",
+        "properties": {
+            "reads_as": {"type": "STRING"},
+            "turn_type": {"type": "STRING", "enum": [
+                "program_info", "compare", "recommend", "eligibility", "offer_response",
+                "out_of_scope", "smalltalk", "unclear"]},
+            "program_code": code_str,
+            "program_status": {"type": "STRING", "enum": ["indexed", "known_unindexed", "none"]},
+            "compare_programs": {"type": "ARRAY", "items": code_item},
+            "attribute": {"type": "STRING", "nullable": True},
+            "retrieval_query": {"type": "STRING", "nullable": True},
+            "disambiguation": {"type": "OBJECT", "properties": {
+                "needed": {"type": "BOOLEAN"}, "candidates": {"type": "ARRAY", "items": code_item}}},
+            "clarify": {"type": "OBJECT", "properties": {
+                "needed": {"type": "BOOLEAN"}, "question": {"type": "STRING"}}},
+            "funnel": {"type": "OBJECT", "properties": {
+                "purpose_id": {"type": "INTEGER", "nullable": True},
+                "amount_rm": {"type": "NUMBER", "nullable": True}}},
+            "offer_response": {"type": "STRING", "enum": ["apply", "decline", "other", "none"]},
+            "out_of_scope_topic": {"type": "STRING", "nullable": True},
+            "confidence": {"type": "NUMBER"},
+        },
+        "required": ["turn_type"],
+    }
+
+
+# Stub-only heuristics for offline `understand` (NOT business config). EN + a little Malay.
+_STUB_ATTR = {
+    "documents": ["document", "dokumen", "docs", "paperwork"],
+    "tenure": ["tenure", "tempoh", "how long", "period", "years"],
+    "profit_rate": ["rate", "profit", "untung", "kadar", "interest"],
+    "financing_size": ["how much", "amount", "size", "limit", "maximum", "berapa banyak"],
+    "eligibility": ["eligible", "eligibility", "qualify", "layak", "requirement"],
+}
+_STUB_APPLY = ["apply", "mohon", "sign up", "get started", "go ahead", "proceed", "yes", "yeah",
+               "yep", "sure", "okay", "ok", "sounds good", "sound good", "let's do it", "interested"]
+_STUB_DECLINE = ["no thanks", "not now", "maybe later", "not interested", "just looking", "tak nak",
+                 "tengok-tengok", "no need", "that's all", "im good", "i'm good"]
+_STUB_OTHER = ["what else", "other program", "other programme", "another program", "different program",
+               "lain", "apa lagi"]
+# A catalog / "show me the programmes" ask (distinct from a question about ONE programme). Precise so
+# "what SME financing TENURE does MIHP have" is NOT mistaken for a browse request.
+_STUB_BROWSE_RE = re.compile(
+    r"what\s+(?:sme\s+)?(?:financing\s+)?(?:programme|program|product|scheme|option)s?\s+(?:do|can|does)\s+(?:you|u|we)\b"
+    r"|what\s+(?:do|can)\s+(?:you|u|we)\s+(?:offer|have|provide)\b"
+    r"|(?:explore|list|show|see)\s+(?:me\s+)?(?:the\s+|all\s+|your\s+)?(?:programme|program|product|option)s?\b",
+    re.I)
+_STUB_PURPOSE = {
+    1: ["expansion", "expand", "capex", "capital expenditure", "grow"],
+    2: ["working capital", "cash flow", "cash-flow", "cashflow", "modal kerja"],
+    3: ["supplier", "trade", "import", "pembekal"],
+    4: ["machinery", "machine", "vehicle", "equipment", "lorry", "truck", "mesin", "kenderaan"],
+    5: ["project", "contract", "projek", "kontrak"],
+}
+
 
 # ── Deterministic stub ───────────────────────────────────────────────────────
 
@@ -295,6 +385,50 @@ class StubLLMClient(LLMClient):
         # Offline: no smart clarify — the caller uses its default R8 line + preset chips.
         return {"question": "", "options": []}
 
+    def understand(self, message: str, history: Optional[list] = None, *,
+                   programs: Optional[list[tuple[str, str]]] = None, stage: str = "") -> dict:
+        # Deterministic offline read. Program resolution is DELEGATED to rewrite_query so the
+        # signal matches the current path exactly; the rest is light EN+MY keyword heuristics.
+        programs = programs or []
+        low = (message or "").lower()
+        rw = self.rewrite_query(message, programs, history)
+        cands = rw.get("program_candidates") or []
+        attribute = next((a for a, kws in _STUB_ATTR.items() if any(k in low for k in kws)), None)
+        if low.strip() in ("no", "nope", "nah") or any(k in low for k in _STUB_DECLINE):
+            offer = "decline"
+        elif any(k in low for k in _STUB_OTHER) or _STUB_BROWSE_RE.search(low):
+            offer = "other"
+        elif any(k in low for k in _STUB_APPLY):
+            offer = "apply"
+        else:
+            offer = "none"
+        purpose = next((pid for pid, kws in _STUB_PURPOSE.items() if any(k in low for k in kws)), None)
+        amount = None
+        for m in _MONEY_RE.finditer(low):
+            num, unit = m.group(1), m.group(2)
+            if unit or "rm" in low[max(0, m.start() - 3):m.start() + 3] or "," in num \
+                    or len(num.replace(",", "").split(".")[0]) >= 4:
+                amount = float(num.replace(",", "")) * _UNIT_MULT.get((unit or "").lower(), 1.0)
+                break
+        if offer != "none" and stage == "program_offer":
+            turn_type = "offer_response"
+        elif rw.get("program_code"):
+            turn_type = "program_info"
+        elif purpose or amount:
+            turn_type = "recommend"
+        else:
+            turn_type = "program_info"
+        return normalize_understanding({
+            "turn_type": turn_type,
+            "program_code": rw.get("program_code"),
+            "attribute": attribute,
+            "retrieval_query": rw.get("rewritten_query") or message,
+            "disambiguation": {"needed": bool(cands), "candidates": cands},
+            "funnel": {"purpose_id": purpose, "amount_rm": amount},
+            "offer_response": offer,
+            "confidence": 0.8,
+        })
+
 
 # ── Vertex AI / Gemini ───────────────────────────────────────────────────────
 
@@ -457,6 +591,27 @@ class VertexGeminiClient(LLMClient):
         except Exception as exc:  # noqa: BLE001 — degrade to stub, never break the turn
             log.warning("Vertex rewrite_query failed (%s); using stub.", exc)
             return self._fallback.rewrite_query(message, programs)
+
+    def understand(self, message: str, history: Optional[list] = None, *,
+                   programs: Optional[list[tuple[str, str]]] = None, stage: str = "") -> dict:
+        programs = programs or []
+        try:
+            codes = [c for c, _ in programs]
+            listing = "\n".join(f"  {c} — {t}" for c, t in programs) or "  (none configured)"
+            filled = render(load_prompt("understand"), programs=listing, message=message,
+                            history=self._history_text(history or []), stage=stage or "(none)")
+            out = self._generate_json("understand", filled, understand_schema(codes))
+            code_set = set(codes)
+            sig = normalize_understanding(out)
+            # honour the index: never let the model hand back a program_code we can't serve
+            if sig["program_code"] not in code_set:
+                sig["program_code"] = None
+            sig["disambiguation"]["candidates"] = [c for c in sig["disambiguation"]["candidates"] if c in code_set]
+            sig["compare_programs"] = [c for c in sig["compare_programs"] if c in code_set]
+            return sig
+        except Exception as exc:  # noqa: BLE001 — degrade to stub, never break the turn
+            log.warning("Vertex understand failed (%s); using stub.", exc)
+            return self._fallback.understand(message, history, programs=programs, stage=stage)
 
     def generate_clarify(self, message: str, history: list[dict]) -> dict:
         try:

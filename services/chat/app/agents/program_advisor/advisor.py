@@ -20,7 +20,7 @@ from app.agents.rag.retriever import Corpus, Retriever
 from app.agents.rag.synthesize import grounded_answer
 from app.config.loader import AppConfig, load_config
 from app.config.settings import get_settings
-from app.integrations.llm import LLMClient
+from app.integrations.llm import LLMClient, normalize_understanding
 from app.utils.suggestions import explore_suggestions
 
 _MONEY_RE = re.compile(r"(?:rm\s*)?(\d[\d,]*(?:\.\d+)?)\s*(juta|million|mil|m|k|ribu|thousand)?\b", re.I)
@@ -300,10 +300,120 @@ class ProgramAdvisor:
             ui={"type": "open_application_link", "payload": {"url": url, "program": program}},
         )
 
+    # -- Phase 1: one-understanding path (settings.use_understand) --------------
+    def _grounded_compare(self, message: str, slots: dict, history: Optional[list],
+                          retrieval_query: str) -> Optional[dict]:
+        """A grounded comparison spanning programmes — no single program_code, so retrieval isn't
+        scoped to one kit. Offers Sales (there's no single 'Apply for X' to show)."""
+        ans = grounded_answer(self._llm, self._retriever, message, Corpus.PROGRAM,
+                              top_k=6, program_code=None, history=history, retrieval_query=retrieval_query)
+        if not ans:
+            return None
+        return _turn(ans["reply"], slots, stage="program_offer", ui={"type": "none", "payload": {}},
+                     citations=ans["citations"], sentences=ans["sentences"], grounded=True,
+                     suggestions=[{"label": "Connect to Sales team",
+                                   "value": "I'd like to talk to your SME financing team"}])
+
+    def _handle_understand(self, message: str, history: list[dict], slots: dict, *,
+                           stage: Optional[str] = None) -> dict:
+        """ONE `understand()` read of the turn, then act — reusing the SAME terminal handlers as the
+        current path (`_disambiguate` / `_grounded_offer` / `_apply_turn` / `_funnel_reply`). The
+        keyword interpreters and the double rewrite are gone; the fuzzy net and money regex stay only
+        as deterministic backstops. Everything upstream (guardrail/classify/decide) and downstream
+        (grounding, eligibility, tiers) is untouched."""
+        programs = getattr(self._retriever, "programs", lambda: [])() or []
+        valid = {c for c, _ in programs}
+        try:
+            sig = self._llm.understand(message, history, programs=programs, stage=stage or "")
+        except Exception:  # never break the turn on an understand failure
+            sig = {}
+        sig = normalize_understanding(sig)
+
+        program = sig["program_code"] if sig["program_code"] in valid else None
+        retrieval_query = (sig.get("retrieval_query") or "").strip() or message
+
+        # 1. Ambiguous / mistyped name → clarify with topic-carrying chips. Signal first; the
+        #    deterministic near-match is a backstop for when the model doesn't flag it.
+        cands = [c for c in sig["disambiguation"]["candidates"] if c in valid]
+        if not program and not cands:
+            fuzzy = self._fuzzy_candidates(message, programs)
+            if len(fuzzy) >= 2:
+                cands = fuzzy
+        if not program and len(cands) >= 2:
+            return self._disambiguate(cands, slots, message, history, retrieval_query)
+
+        # 2. Genuinely unsure → clarify with the model's own question (never guess).
+        if sig["clarify"]["needed"] and (sig["clarify"]["question"] or "").strip():
+            return _turn(sig["clarify"]["question"].strip(), slots, stage="program_done",
+                         ui={"type": "none", "payload": {}})
+
+        # 3. Post-answer offer: read by MEANING (apply/decline/other), not a keyword list.
+        if stage == "program_offer" and slots.get("last_program"):
+            prog = slots["last_program"]
+            resp = sig["offer_response"]
+            if resp == "apply":
+                return self._apply_turn(prog, slots)
+            if resp == "decline":
+                return _turn(f"No problem — I'm here whenever you'd like to look at {prog} "
+                             "or another programme. A few things I can help with —",
+                             slots, stage="program_done", ui={"type": "none", "payload": {}},
+                             suggestions=explore_suggestions(prog))
+            if resp == "other":
+                slots.pop("last_program", None)   # fall through to the funnel
+            elif not program:
+                # attribute follow-up about the programme in play ("and the tenure?")
+                offer = self._grounded_offer(message, prog, slots, history, retrieval_query=retrieval_query)
+                if offer:
+                    return offer
+                return _turn(f"Sure — would you like to apply for {prog}, or ask me anything "
+                             "else about our SME financing?", slots, stage="program_offer",
+                             ui={"type": "none", "payload": {}},
+                             suggestions=self._offer_suggestions(prog))
+
+        # 4. Known-but-unindexed programme → name it, hand to Sales (never fabricate its facts).
+        if not program:
+            named = self._named_unindexed_program(message)
+            if named:
+                code, full_name = named
+                reply = (f"{full_name} is one of Bank Muamalat's SME financing programmes, but I don't "
+                         f"have its detailed materials on hand here yet. Our SME financing team can walk you "
+                         f"through {code} — or I can help you explore the programmes I can detail.")
+                return _turn(reply, slots, stage="program_done", ui={"type": "none", "payload": {}},
+                             suggestions=[
+                                 {"label": "Connect to Sales team", "value": "I'd like to talk to your SME financing team"},
+                                 {"label": "Explore programmes", "value": "What SME financing programmes do you offer?"},
+                             ])
+
+        # 5. Compare programmes we can detail.
+        if sig["turn_type"] == "compare" and len([c for c in sig["compare_programs"] if c in valid]) >= 2:
+            cmp = self._grounded_compare(message, slots, history, retrieval_query)
+            if cmp:
+                return cmp
+
+        # 6. Grounded programme answer (the common case).
+        if program:
+            offer = self._grounded_offer(message, program, slots, history, retrieval_query=retrieval_query)
+            if offer:
+                return offer
+
+        # 7. Funnel — merge purpose/amount from the signal (money regex as an exact-figure backstop),
+        #    then the shared funnel steps.
+        if slots.get("funnel_purpose") is None and sig["funnel"]["purpose_id"]:
+            slots["funnel_purpose"] = sig["funnel"]["purpose_id"]
+        if slots.get("funnel_amount") is None:
+            amt = sig["funnel"]["amount_rm"]
+            if amt is None:
+                amt = self._parse_amount(message)
+            if amt is not None:
+                slots["funnel_amount"] = amt
+        return self._funnel_reply(message, history, slots)
+
     def handle(self, message: str, history: list[dict], slots: dict, *,
                stage: Optional[str] = None, intent: Optional[dict] = None) -> dict:
-        funnel = self._cfg.products["funnel"]
         slots = dict(slots or {})
+        # Phase 1: one-understanding path (off by default). The legacy body below is unchanged.
+        if get_settings().use_understand:
+            return self._handle_understand(message, history, slots, stage=stage)
         intent_primary = (intent or {}).get("primary")
 
         # Which specific programme (if any) this turn names — computed once and
@@ -397,6 +507,13 @@ class ProgramAdvisor:
             if amt is not None:
                 slots["funnel_amount"] = amt
 
+        return self._funnel_reply(message, history, slots)
+
+    def _funnel_reply(self, message: str, history: list[dict], slots: dict) -> dict:
+        """Discovery funnel steps 1-3: ask purpose, then amount, then recommend from the deterministic
+        quantum match. Shared by the current path and the understand path — the ONLY difference is how
+        purpose/amount landed in `slots` (keyword extractors vs the understanding signal)."""
+        funnel = self._cfg.products["funnel"]
         purpose = slots.get("funnel_purpose")
         amount = slots.get("funnel_amount")
 
