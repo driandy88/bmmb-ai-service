@@ -38,3 +38,18 @@ def test_classify_does_not_hijack_genuine_in_scope_intent():
 def test_classify_leaves_non_programme_offtopic_alone():
     out = classify_node({"message": "what's your fixed deposit rate", "history": []}, _deps("OOS-01"))
     assert out["intent"]["primary"] == "OOS-01"
+
+
+def test_classify_yields_to_confident_other_product_named_with_a_programme():
+    # "fixed deposit rate for GGSM?" is confidently OTHER products (OOS-01) — the stray "GGSM" must
+    # not hijack it into a programme query; it stays out-of-scope (→ the smart deflection).
+    out = classify_node(
+        {"message": "what's your fixed deposit rate for GGSM?", "history": []}, _deps("OOS-01", 0.9)
+    )
+    assert out["intent"]["primary"] == "OOS-01"
+
+
+def test_classify_still_rescues_low_confidence_acronym():
+    # Safety: a WEAK product guess for an unrecognised acronym still gets rescued to the advisor.
+    out = classify_node({"message": "what is GGSM", "history": []}, _deps("OOS-01", 0.4))
+    assert out["intent"]["primary"] == "INS-02"
