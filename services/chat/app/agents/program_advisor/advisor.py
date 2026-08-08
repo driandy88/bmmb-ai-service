@@ -12,6 +12,7 @@ offline. Product SELECTION is never done by the LLM.
 """
 from __future__ import annotations
 
+import difflib
 import re
 from typing import Any, Optional
 
@@ -137,7 +138,36 @@ class ProgramAdvisor:
         code = code if code in valid else None
         resolved = (rw.get("rewritten_query") or "").strip() or message
         candidates = [c for c in (rw.get("program_candidates") or []) if c in valid]
+        # Deterministic safety net: the rewrite is supposed to flag a mistyped/ambiguous name in
+        # `program_candidates`, but the model doesn't do it reliably. When it resolved nothing, fall
+        # back to a near-match over the programme list ("MHIP" ≈ MIHP & MHP) so the ambiguity is still
+        # caught and clarified — general string similarity, no typo dictionary.
+        if not code and not candidates:
+            fuzzy = self._fuzzy_candidates(message, programs)
+            if len(fuzzy) >= 2:
+                candidates = fuzzy
         return code, resolved, bool(rw.get("is_program_dependent")), candidates
+
+    @staticmethod
+    def _fuzzy_candidates(message: str, programs: list[tuple[str, str]]) -> list[str]:
+        """Which listed programmes a word in the message is a likely TYPO of — general edit-distance
+        similarity over the programme codes (normalised to their core, e.g. MIHP-I→MIHP, GGSM3→GGSM),
+        not a hardcoded typo list. Exact hits are skipped (the rewrite handles those). Returns the
+        near-matched codes, best first; ≥2 means a genuinely ambiguous typo the caller should clarify."""
+        cores: dict[str, str] = {}
+        for code, _ in programs:
+            core = re.sub(r"[-\s]?(?:i|\d+)$", "", code, flags=re.I).upper()
+            cores.setdefault(core, code)
+        best: dict[str, float] = {}
+        for tok in {t.upper() for t in re.findall(r"[A-Za-z]{3,}", message)}:
+            for core, code in cores.items():
+                if tok == core:  # exact — not a typo
+                    continue
+                if abs(len(tok) - len(core)) <= 2:
+                    r = difflib.SequenceMatcher(None, tok, core).ratio()
+                    if r >= 0.7:
+                        best[code] = max(best.get(code, 0.0), r)
+        return sorted(best, key=lambda c: best[c], reverse=True)
 
     def _disambiguate(self, candidates: list, slots: dict, message: str,
                       history: Optional[list] = None) -> dict:

@@ -277,6 +277,24 @@ def test_mistyped_ambiguous_programme_asks_which_one():
     assert "Tell me about MIHP-I" in values and "Tell me about MHP-I" in values   # both offered as chips
 
 
+def test_mistyped_name_clarifies_via_deterministic_fallback():
+    # The reliability fix: even when the rewrite flags NO candidates (the stub, or an unreliable
+    # model), a near-match over the programme list still catches "MHIP" ≈ MIHP & MHP and clarifies —
+    # no fake LLM, no typo list. This is the deployed path.
+    progs = [("MIHP-I", "Muamalat Industrial Hire Purchase (MIHP-i) Sales Kit"),
+             ("MHP-I", "Micro Hire Purchase-i (MHP-i) Sales Kit"),
+             ("GGSM3", "GGSM3 Sales Kit")]
+    adv = ProgramAdvisor(StubLLMClient(), FakeRetriever([_chunk("x")], programs=progs))
+    res = adv.handle("what about MHIP?", [], {})
+    assert res["ui_action"]["type"] == "none"                   # a clarify, NOT the funnel
+    assert not res.get("grounded")
+    values = [s["value"] for s in res["suggestions"]]
+    assert "Tell me about MIHP-I" in values and "Tell me about MHP-I" in values
+    # and a normal, correctly-named question is NOT dragged into a typo clarify
+    ok = adv.handle("what is the tenure for GGSM3?", [], {})
+    assert ok.get("grounded") is True
+
+
 def test_empty_index_falls_through_to_funnel():
     adv = ProgramAdvisor(StubLLMClient(), FakeRetriever([], programs=[]))
     res = adv.handle("tell me about GGSM3", [], {})
