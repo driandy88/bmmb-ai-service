@@ -258,6 +258,25 @@ def test_bare_purpose_answer_continues_funnel():
     assert not res.get("grounded")
 
 
+def test_mistyped_ambiguous_programme_asks_which_one():
+    # "what about MHIP?" is a typo one letter off both MIHP and MHP — the rewrite can't settle on one
+    # and returns both as candidates. Don't guess or funnel: clarify with a chip per candidate.
+    class _AmbiguousLLM(StubLLMClient):
+        def rewrite_query(self, message, programs, history=None):
+            return {"rewritten_query": message, "program_code": None,
+                    "program_candidates": ["MIHP-I", "MHP-I"], "is_program_dependent": True}
+
+    progs = [("MIHP-I", "Muamalat Industrial Hire Purchase (MIHP-i) Sales Kit"),
+             ("MHP-I", "Micro Hire Purchase-i (MHP-i) Sales Kit")]
+    adv = ProgramAdvisor(_AmbiguousLLM(), FakeRetriever([_chunk("x")], programs=progs))
+    res = adv.handle("what about MHIP?", [], {})
+    assert res["ui_action"]["type"] == "none"                   # a clarify, NOT the funnel
+    assert not res.get("grounded")
+    assert "did you mean" in res["reply"].lower()
+    values = [s["value"] for s in res["suggestions"]]
+    assert "Tell me about MIHP-I" in values and "Tell me about MHP-I" in values   # both offered as chips
+
+
 def test_empty_index_falls_through_to_funnel():
     adv = ProgramAdvisor(StubLLMClient(), FakeRetriever([], programs=[]))
     res = adv.handle("tell me about GGSM3", [], {})
