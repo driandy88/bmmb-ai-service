@@ -170,7 +170,7 @@ class ProgramAdvisor:
         return sorted(best, key=lambda c: best[c], reverse=True)
 
     def _disambiguate(self, candidates: list, slots: dict, message: str,
-                      history: Optional[list] = None) -> dict:
+                      history: Optional[list] = None, resolved: str = "") -> dict:
         """Ask which programme a mistyped / ambiguous name meant — a tappable chip per candidate, so
         the customer confirms instead of us guessing (or funnelling). The MODEL phrases the question
         (short, natural, straight to the point); `compose` falls back to a concise default offline."""
@@ -185,9 +185,36 @@ class ProgramAdvisor:
             "programme_disambiguate", message=message, history=history or [],
             fallback=f"Did you mean {joined}?", candidates="\n".join(f"- {n}" for n in names),
         )
-        suggestions = [{"label": _name(c), "value": f"Tell me about {c}"} for c in candidates]
+        # Each chip re-sends the customer's intent with just the mistyped name corrected, NOT a
+        # generic "tell me about". Prefer the REWRITE's resolution of THIS turn (`resolved`, e.g.
+        # "documents for MHIP") over the raw message: it was just computed with clean history, so it
+        # still carries what they were actually on (documents / tenure / …). Baking that into the chip
+        # means the pick answers "documents for MIHP-i" directly — the pipeline never has to re-derive
+        # the topic across this clarify turn, which is exactly where it gets dropped to a bare overview.
+        base = resolved if self._ambiguous_token(resolved, candidates) else message
+        typo = self._ambiguous_token(base, candidates)
+
+        def _pick(code: str) -> str:
+            if typo:
+                return re.sub(re.escape(typo), code, base, count=1, flags=re.I)
+            return f"Tell me about {code}"
+
+        suggestions = [{"label": _name(c), "value": _pick(c)} for c in candidates]
         return _turn(reply, slots, stage="program_done", ui={"type": "none", "payload": {}},
                      suggestions=suggestions)
+
+    @staticmethod
+    def _ambiguous_token(message: str, candidates: list) -> Optional[str]:
+        """The mistyped programme word in the message — the token most similar to the candidates'
+        cores — so a chip can swap just that word for the chosen code and leave the rest of the
+        customer's phrasing (and thus the topic) intact. None if nothing in the message is close."""
+        cores = [re.sub(r"[-\s]?(?:i|\d+)$", "", c, flags=re.I).upper() for c in candidates]
+        best, token = 0.0, None
+        for tok in re.findall(r"[A-Za-z]{3,}", message):
+            score = max(difflib.SequenceMatcher(None, tok.upper(), core).ratio() for core in cores)
+            if score > best:
+                best, token = score, tok
+        return token if best >= 0.6 else None
 
     @staticmethod
     def _norm_program(code: str) -> str:
@@ -292,7 +319,7 @@ class ProgramAdvisor:
         # don't dump into the funnel — ask which one. The rewrite (LLM) reads the near-matches; we
         # only clarify when it couldn't settle on one AND there are ≥2 candidates.
         if not program and len(candidates) >= 2:
-            return self._disambiguate(candidates, slots, message, history)
+            return self._disambiguate(candidates, slots, message, history, resolved)
 
         # Continuation of a grounded answer's "apply / talk to our team" offer:
         # a bare reply that names no new programme is read as proceed/decline

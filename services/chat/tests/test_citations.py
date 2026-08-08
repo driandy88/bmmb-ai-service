@@ -261,9 +261,11 @@ def test_bare_purpose_answer_continues_funnel():
 def test_mistyped_ambiguous_programme_asks_which_one():
     # "what about MHIP?" is a typo one letter off both MIHP and MHP — the rewrite can't settle on one
     # and returns both as candidates. Don't guess or funnel: clarify with a chip per candidate.
+    # And the rewrite carries the TOPIC ("documents") per rule 1 even though the programme is
+    # ambiguous — so the chip forwards "documents required for <picked>", NOT a bare overview.
     class _AmbiguousLLM(StubLLMClient):
         def rewrite_query(self, message, programs, history=None):
-            return {"rewritten_query": message, "program_code": None,
+            return {"rewritten_query": "documents required for MHIP", "program_code": None,
                     "program_candidates": ["MIHP-I", "MHP-I"], "is_program_dependent": True}
 
     progs = [("MIHP-I", "Muamalat Industrial Hire Purchase (MIHP-i) Sales Kit"),
@@ -273,8 +275,12 @@ def test_mistyped_ambiguous_programme_asks_which_one():
     assert res["ui_action"]["type"] == "none"                   # a clarify, NOT the funnel
     assert not res.get("grounded")
     assert "did you mean" in res["reply"].lower()
+    labels = [s["label"] for s in res["suggestions"]]
+    assert any("MIHP-i" in l for l in labels) and any("MHP-i" in l for l in labels)  # both offered as chips
+    # each chip forwards the rewrite's resolution with just the programme corrected — TOPIC KEPT
     values = [s["value"] for s in res["suggestions"]]
-    assert "Tell me about MIHP-I" in values and "Tell me about MHP-I" in values   # both offered as chips
+    assert "documents required for MIHP-I" in values and "documents required for MHP-I" in values
+    assert not any("Tell me about" in v for v in values)   # NOT reset to a generic overview
 
 
 def test_mistyped_name_clarifies_via_deterministic_fallback():
@@ -289,7 +295,7 @@ def test_mistyped_name_clarifies_via_deterministic_fallback():
     assert res["ui_action"]["type"] == "none"                   # a clarify, NOT the funnel
     assert not res.get("grounded")
     values = [s["value"] for s in res["suggestions"]]
-    assert "Tell me about MIHP-I" in values and "Tell me about MHP-I" in values
+    assert "what about MIHP-I?" in values and "what about MHP-I?" in values   # corrected follow-up, topic kept
     # and a normal, correctly-named question is NOT dragged into a typo clarify
     ok = adv.handle("what is the tenure for GGSM3?", [], {})
     assert ok.get("grounded") is True
