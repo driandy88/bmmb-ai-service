@@ -315,18 +315,20 @@ class ProgramAdvisor:
                                    "value": "I'd like to talk to your SME financing team"}])
 
     def _handle_understand(self, message: str, history: list[dict], slots: dict, *,
-                           stage: Optional[str] = None) -> dict:
-        """ONE `understand()` read of the turn, then act — reusing the SAME terminal handlers as the
-        current path (`_disambiguate` / `_grounded_offer` / `_apply_turn` / `_funnel_reply`). The
-        keyword interpreters and the double rewrite are gone; the fuzzy net and money regex stay only
-        as deterministic backstops. Everything upstream (guardrail/classify/decide) and downstream
-        (grounding, eligibility, tiers) is untouched."""
+                           stage: Optional[str] = None, sig: Optional[dict] = None) -> dict:
+        """Act on the turn's understanding, reusing the SAME terminal handlers as the current path
+        (`_disambiguate` / `_grounded_offer` / `_apply_turn` / `_funnel_reply`). The keyword
+        interpreters and the double rewrite are gone; the fuzzy net and money regex stay only as
+        deterministic backstops. In Phase 2 the signal is computed ONCE upstream (classify_node) and
+        passed in via `sig`; if absent (Phase-1 style call), we compute it here. Everything upstream
+        (guardrail/classify/decide) and downstream (grounding, eligibility, tiers) is untouched."""
         programs = getattr(self._retriever, "programs", lambda: [])() or []
         valid = {c for c, _ in programs}
-        try:
-            sig = self._llm.understand(message, history, programs=programs, stage=stage or "")
-        except Exception:  # never break the turn on an understand failure
-            sig = {}
+        if sig is None:
+            try:
+                sig = self._llm.understand(message, history, programs=programs, stage=stage or "")
+            except Exception:  # never break the turn on an understand failure
+                sig = {}
         sig = normalize_understanding(sig)
 
         program = sig["program_code"] if sig["program_code"] in valid else None
@@ -409,11 +411,13 @@ class ProgramAdvisor:
         return self._funnel_reply(message, history, slots)
 
     def handle(self, message: str, history: list[dict], slots: dict, *,
-               stage: Optional[str] = None, intent: Optional[dict] = None) -> dict:
+               stage: Optional[str] = None, intent: Optional[dict] = None,
+               understanding: Optional[dict] = None) -> dict:
         slots = dict(slots or {})
-        # Phase 1: one-understanding path (off by default). The legacy body below is unchanged.
+        # Phase 1/2: the one-understanding path (off by default). `understanding` is the signal the
+        # classify node already computed this turn (Phase 2); if absent we compute it. Legacy below.
         if get_settings().use_understand:
-            return self._handle_understand(message, history, slots, stage=stage)
+            return self._handle_understand(message, history, slots, stage=stage, sig=understanding)
         intent_primary = (intent or {}).get("primary")
 
         # Which specific programme (if any) this turn names — computed once and

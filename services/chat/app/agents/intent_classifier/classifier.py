@@ -18,9 +18,13 @@ class IntentClassifier:
         self._llm = llm
 
     def classify(self, message: str, history: list[dict] | None = None) -> dict:
-        tax = load_config().taxonomy
-        out = self._llm.classify_intent(message, history or [])
+        return self.validate(self._llm.classify_intent(message, history or []))
 
+    @staticmethod
+    def validate(out: dict) -> dict:
+        """Clamp confidence and reject hallucinated labels — shared by the classic path and the
+        Phase-2 understand path (whose intent field is validated identically, so routing matches)."""
+        tax = load_config().taxonomy
         primary = out.get("primary")
         secondary = out.get("secondary")
         confidence = max(0.0, min(1.0, float(out.get("confidence") or 0.0)))   # clamp to [0,1]

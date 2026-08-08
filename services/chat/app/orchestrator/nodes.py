@@ -33,23 +33,35 @@ def guardrail_node(state: dict, deps) -> dict:
 
 
 def classify_node(state: dict, deps) -> dict:
+    # Phase 2: one `understand()` read produces the routing intent AND the advisor signal (stored for
+    # the program handler to reuse — no second call). Off by default; the classic path is below.
+    if getattr(getattr(deps, "settings", None), "use_understand", False):
+        programs = getattr(deps.retriever, "programs", lambda: [])() or []
+        sig = deps.llm.understand(state["message"], state.get("history", []),
+                                  programs=programs, stage=state.get("stage") or "")
+        intent = deps.classifier.validate(sig.get("intent") or {})
+        return {"intent": _rescue_program_intent(intent, state["message"], deps), "understanding": sig}
+
     intent = deps.classifier.classify(state["message"], state.get("history", []))
-    # Deterministic rescue: the classifier doesn't know the programme acronyms, so "what is GGSM" /
-    # "what is MIHP" intermittently lands in an off-topic / social / ambiguous bucket instead of
-    # INS-02. If the message names a known programme and the LLM landed there, treat it as a
-    # programme query so it reaches the advisor (adversarial still wins — the guardrail ran first).
+    return {"intent": _rescue_program_intent(intent, state["message"], deps)}
+
+
+def _rescue_program_intent(intent: dict, message: str, deps) -> dict:
+    """Deterministic rescue: the classifier doesn't know the programme acronyms, so "what is GGSM" /
+    "what is MIHP" intermittently lands in an off-topic / social / ambiguous bucket instead of INS-02.
+    If the message names a known programme and the LLM landed there, treat it as a programme query so
+    it reaches the advisor (adversarial still wins — the guardrail ran first). But YIELD when the
+    classifier landed on a specific, recognisable off-topic topic (fixed deposit, personal loan, a
+    competitor, investment advice — flagged `specific_topic` in intents.yaml): there the programme
+    name is incidental ("fixed deposit rate for GGSM") and must not hijack the turn. Config declares
+    the boundary; nothing hard-coded here."""
     primary = intent.get("primary") or ""
     rescuable = (not primary or primary.startswith(_RESCUABLE_PREFIXES))
-    # …but YIELD when the classifier landed on a specific, recognisable off-topic topic (fixed
-    # deposit, personal loan, a competitor, investment advice — flagged `specific_topic` in
-    # intents.yaml). There the programme name is incidental ("fixed deposit rate for GGSM"), so it
-    # must not hijack the turn into a programme query. The config declares which intents these are —
-    # the classifier makes the call, the taxonomy names the boundary; nothing hard-coded here.
     row = deps.config.taxonomy.get(primary)
     specific_topic = bool(row and row.specific_topic)
-    if rescuable and not specific_topic and mentions_program(state["message"]):
-        intent = {**intent, "primary": "INS-02", "confidence": max(float(intent.get("confidence") or 0.0), 0.9)}
-    return {"intent": intent}
+    if rescuable and not specific_topic and mentions_program(message):
+        return {**intent, "primary": "INS-02", "confidence": max(float(intent.get("confidence") or 0.0), 0.9)}
+    return intent
 
 
 def decide_node(state: dict, deps) -> dict:
@@ -253,7 +265,8 @@ def _run_handler(deps, ref: str, state: dict) -> dict:
                                          stage=state.get("stage"))
     if ref == "ROUTE-PROGRAM":
         return deps.program_advisor.handle(msg, hist, slots, stage=state.get("stage"),
-                                           intent=state.get("intent"))
+                                           intent=state.get("intent"),
+                                           understanding=state.get("understanding"))
     if ref in ("ROUTE-GUIDELINES", "ROUTE-SHARIAH"):
         return deps.guidelines.handle(msg, hist)
     if ref == "ROUTE-ELIGIBILITY":

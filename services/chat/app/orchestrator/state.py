@@ -32,6 +32,7 @@ class SessionState(TypedDict, total=False):
     # ── NLU outputs ──────────────────────────────────────────────────────────
     guardrail: dict[str, Any]          # {flagged, category}
     intent: dict[str, Any]             # {primary, confidence, secondary}
+    understanding: dict[str, Any]      # Phase 2: the one-read signal (llm.understand), if use_understand
     decision: dict[str, Any]           # RoutingDecision (routing.py) as dict
 
     # ── Handler outputs (assembled into the envelope) ────────────────────────
