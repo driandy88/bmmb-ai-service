@@ -125,6 +125,14 @@ def canned_node(state: dict, deps) -> dict:
         suggestions = explore_suggestions(last_program)
     elif row is not None and row.type == "out_of_scope":
         suggestions = explore_suggestions(last_program)
+        # Smart, specific deflection: name what they actually asked ("fixed deposit rates…"), say it's
+        # outside SME financing, and redirect — instead of the generic canned line. `compose` returns
+        # the canned wording offline / on failure, so this only ever upgrades the reply (never the
+        # adversarial refusals R6/R7, which aren't out_of_scope and don't reach here).
+        reply = deps.llm.compose(
+            "oos_deflection", message=state["message"], history=state.get("history", []),
+            fallback=reply, category=(row.category or "another product or topic"),
+        )
 
     updates: dict[str, Any] = {
         "ui_action": dict(_NONE_UI), "citations": [], "handoff": dict(_NO_HANDOFF),
