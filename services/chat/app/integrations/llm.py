@@ -129,7 +129,7 @@ def understand_schema(codes: list[str], cat_ids: Optional[list[str]] = None) -> 
             "reads_as": {"type": "STRING"},
             "turn_type": {"type": "STRING", "enum": [
                 "program_info", "compare", "recommend", "eligibility", "offer_response",
-                "capability", "out_of_scope", "smalltalk", "unclear"]},
+                "capability", "catalog", "out_of_scope", "smalltalk", "unclear"]},
             "program_code": code_str,
             "program_status": {"type": "STRING", "enum": ["indexed", "known_unindexed", "none"]},
             "compare_programs": {"type": "ARRAY", "items": code_item},
@@ -170,6 +170,14 @@ _STUB_BROWSE_RE = re.compile(
     r"what\s+(?:sme\s+)?(?:financing\s+)?(?:programme|program|product|scheme|option)s?\s+(?:do|can|does)\s+(?:you|u|we)\b"
     r"|what\s+(?:do|can)\s+(?:you|u|we)\s+(?:offer|have|provide)\b"
     r"|(?:explore|list|show|see)\s+(?:me\s+)?(?:the\s+|all\s+|your\s+)?(?:programme|program|product|option)s?\b",
+    re.I)
+# A "list the OTHERS / do you have X" catalog ask — "what else", "besides GGSM", "other financing
+# products", "do you have a loan product?". Deliberately does NOT catch a bare "what programmes do you
+# offer" (that stays the guided funnel) nor a single-programme question ("what tenure does MIHP have").
+_STUB_CATALOG_RE = re.compile(
+    r"\bwhat\s+else\b|\bbesides?\b|\bother\s+than\b"
+    r"|\bother\s+(?:sme\s+)?(?:financing|programme|program|product|option|scheme)s?\b"
+    r"|\bdo\s+(?:you|u|we)\s+have\s+(?:a|an|any)?\s*\w*\s*(?:product|financing|loan|programme|program|scheme|facilit)",
     re.I)
 # A meta question about what the assistant itself can do ("what can you do", "can you compare?").
 # Deliberately narrow (specific capability verbs) so "can you tell me the tenure for X" isn't caught.
@@ -424,8 +432,13 @@ class StubLLMClient(LLMClient):
                     or len(num.replace(",", "").split(".")[0]) >= 4:
                 amount = float(num.replace(",", "")) * _UNIT_MULT.get((unit or "").lower(), 1.0)
                 break
-        capability = bool(_STUB_CAPABILITY_RE.search(low)) and not rw.get("program_code")
-        if capability:
+        # A catalog ask wins even if a programme is named ("what else besides GGSM?") — it's a listing
+        # question, not a question about that programme.
+        catalog = bool(_STUB_CATALOG_RE.search(low))
+        capability = bool(_STUB_CAPABILITY_RE.search(low)) and not rw.get("program_code") and not catalog
+        if catalog:
+            turn_type = "catalog"
+        elif capability:
             turn_type = "capability"
         elif offer != "none" and stage == "program_offer":
             turn_type = "offer_response"
@@ -435,11 +448,11 @@ class StubLLMClient(LLMClient):
             turn_type = "recommend"
         else:
             turn_type = "program_info"
-        # Phase 2: routing intent is DELEGATED to classify_intent (identical offline routing) — except
-        # a capability question, which the stub classifier can mislabel (e.g. "compare" → OOS-03); force
-        # it to the advisor (INS-02) so the capability answer is reached. The Vertex prompt does this too.
+        # Phase 2: routing intent is DELEGATED to classify_intent (identical offline routing) — except a
+        # catalog / capability question, which the stub classifier can mislabel (e.g. "loan" → OOS-02,
+        # "compare" → OOS-03); force it to the advisor (INS-02) so the answer is reached. Vertex does too.
         intent = self.classify_intent(message, history or [])
-        if capability:
+        if catalog or capability:
             intent = {"primary": "INS-02", "confidence": 0.9, "secondary": None}
         return normalize_understanding({
             "turn_type": turn_type,

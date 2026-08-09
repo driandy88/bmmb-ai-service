@@ -209,9 +209,12 @@ def test_program_offer_followup_inherits_last_program():
     assert res["slots"]["last_program"] == "GGSM3"
 
 
-def test_program_offer_other_programmes_opens_funnel():
-    # "what else do you have?" in the offer leaves the current programme and opens the
-    # discovery funnel, instead of dead-ending on "apply for GGSM3?".
+def test_program_offer_other_programmes_opens_funnel(monkeypatch):
+    # LEGACY path: "what else do you have?" in the offer leaves the current programme and opens the
+    # discovery funnel. (The understand path answers this with the catalog list instead — see
+    # test_understand.test_what_else_lists_the_catalog.) Pin the flag off so this tests legacy either way.
+    import app.agents.program_advisor.advisor as advmod
+    monkeypatch.setattr(advmod, "get_settings", lambda: type("S", (), {"use_understand": False})())
     adv = ProgramAdvisor(StubLLMClient(), FakeRetriever([_chunk("x")], PROGRAMS))
     res = adv.handle("what else do you have?", [],
                      {"last_program": "GGSM3"}, stage="program_offer")
