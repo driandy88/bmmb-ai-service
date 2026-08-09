@@ -185,12 +185,10 @@ class ProgramAdvisor:
             "programme_disambiguate", message=message, history=history or [],
             fallback=f"Did you mean {joined}?", candidates="\n".join(f"- {n}" for n in names),
         )
-        # Each chip re-sends the customer's intent with just the mistyped name corrected, NOT a
-        # generic "tell me about". Prefer the REWRITE's resolution of THIS turn (`resolved`, e.g.
-        # "documents for MHIP") over the raw message: it was just computed with clean history, so it
-        # still carries what they were actually on (documents / tenure / …). Baking that into the chip
-        # means the pick answers "documents for MIHP-i" directly — the pipeline never has to re-derive
-        # the topic across this clarify turn, which is exactly where it gets dropped to a bare overview.
+        # Each chip re-sends the turn with only the mistyped name corrected, so the pick keeps the
+        # topic. Prefer `resolved` (the rewrite's history-aware query, e.g. "documents for MHIP") over
+        # the raw message: it carries the attribute, so the pipeline needn't re-derive it across the
+        # clarify turn — which is where it otherwise drops to a bare overview.
         base = resolved if self._ambiguous_token(resolved, candidates) else message
         typo = self._ambiguous_token(base, candidates)
 
@@ -270,9 +268,8 @@ class ProgramAdvisor:
         if not ans:
             return None
         slots["last_program"] = program
-        # No call-to-action sentence: the offer chips (_offer_suggestions) already carry
-        # "Apply for {program}" and "Connect to Sales team", so a "would you like to apply…"
-        # line just duplicates them and reads robotic. End on the grounded answer.
+        # No call-to-action sentence: the offer chips already carry Apply / Connect-to-Sales, so a
+        # "would you like to apply…" line just duplicates them and reads robotic.
         return _turn(ans["reply"], slots, stage="program_offer",
                      ui={"type": "none", "payload": {}}, citations=ans["citations"],
                      sentences=ans["sentences"], grounded=True,
@@ -323,8 +320,8 @@ class ProgramAdvisor:
 
         # Continuation of a grounded answer's "apply / talk to our team" offer:
         # a bare reply that names no new programme is read as proceed/decline
-        # rather than re-classified (which reads "sounds good" as a goodbye —
-        # the dead-end we're fixing). Reached via STAGE_TO_ROUTE["program_offer"].
+        # rather than re-classified (which reads "sounds good" as a goodbye).
+        # Reached via STAGE_TO_ROUTE["program_offer"].
         if stage == "program_offer" and slots.get("last_program") and not program:
             prog = slots["last_program"]
             decision = self._followup_decision(message)
@@ -335,12 +332,10 @@ class ProgramAdvisor:
                              "or another programme. A few things I can help with —",
                              slots, stage="program_done", ui={"type": "none", "payload": {}},
                              suggestions=explore_suggestions(prog))
-            # A request to browse programmes leaves the current one and opens the discovery funnel
-            # below — otherwise "what else do you have?" / "what SME financing do you offer?"
-            # dead-ended on an offer to apply for the very programme they were moving on from. Two
-            # signals, both the model's: the explicit "other programmes" phrasing, OR a fresh
-            # programme question (INS-02) that is NOT programme-dependent — i.e. a catalog/listing
-            # ask, not an attribute follow-up ("and the tenure?") about the programme in play.
+            # Browse OTHER programmes → drop the current one and open the funnel; else a
+            # dead-end offer to apply for the programme they're moving on from. Two signals, both the
+            # model's: explicit "other programmes" phrasing, OR a fresh INS-02 that is NOT
+            # programme-dependent (a catalog ask, not an attribute follow-up about the one in play).
             browse = self._wants_other_programs(message) or (
                 intent_primary == "INS-02" and not program_dependent
             )
@@ -348,16 +343,13 @@ class ProgramAdvisor:
                 slots.pop("last_program", None)
                 # fall through to the funnel
             else:
-                # Otherwise it's a follow-up QUESTION about the programme just discussed
-                # ("tell me more", "the profit rate", "what documents") — answer it, inheriting
-                # last_program so the grounded index is scoped to it even though the message
-                # names nothing. This is the anaphora the stateless retriever can't do alone;
-                # here we HAVE last_program in slots.
+                # A follow-up QUESTION about the programme in play — answer it, inheriting last_program
+                # so retrieval stays scoped even though the message names nothing (the anaphora the
+                # stateless retriever can't do; here we HAVE last_program).
                 offer = self._grounded_offer(message, prog, slots, history, retrieval_query=resolved)
                 if offer:
                     return offer
-                # Nothing relevant to this programme and not asking to browse — keep the
-                # thread open with a gentle re-prompt (the original stray-reply behaviour).
+                # Not answerable and not a browse — keep the thread open with a gentle re-prompt.
                 return _turn(f"Sure — would you like to apply for {prog}, or ask me anything "
                              "else about our SME financing?", slots, stage="program_offer",
                              ui={"type": "none", "payload": {}},
@@ -387,7 +379,6 @@ class ProgramAdvisor:
                                  {"label": "Explore programmes", "value": "What SME financing programmes do you offer?"},
                              ])
 
-        # Merge any purpose/amount found this turn.
         if slots.get("funnel_purpose") is None:
             pid = self._match_purpose(message)
             if pid is not None:
@@ -400,21 +391,18 @@ class ProgramAdvisor:
         purpose = slots.get("funnel_purpose")
         amount = slots.get("funnel_amount")
 
-        # Step 1: purpose.
         if purpose is None:
             options = [o["label"] for o in funnel["purpose_options"]]
             reply = funnel["purpose_prompt"]
             return _turn(reply, slots, stage="funnel_purpose",
                          ui={"type": "show_program_options", "payload": {"step": "purpose", "options": options}})
 
-        # Step 2: amount.
         if amount is None:
             bands = [b["label"] for b in funnel["amount_bands"]]
             reply = funnel["amount_prompt"]
             return _turn(reply, slots, stage="funnel_amount",
                          ui={"type": "show_program_options", "payload": {"step": "amount", "bands": bands}})
 
-        # Step 3: recommend.
         candidates = self._candidates(float(amount), purpose)
         chunks = self._retriever.retrieve(message, Corpus.PROGRAM, top_k=3)
         citations = [{"corpus": c.corpus, "ref": c.ref, "snippet": c.text} for c in chunks]
