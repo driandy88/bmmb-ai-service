@@ -61,7 +61,7 @@ invent its facts.
 {
   "intent": { "primary": "<cat_id or null>", "secondary": "<cat_id or null>", "confidence": 0.0 },
   "reads_as": "<one plain line: what the customer is doing this turn>",
-  "turn_type": "program_info | compare | recommend | eligibility | offer_response | out_of_scope | smalltalk | unclear",
+  "turn_type": "program_info | compare | recommend | eligibility | offer_response | capability | out_of_scope | smalltalk | unclear",
   "program_code": "<a code from the list, or null>",
   "program_status": "indexed | known_unindexed | none",
   "compare_programs": ["<code>", "..."],
@@ -86,6 +86,7 @@ Import · 4=Machinery/Vehicles/Equipment · 5=Project/Contract.
 - "how much can I get?" → `{"turn_type":"unclear","clarify":{"needed":true,"question":"Happy to help — what will the financing be for, and roughly how much?"},"confidence":0.55}`
 - "I need working capital" → `{"turn_type":"recommend","funnel":{"purpose_id":2,"amount_rm":null},"confidence":0.9}`
 - "can you compare two programmes?" → `{"turn_type":"capability","intent":{"primary":"INS-02","confidence":0.9},"confidence":0.9}`
+- after MHP-i and MIHP-i were discussed · "no difference between these 2?" → `{"turn_type":"compare","compare_programs":["MHP-I","MIHP-I"],"attribute":"overview","retrieval_query":"differences between MHP-i and MIHP-i","intent":{"primary":"INS-02","confidence":0.9},"confidence":0.85}`
 
 ## Programmes in the live index (the only valid program_code values you can DETAIL)
 {programs}
