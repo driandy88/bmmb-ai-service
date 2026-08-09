@@ -297,6 +297,28 @@ class ProgramAdvisor:
             ui={"type": "open_application_link", "payload": {"url": url, "program": program}},
         )
 
+    def _capability_turn(self, slots: dict) -> dict:
+        """Answer "what can you do?" / "can you compare?" from our own capabilities — a truthful
+        overview + tappable next steps, instead of dropping into the funnel. The list is factual
+        (what the assistant actually supports), so it's deterministic; the LLM chose to ask, we answer."""
+        reply = (
+            "Happy to help — here's what I can do:\n"
+            "• Answer questions about our SME financing programmes — profit rate, tenure, financing "
+            "size, eligibility, documents — with sources\n"
+            "• Compare two programmes\n"
+            "• Recommend one based on what you need the financing for and how much\n"
+            "• Give an in-principle eligibility indication\n"
+            "• Start, continue, or track an application\n"
+            "• Connect you to our SME financing team\n\n"
+            "What would you like to do?"
+        )
+        return _turn(reply, slots, stage="program_done", ui={"type": "none", "payload": {}},
+                     suggestions=[
+                         {"label": "Discover programmes", "value": "What SME financing programmes do you offer?"},
+                         {"label": "Check eligibility", "value": "Am I eligible for SME financing?"},
+                         {"label": "Apply", "value": "I'd like to apply for SME financing"},
+                     ])
+
     # -- Phase 1: one-understanding path (settings.use_understand) --------------
     def _grounded_compare(self, message: str, slots: dict, history: Optional[list],
                           retrieval_query: str) -> Optional[dict]:
@@ -345,6 +367,10 @@ class ProgramAdvisor:
         if sig["clarify"]["needed"] and (sig["clarify"]["question"] or "").strip():
             return _turn(sig["clarify"]["question"].strip(), slots, stage="program_done",
                          ui={"type": "none", "payload": {}})
+
+        # 2b. "What can you do?" / "can you compare?" — say what we can help with, don't funnel.
+        if sig["turn_type"] == "capability":
+            return self._capability_turn(slots)
 
         # 3. Post-answer offer: read by MEANING (apply/decline/other), not a keyword list.
         if stage == "program_offer" and slots.get("last_program"):

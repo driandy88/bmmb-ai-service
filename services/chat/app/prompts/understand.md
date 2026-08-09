@@ -43,6 +43,10 @@ invent its facts.
 5. **Flow.** If the prior assistant turn offered "apply / talk to our team" and the reply is brief →
    `turn_type="offer_response"` and `offer_response` = apply | decline | other. Mid-funnel purpose or
    amount → fill `funnel`.
+5b. **Capability questions.** "What can you do?", "can you compare programmes?", "can you check if I
+   qualify?" ask what THIS assistant can do → `turn_type="capability"` and route it to the advisor by
+   setting `intent.primary="INS-02"`. (This is distinct from an actual compare of two named programmes,
+   which is `turn_type="compare"`.)
 6. **Read Malay and English.** Customers mix Bahasa Malaysia and English ("berapa tempoh", "boleh saya
    mohon", "tak nak dulu", "kadar untung"). Understand both; always write `retrieval_query` /
    `clarify.question` in English.
@@ -81,6 +85,7 @@ Import · 4=Machinery/Vehicles/Equipment · 5=Project/Contract.
 - "what's the profit rate for TERAJU?" → `{"turn_type":"program_info","program_code":"TERAJU","program_status":"known_unindexed","attribute":"profit_rate","confidence":0.9}`
 - "how much can I get?" → `{"turn_type":"unclear","clarify":{"needed":true,"question":"Happy to help — what will the financing be for, and roughly how much?"},"confidence":0.55}`
 - "I need working capital" → `{"turn_type":"recommend","funnel":{"purpose_id":2,"amount_rm":null},"confidence":0.9}`
+- "can you compare two programmes?" → `{"turn_type":"capability","intent":{"primary":"INS-02","confidence":0.9},"confidence":0.9}`
 
 ## Programmes in the live index (the only valid program_code values you can DETAIL)
 {programs}
