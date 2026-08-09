@@ -129,7 +129,7 @@ def understand_schema(codes: list[str], cat_ids: Optional[list[str]] = None) -> 
             "reads_as": {"type": "STRING"},
             "turn_type": {"type": "STRING", "enum": [
                 "program_info", "compare", "recommend", "eligibility", "offer_response",
-                "out_of_scope", "smalltalk", "unclear"]},
+                "capability", "out_of_scope", "smalltalk", "unclear"]},
             "program_code": code_str,
             "program_status": {"type": "STRING", "enum": ["indexed", "known_unindexed", "none"]},
             "compare_programs": {"type": "ARRAY", "items": code_item},
@@ -170,6 +170,13 @@ _STUB_BROWSE_RE = re.compile(
     r"what\s+(?:sme\s+)?(?:financing\s+)?(?:programme|program|product|scheme|option)s?\s+(?:do|can|does)\s+(?:you|u|we)\b"
     r"|what\s+(?:do|can)\s+(?:you|u|we)\s+(?:offer|have|provide)\b"
     r"|(?:explore|list|show|see)\s+(?:me\s+)?(?:the\s+|all\s+|your\s+)?(?:programme|program|product|option)s?\b",
+    re.I)
+# A meta question about what the assistant itself can do ("what can you do", "can you compare?").
+# Deliberately narrow (specific capability verbs) so "can you tell me the tenure for X" isn't caught.
+_STUB_CAPABILITY_RE = re.compile(
+    r"\bwhat\s+can\s+(?:you|u)\s+(?:do|help)\b|\bwhat\s+do\s+(?:you|u)\s+do\b"
+    r"|\bhow\s+can\s+(?:you|u)\s+help\b|\bwhat\s+are\s+(?:you|your)\s+capab"
+    r"|\bcan\s+(?:you|u)\s+(?:compare|recommend|check)\b",
     re.I)
 _STUB_PURPOSE = {
     1: ["expansion", "expand", "capex", "capital expenditure", "grow"],
@@ -417,7 +424,10 @@ class StubLLMClient(LLMClient):
                     or len(num.replace(",", "").split(".")[0]) >= 4:
                 amount = float(num.replace(",", "")) * _UNIT_MULT.get((unit or "").lower(), 1.0)
                 break
-        if offer != "none" and stage == "program_offer":
+        capability = bool(_STUB_CAPABILITY_RE.search(low)) and not rw.get("program_code")
+        if capability:
+            turn_type = "capability"
+        elif offer != "none" and stage == "program_offer":
             turn_type = "offer_response"
         elif rw.get("program_code"):
             turn_type = "program_info"
@@ -425,6 +435,12 @@ class StubLLMClient(LLMClient):
             turn_type = "recommend"
         else:
             turn_type = "program_info"
+        # Phase 2: routing intent is DELEGATED to classify_intent (identical offline routing) — except
+        # a capability question, which the stub classifier can mislabel (e.g. "compare" → OOS-03); force
+        # it to the advisor (INS-02) so the capability answer is reached. The Vertex prompt does this too.
+        intent = self.classify_intent(message, history or [])
+        if capability:
+            intent = {"primary": "INS-02", "confidence": 0.9, "secondary": None}
         return normalize_understanding({
             "turn_type": turn_type,
             "program_code": rw.get("program_code"),
@@ -434,9 +450,7 @@ class StubLLMClient(LLMClient):
             "funnel": {"purpose_id": purpose, "amount_rm": amount},
             "offer_response": offer,
             "confidence": 0.8,
-            # Phase 2: routing intent is DELEGATED to classify_intent, so the understand path routes
-            # identically to the current path offline — the Vertex prompt does this in one shot.
-            "intent": self.classify_intent(message, history or []),
+            "intent": intent,
         })
 
 

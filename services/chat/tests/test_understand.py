@@ -147,6 +147,33 @@ def test_handle_reuses_the_passed_understanding_without_recomputing():
     assert res["grounded"] is True
 
 
+def test_capability_question_is_answered_not_funnelled():
+    # "can you compare two programmes?" is a question about what the bot can do — answer it, don't
+    # open the Program Finder.
+    res = _adv().handle("can you compare two programmes?", [], {})
+    assert res["stage"] == "program_done" and not res.get("grounded")
+    assert "compare" in res["reply"].lower()
+    assert res["ui_action"]["type"] == "none"                # not show_program_options (the funnel)
+    labels = [s["label"] for s in res["suggestions"]]
+    assert any("eligibility" in l.lower() for l in labels)
+
+
+def test_capability_question_routes_to_the_advisor():
+    # A capability turn must REACH the advisor: the stub classifier can mislabel "compare" as OOS-03,
+    # so understand() forces intent to INS-02 (→ ROUTE-PROGRAM).
+    res = StubLLMClient().understand("can you compare two programmes?", [], programs=[])
+    assert res["turn_type"] == "capability"
+    assert res["intent"]["primary"] == "INS-02"
+
+
+def test_capability_regex_does_not_hijack_a_normal_programme_question():
+    # "can you check … " triggers the capability verb, but a resolved programme means it's a real
+    # question, not a meta one — so it must NOT become a capability turn.
+    sig = StubLLMClient().understand("can you check the tenure for MIHP-I?", [],
+                                     programs=[("MIHP-I", "MIHP-i Sales Kit")])
+    assert sig["turn_type"] != "capability"
+
+
 def test_classify_via_understand_stores_signal_and_keeps_routing_parity():
     # classify_node with the flag ON produces the same routing intent as the classic path, and stores
     # the one-read signal for the advisor to reuse. (Stub delegates intent to classify_intent.)
