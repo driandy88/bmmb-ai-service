@@ -319,6 +319,28 @@ class ProgramAdvisor:
                          {"label": "Apply", "value": "I'd like to apply for SME financing"},
                      ])
 
+    def _catalog_turn(self, message: str, history: Optional[list], slots: dict) -> dict:
+        """List the programmes we offer — a direct catalog answer for "what else / what do you have /
+        do you have a loan product?", instead of the funnel. The LIST is our real catalog (products.yaml);
+        the LLM decided it's a listing question and phrases the reply (incl. our Islamic 'financing not
+        loan' framing). Config-grounded, LLM-phrased — not a hardcoded canned reply."""
+        names = [(p.get("full_name") or p.get("program") or "").strip()
+                 for p in self._cfg.products.get("quantum", [])]
+        listing = "\n".join(f"- {n}" for n in names if n)
+        fallback = (
+            'As an Islamic bank, we offer Shariah-compliant SME financing (we say "financing" rather '
+            'than a conventional "loan"). Our programmes include:\n' + listing +
+            "\n\nWould you like details on any of these, or shall I help you find the best fit?"
+        )
+        reply = self._llm.compose("catalog", message=message, history=history or [], fallback=fallback,
+                                  programmes=listing)
+        return _turn(reply, slots, stage="program_done", ui={"type": "none", "payload": {}},
+                     suggestions=[
+                         {"label": "Help me choose", "value": "Help me find the right SME financing"},
+                         {"label": "Check eligibility", "value": "Am I eligible for SME financing?"},
+                         {"label": "Talk to our team", "value": "I'd like to talk to your SME financing team"},
+                     ])
+
     # -- Phase 1: one-understanding path (settings.use_understand) --------------
     def _grounded_compare(self, message: str, slots: dict, history: Optional[list],
                           retrieval_query: str) -> Optional[dict]:
@@ -371,6 +393,10 @@ class ProgramAdvisor:
         # 2b. "What can you do?" / "can you compare?" — say what we can help with, don't funnel.
         if sig["turn_type"] == "capability":
             return self._capability_turn(slots)
+
+        # 2c. "What else do you have / do you have a loan product?" — list the catalog, don't funnel.
+        if sig["turn_type"] == "catalog":
+            return self._catalog_turn(message, history, slots)
 
         # 3. Post-answer offer: read by MEANING (apply/decline/other), not a keyword list.
         if stage == "program_offer" and slots.get("last_program"):

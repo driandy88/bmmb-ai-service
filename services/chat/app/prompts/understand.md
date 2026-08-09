@@ -47,6 +47,13 @@ invent its facts.
    qualify?" ask what THIS assistant can do → `turn_type="capability"` and route it to the advisor by
    setting `intent.primary="INS-02"`. (This is distinct from an actual compare of two named programmes,
    which is `turn_type="compare"`.)
+5c. **"List the OTHERS / do you have X" catalog questions.** "What else do you have?", "any other
+   financing besides GGSM and MHP-i?", "do you have a loan product?" ask to SEE more of the range →
+   `turn_type="catalog"` and `intent.primary="INS-02"` (route to the advisor, which lists the
+   programmes). Applies EVEN when they name a programme ("besides X") — it's a listing question, not a
+   question about X. We're an Islamic bank, so "loan" means our Shariah-compliant financing — still
+   `catalog`, don't refuse it. (A bare "what programmes do you offer?" and true guidance requests — "I
+   need financing for machinery" — are `recommend`, i.e. the guided funnel, NOT catalog.)
 6. **Read Malay and English.** Customers mix Bahasa Malaysia and English ("berapa tempoh", "boleh saya
    mohon", "tak nak dulu", "kadar untung"). Understand both; always write `retrieval_query` /
    `clarify.question` in English.
@@ -61,7 +68,7 @@ invent its facts.
 {
   "intent": { "primary": "<cat_id or null>", "secondary": "<cat_id or null>", "confidence": 0.0 },
   "reads_as": "<one plain line: what the customer is doing this turn>",
-  "turn_type": "program_info | compare | recommend | eligibility | offer_response | out_of_scope | smalltalk | unclear",
+  "turn_type": "program_info | compare | recommend | eligibility | offer_response | capability | catalog | out_of_scope | smalltalk | unclear",
   "program_code": "<a code from the list, or null>",
   "program_status": "indexed | known_unindexed | none",
   "compare_programs": ["<code>", "..."],
@@ -86,6 +93,8 @@ Import · 4=Machinery/Vehicles/Equipment · 5=Project/Contract.
 - "how much can I get?" → `{"turn_type":"unclear","clarify":{"needed":true,"question":"Happy to help — what will the financing be for, and roughly how much?"},"confidence":0.55}`
 - "I need working capital" → `{"turn_type":"recommend","funnel":{"purpose_id":2,"amount_rm":null},"confidence":0.9}`
 - "can you compare two programmes?" → `{"turn_type":"capability","intent":{"primary":"INS-02","confidence":0.9},"confidence":0.9}`
+- "what other financing products do you have besides GGSM and MHP-i?" → `{"turn_type":"catalog","intent":{"primary":"INS-02","confidence":0.9},"confidence":0.9}`
+- "do you have a loan product?" → `{"turn_type":"catalog","intent":{"primary":"INS-02","confidence":0.9},"confidence":0.88}`
 
 ## Programmes in the live index (the only valid program_code values you can DETAIL)
 {programs}

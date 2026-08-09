@@ -96,9 +96,25 @@ def test_offer_decline_read_by_meaning_in_malay():
     assert res["ui_action"]["type"] == "none" and not res.get("grounded")
 
 
-def test_offer_other_opens_the_funnel():
+def test_what_else_lists_the_catalog():
+    # "what else do you have?" now LISTS the programmes (catalog) instead of asking funnel questions.
     res = _adv().handle("what else do you have?", [], {"last_program": "MIHP-I"}, stage="program_offer")
-    assert res["stage"] == "funnel_purpose"                            # left the programme, opened discovery
+    assert res["stage"] == "program_done" and not res.get("grounded")
+    assert res["ui_action"]["type"] == "none"                          # a listed answer, not the funnel
+    assert "financing" in res["reply"].lower()
+
+
+def test_besides_named_programmes_lists_the_others():
+    res = _adv().handle("any other financing products besides GGSM3 and MIHP-I?", [], {})
+    assert res["stage"] == "program_done" and not res.get("grounded")
+    assert res["ui_action"]["type"] == "none"                          # catalog list, not a lookup of GGSM3
+
+
+def test_loan_question_gets_catalog_with_financing_framing():
+    # "loan" from a customer → don't refuse or funnel; list what we offer, framed as Islamic financing.
+    res = _adv().handle("do you have a loan product?", [], {})
+    assert res["stage"] == "program_done" and not res.get("grounded")
+    assert 'financing' in res["reply"].lower() and 'loan' in res["reply"].lower()  # gently reframes
 
 
 def test_attribute_followup_inherits_last_program():
