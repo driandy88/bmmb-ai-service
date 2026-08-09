@@ -42,11 +42,31 @@ def _match_case(replacement: str, original: str) -> str:
     return replacement
 
 
+_QUOTES = set("\"'“”‘’")
+# A qualifier that makes "loan"/"interest" refer to a NON-Islamic product the bot is contrasting
+# with, not to our own offering — so it's compliant to keep it ("a conventional loan").
+_CONTRAST_BEFORE = re.compile(r"(?:conventional|traditional|ordinary|non[- ]?islamic)\W+$", re.I)
+
+
+def _deliberate(text: str, start: int, end: int) -> bool:
+    """The forbidden term is used LEGITIMATELY here — a deliberate contrast, not the bot mislabelling
+    our own product — so keep it rather than rewrite it into a self-contradiction ("financing rather
+    than conventional financing"). Signals: the term is in quotes (the bot is naming it), or a
+    'conventional / traditional' qualifier precedes it. Compliance still catches a bare slip."""
+    before = text[start - 1] if start > 0 else ""
+    after = text[end] if end < len(text) else ""
+    if before in _QUOTES and after in _QUOTES:
+        return True
+    return bool(_CONTRAST_BEFORE.search(text[max(0, start - 20):start]))
+
+
 def lint(text: str) -> LintResult:
     violations: list[str] = []
     out = text or ""
     for pattern, replacement in _RULES:
         def _sub(m: re.Match) -> str:
+            if _deliberate(m.string, m.start(), m.end()):
+                return m.group(0)                       # kept on purpose — not a violation
             violations.append(m.group(0))
             return _match_case(replacement, m.group(0))
         out = pattern.sub(_sub, out)
