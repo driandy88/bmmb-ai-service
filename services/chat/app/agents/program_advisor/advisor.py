@@ -341,6 +341,36 @@ class ProgramAdvisor:
                          {"label": "Talk to our team", "value": "I'd like to talk to your SME financing team"},
                      ])
 
+    def _unindexed_redirect(self, code: str, full_name: str, slots: dict) -> dict:
+        """Name a programme the bank HAS but we can't detail here (no Sales Kit indexed), and hand to
+        Sales — never fabricate its facts, and never dump the customer into the funnel for asking."""
+        reply = (f"{full_name} is one of Bank Muamalat's SME financing programmes, but I don't "
+                 f"have its detailed materials on hand here yet. Our SME financing team can walk you "
+                 f"through {code} — or I can help you explore the programmes I can detail.")
+        return _turn(reply, slots, stage="program_done", ui={"type": "none", "payload": {}},
+                     suggestions=[
+                         {"label": "Connect to Sales team", "value": "I'd like to talk to your SME financing team"},
+                         {"label": "Explore programmes", "value": "What SME financing programmes do you offer?"},
+                     ])
+
+    def _soft_help(self, slots: dict) -> dict:
+        """The turn didn't map to a programme, an action, or a request for guidance. Rather than
+        ambush the customer with the Program Finder wizard — which is what made it a non-sequitur —
+        offer a warm, concrete hand and let THEM choose the direction. Deterministic + honest; the
+        guided funnel is now behind an explicit 'Help me choose', not the fallback for everything."""
+        reply = (
+            "Happy to help with Bank Muamalat SME financing. I can tell you about a specific "
+            "programme — profit rate, tenure, financing size, eligibility, documents — help you find "
+            "the right one for what you need, or connect you with our SME financing team. "
+            "What would be most useful?"
+        )
+        return _turn(reply, slots, stage="program_done", ui={"type": "none", "payload": {}},
+                     suggestions=[
+                         {"label": "Discover programmes", "value": "What SME financing programmes do you offer?"},
+                         {"label": "Help me choose", "value": "Help me find the right SME financing"},
+                         {"label": "Talk to our team", "value": "I'd like to talk to your SME financing team"},
+                     ])
+
     # -- Phase 1: one-understanding path (settings.use_understand) --------------
     def _grounded_compare(self, message: str, slots: dict, history: Optional[list],
                           retrieval_query: str) -> Optional[dict]:
@@ -399,6 +429,7 @@ class ProgramAdvisor:
             return self._catalog_turn(message, history, slots)
 
         # 3. Post-answer offer: read by MEANING (apply/decline/other), not a keyword list.
+        browse_other = False
         if stage == "program_offer" and slots.get("last_program"):
             prog = slots["last_program"]
             resp = sig["offer_response"]
@@ -410,7 +441,8 @@ class ProgramAdvisor:
                              slots, stage="program_done", ui={"type": "none", "payload": {}},
                              suggestions=explore_suggestions(prog))
             if resp == "other":
-                slots.pop("last_program", None)   # fall through to the funnel
+                slots.pop("last_program", None)   # they want to browse OTHER programmes → discovery
+                browse_other = True
             elif not program:
                 # attribute follow-up about the programme in play ("and the tenure?")
                 offer = self._grounded_offer(message, prog, slots, history, retrieval_query=retrieval_query)
@@ -421,19 +453,12 @@ class ProgramAdvisor:
                              ui={"type": "none", "payload": {}},
                              suggestions=self._offer_suggestions(prog))
 
-        # 4. Known-but-unindexed programme → name it, hand to Sales (never fabricate its facts).
-        if not program:
-            named = self._named_unindexed_program(message)
-            if named:
-                code, full_name = named
-                reply = (f"{full_name} is one of Bank Muamalat's SME financing programmes, but I don't "
-                         f"have its detailed materials on hand here yet. Our SME financing team can walk you "
-                         f"through {code} — or I can help you explore the programmes I can detail.")
-                return _turn(reply, slots, stage="program_done", ui={"type": "none", "payload": {}},
-                             suggestions=[
-                                 {"label": "Connect to Sales team", "value": "I'd like to talk to your SME financing team"},
-                                 {"label": "Explore programmes", "value": "What SME financing programmes do you offer?"},
-                             ])
+        # 4. Known-but-unindexed programme the customer NAMED → be honest and hand to Sales. Checked on
+        #    the raw message (not the model's program_code) so an anaphora / mis-resolve to an indexed
+        #    code can't hide the fact they literally asked about SRF / TERAJU / CGC.
+        named = self._named_unindexed_program(message)
+        if named and not program:
+            return self._unindexed_redirect(named[0], named[1], slots)
 
         # 5. Compare programmes we can detail.
         if sig["turn_type"] == "compare" and len([c for c in sig["compare_programs"] if c in valid]) >= 2:
@@ -446,9 +471,16 @@ class ProgramAdvisor:
             offer = self._grounded_offer(message, program, slots, history, retrieval_query=retrieval_query)
             if offer:
                 return offer
+            # Resolved a programme but the index had nothing. If the customer actually named a
+            # programme we DON'T detail (the model mis-resolved via anaphora), say so honestly rather
+            # than dropping them into the funnel — the exact ambush behind "what about SRF".
+            if named:
+                return self._unindexed_redirect(named[0], named[1], slots)
 
-        # 7. Funnel — merge purpose/amount from the signal (money regex as an exact-figure backstop),
-        #    then the shared funnel steps.
+        # 7. No programme in play. What the customer WANTS decides the reply — the guided Program
+        #    Finder is a tool for "help me choose", NOT a catch-all for everything else, which is what
+        #    made it ambush people mid-conversation. Merge any purpose/amount the model read (exact
+        #    figure regex as a backstop) so a guidance turn flows straight into the recommender.
         if slots.get("funnel_purpose") is None and sig["funnel"]["purpose_id"]:
             slots["funnel_purpose"] = sig["funnel"]["purpose_id"]
         if slots.get("funnel_amount") is None:
@@ -457,7 +489,18 @@ class ProgramAdvisor:
                 amt = self._parse_amount(message)
             if amt is not None:
                 slots["funnel_amount"] = amt
-        return self._funnel_reply(message, history, slots)
+
+        wants_guidance = (
+            sig["turn_type"] in ("recommend", "eligibility")   # asked to be pointed to one
+            or browse_other                                    # left a programme to see the others
+            or stage in ("funnel_purpose", "funnel_amount")    # already mid-funnel
+            or slots.get("funnel_purpose") is not None         # gave a purpose to match on
+            or slots.get("funnel_amount") is not None          # gave an amount to match on
+            or not programs                                    # no index at all → the config recommender is all we have
+        )
+        if wants_guidance:
+            return self._funnel_reply(message, history, slots)
+        return self._soft_help(slots)
 
     def handle(self, message: str, history: list[dict], slots: dict, *,
                stage: Optional[str] = None, intent: Optional[dict] = None,

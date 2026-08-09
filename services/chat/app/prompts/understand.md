@@ -90,6 +90,7 @@ Import · 4=Machinery/Vehicles/Equipment · 5=Project/Contract.
 - history:[documents for MIHP-i] · "and the tenure?" → `{"turn_type":"program_info","program_code":"MIHP-I","program_status":"indexed","attribute":"tenure","retrieval_query":"financing tenure for MIHP-i","confidence":0.95}`
 - offer stage · "boleh saya mohon?" → `{"turn_type":"offer_response","offer_response":"apply","confidence":0.9}`
 - "what's the profit rate for TERAJU?" → `{"turn_type":"program_info","program_code":"TERAJU","program_status":"known_unindexed","attribute":"profit_rate","confidence":0.9}`
+- history:[answered on GGSM, then listed the range incl. SRF] · "what about SRF?" → resolve to SRF, NOT the previous programme: `{"turn_type":"program_info","program_code":"SRF","program_status":"known_unindexed","attribute":"overview","confidence":0.85}` (a "what about <programme>" names THAT programme; don't carry the prior one over)
 - "how much can I get?" → `{"turn_type":"unclear","clarify":{"needed":true,"question":"Happy to help — what will the financing be for, and roughly how much?"},"confidence":0.55}`
 - "I need working capital" → `{"turn_type":"recommend","funnel":{"purpose_id":2,"amount_rm":null},"confidence":0.9}`
 - "can you compare two programmes?" → `{"turn_type":"capability","intent":{"primary":"INS-02","confidence":0.9},"confidence":0.9}`

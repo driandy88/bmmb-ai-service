@@ -133,6 +133,35 @@ def test_known_but_unindexed_programme_is_a_named_redirect():
     assert any("Sales" in s["label"] for s in res["suggestions"])
 
 
+def test_named_unindexed_survives_a_misresolve_instead_of_funnelling():
+    # The screenshot bug: after a GGSM answer + catalog list, "what about SRF" — SRF is a real
+    # programme we DON'T index. If the model anaphora-resolves it to an indexed code (GGSM3) and the
+    # index returns nothing for the SRF query, we must NOT ambush with the Program Finder: name SRF
+    # honestly and offer Sales. The redirect is driven off the message, not the model's program_code.
+    class _Misresolve(StubLLMClient):
+        def understand(self, message, history=None, *, programs=None, stage=""):
+            return normalize_understanding({"turn_type": "program_info", "program_code": "GGSM3",
+                                            "program_status": "indexed", "retrieval_query": "overview of SRF"})
+    adv = ProgramAdvisor(_Misresolve(), FakeRetriever([], PROGS))       # index has nothing for the query
+    res = adv.handle("what about SRF", [], {"last_program": "GGSM3"}, stage="program_done")
+    assert res["ui_action"]["type"] == "none"                          # NOT show_program_options
+    assert "SRF" in res["reply"] and not res.get("grounded")
+    assert any("Sales" in s["label"] for s in res["suggestions"])
+
+
+def test_unhandled_turn_gets_soft_help_not_the_funnel():
+    # A turn that maps to no programme, no action, and no guidance request must NOT trigger the
+    # wizard — offer a warm hand and let the customer steer. The funnel is now opt-in.
+    class _Smalltalk(StubLLMClient):
+        def understand(self, message, history=None, *, programs=None, stage=""):
+            return normalize_understanding({"turn_type": "smalltalk"})
+    res = _adv(_Smalltalk()).handle("ok cool thanks", [], {})
+    assert res["ui_action"]["type"] == "none"                          # not the Program Finder
+    assert res["stage"] == "program_done" and not res.get("grounded")
+    labels = [s["label"].lower() for s in res["suggestions"]]
+    assert any("choose" in l for l in labels)                          # guided funnel offered, not forced
+
+
 def test_funnel_from_natural_language_purpose():
     res = _adv().handle("I need working capital", [], {})
     assert res["stage"] == "funnel_amount"                             # purpose captured → asks amount

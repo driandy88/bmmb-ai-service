@@ -436,6 +436,9 @@ class StubLLMClient(LLMClient):
         # question, not a question about that programme.
         catalog = bool(_STUB_CATALOG_RE.search(low))
         capability = bool(_STUB_CAPABILITY_RE.search(low)) and not rw.get("program_code") and not catalog
+        # A bare "what programmes do you offer / show me your options" is a request to be guided → the
+        # recommender funnel (matches the Vertex model). Distinct from catalog ("what ELSE / besides X").
+        browse = bool(_STUB_BROWSE_RE.search(low)) and not catalog and not capability and not rw.get("program_code")
         if catalog:
             turn_type = "catalog"
         elif capability:
@@ -444,7 +447,7 @@ class StubLLMClient(LLMClient):
             turn_type = "offer_response"
         elif rw.get("program_code"):
             turn_type = "program_info"
-        elif purpose or amount:
+        elif browse or purpose or amount:
             turn_type = "recommend"
         else:
             turn_type = "program_info"
