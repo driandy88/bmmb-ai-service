@@ -116,3 +116,18 @@ def test_slotfill_flow_stays_sticky_on_ambiguous_answer():
     # ambiguous answers, so an AMB reply there continues the flow rather than clarifying.
     d = decide(primary="AMB-03", confidence=0.9, active="ROUTE-ELIGIBILITY")
     assert d.action == routing.DISPATCH and d.primary_ref == "ROUTE-ELIGIBILITY"
+
+
+def test_active_flow_yields_to_out_of_scope_topic_change():
+    # The bug: at the post-answer offer (ROUTE-PROGRAM), a clear out-of-scope question ("what's your
+    # fixed deposit rate?") was swallowed into the program handler and answered with "would you like
+    # to apply?". A confident out-of-scope turn must break out and be deflected instead.
+    d = decide(primary="OOS-01", confidence=0.9, active="ROUTE-PROGRAM")
+    assert d.action == routing.CANNED and d.primary_ref == "R1"
+
+
+def test_active_flow_stays_sticky_on_low_confidence_out_of_scope():
+    # A bare offer reply mislabelled as OOS at LOW confidence must NOT break out — the offer handler
+    # reads apply/decline itself. Only a confident topic change yields.
+    d = decide(primary="OOS-01", confidence=0.5, active="ROUTE-PROGRAM")
+    assert d.action == routing.DISPATCH and d.primary_ref == "ROUTE-PROGRAM"

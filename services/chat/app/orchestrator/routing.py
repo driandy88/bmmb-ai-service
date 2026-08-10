@@ -165,7 +165,17 @@ def decide(
             and primary_row is not None
             and primary_row.type == "ambiguous"
         )
-        if not switched and not interrupted:
+        # A clear topic change OUT of SME financing (fixed deposit, personal loan, a competitor…)
+        # must not be swallowed by an active flow's follow-up handling — otherwise "what's your fixed
+        # deposit rate?" during the post-answer offer becomes "would you like to apply?" instead of an
+        # honest deflection. Let a confident out-of-scope turn break out; bare offer replies (yes/no/
+        # "tell me more") aren't out-of-scope, so they stay sticky.
+        left_scope = (
+            primary_row is not None
+            and primary_row.type == "out_of_scope"
+            and confidence >= threshold
+        )
+        if not switched and not interrupted and not left_scope:
             handler, label = ROUTE_TABLE[active_flow_route]
             return RoutingDecision(
                 action=DISPATCH, route_label=f"{label} (cont.)",
