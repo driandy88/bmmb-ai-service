@@ -401,8 +401,9 @@ you can turn off entirely.
 
 \* `LLM_BACKEND` auto-selects `vertex` when `GCP_PROJECT_ID` is set, else `stub`. The dev
 `.env` in the service root points at Vertex (`prototype-bmmb-1b62`) — remove it or set
-`LLM_BACKEND=stub` to run fully offline. `google-genai==0.3.0` (same as extraction) is
-required for the Vertex path; the stub path needs none of the GCP packages.
+`LLM_BACKEND=stub` to run fully offline. `google-genai==1.47.0` (same as extraction,
+bbox_generator, validation) is required for the Vertex path; the stub path needs none
+of the GCP packages.
 
 **Content lives in config, never code:** `intents.yaml` (taxonomy — the router and
 classifier both read it), `responses.yaml` (R1–R8 wording), `eligibility_rules.yaml`
