@@ -13,6 +13,7 @@ program (§6a, §11), so every chunk here is safe to quote. The citation numbers
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
 from app.agents.rag.retriever import CorpusScope, Retriever
@@ -70,10 +71,16 @@ def grounded_answer(llm, retriever: Retriever, message: str, corpus: CorpusScope
     neighbour (MIHP-i leaking into a GGSM-vs-MHP-i compare) and answer about the wrong product."""
     query = retrieval_query or message
     if program_codes:
+        # A compare fetches chunks per programme (so a look-alike neighbour can't leak in). Those
+        # retrievals are independent I/O (each embeds + queries), so run them CONCURRENTLY — a compare
+        # was doing them back-to-back and paying ~2s twice. Order is preserved so citations stay stable.
         per = max(2, top_k // len(program_codes))
-        chunks = []
-        for code in program_codes:
-            chunks += retriever.retrieve(query, corpus, top_k=per, program_code=code, channel=channel)
+        with ThreadPoolExecutor(max_workers=len(program_codes)) as ex:
+            per_code = ex.map(
+                lambda code: retriever.retrieve(query, corpus, top_k=per, program_code=code, channel=channel),
+                program_codes,
+            )
+        chunks = [c for result in per_code for c in result]
     else:
         chunks = retriever.retrieve(query, corpus, top_k=top_k, program_code=program_code, channel=channel)
     if not chunks:

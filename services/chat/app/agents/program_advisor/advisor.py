@@ -443,15 +443,22 @@ class ProgramAdvisor:
 
         program = sig["program_code"] if sig["program_code"] in valid else None
         retrieval_query = (sig.get("retrieval_query") or "").strip() or message
+        # A confident compare of two known programmes — "difference between MHP-i and MIHP-i". Computed
+        # up front because it must win over the fuzzy disambiguation backstop below: MHP-i and MIHP-i
+        # are near look-alikes, so that backstop would otherwise flag them and ask "which one?" on a
+        # turn where the customer clearly named BOTH and wants them compared.
+        cmp_codes = [c for c in sig["compare_programs"] if c in valid]
+        is_compare = sig["turn_type"] == "compare" and len(cmp_codes) >= 2
 
         # 1. Ambiguous / mistyped name → clarify with topic-carrying chips. Signal first; the
-        #    deterministic near-match is a backstop for when the model doesn't flag it.
+        #    deterministic near-match is a backstop for when the model doesn't flag it. Skipped for a
+        #    confident compare (see above) — that names both, so compare instead of asking which.
         cands = [c for c in sig["disambiguation"]["candidates"] if c in valid]
         if not program and not cands:
             fuzzy = self._fuzzy_candidates(message, programs)
             if len(fuzzy) >= 2:
                 cands = fuzzy
-        if not program and len(cands) >= 2:
+        if not program and not is_compare and len(cands) >= 2:
             return self._disambiguate(cands, slots, message, history, retrieval_query)
 
         # 2. Genuinely unsure → clarify with the model's own question (never guess).
@@ -471,8 +478,7 @@ class ProgramAdvisor:
         #     offer stage. (Otherwise the offer-followup heuristic below reads "compare GGSM and MHP-i"
         #     as a question about the last programme and reprompts instead of comparing.) Retrieval is
         #     scoped to exactly these codes so a confusable neighbour can't be compared by mistake.
-        cmp_codes = [c for c in sig["compare_programs"] if c in valid]
-        if sig["turn_type"] == "compare" and len(cmp_codes) >= 2:
+        if is_compare:
             cmp = self._grounded_compare(message, slots, history, retrieval_query, cmp_codes)
             if cmp:
                 return cmp
