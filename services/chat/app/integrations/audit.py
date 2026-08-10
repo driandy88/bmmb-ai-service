@@ -16,9 +16,9 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from app.config.settings import Settings, get_settings
-from app.utils import pii
-from app.utils.logging import get_logger
+from ..config.settings import Settings, get_settings
+from ..utils import pii
+from ..utils.logging import get_logger
 
 log = get_logger("audit")
 

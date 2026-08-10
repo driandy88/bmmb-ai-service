@@ -22,9 +22,9 @@ from __future__ import annotations
 import math
 from functools import lru_cache
 
-from app.agents.rag.retriever import Corpus, CorpusScope, RetrievalChunk, Retriever
-from app.config.settings import Settings
-from app.utils.logging import get_logger
+from ..agents.rag.retriever import Corpus, CorpusScope, RetrievalChunk, Retriever
+from ..config.settings import Settings
+from ..utils.logging import get_logger
 
 log = get_logger("rag.pgvector")
 

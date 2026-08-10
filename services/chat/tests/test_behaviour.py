@@ -1,6 +1,6 @@
 """behaviour.md — the swappable brand-voice preamble, wired into every generation via system_prompt."""
-from app.utils import prompts
-from app.utils.prompts import load_prompt, system_prompt
+from services.chat.app.utils import prompts
+from services.chat.app.utils.prompts import load_prompt, system_prompt
 
 
 def test_behaviour_voice_is_in_every_generation_prompt():

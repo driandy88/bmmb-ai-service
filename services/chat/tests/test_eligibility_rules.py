@@ -1,6 +1,6 @@
 """Tier-1 eligibility rules — DETERMINISTIC boundary tests (brief §10 Part A).
 No LLM: the pure rules.evaluate() decides. Sheet 5 thresholds."""
-from app.agents.eligibility import rules
+from services.chat.app.agents.eligibility import rules
 
 FULL = dict(
     business_age_years=4, total_equity_or_net_worth=100_000, revenue=1_000_000,

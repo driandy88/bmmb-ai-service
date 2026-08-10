@@ -2,9 +2,9 @@
 with the default R8 line + preset chips as the offline/failure fallback. Still ask-once."""
 import types
 
-from app.config.loader import load_config
-from app.integrations.llm import StubLLMClient
-from app.orchestrator.nodes import clarify_node
+from services.chat.app.config.loader import load_config
+from services.chat.app.integrations.llm import StubLLMClient
+from services.chat.app.orchestrator.nodes import clarify_node
 
 
 def _state(msg="I need funding", primary="AMB-03"):
