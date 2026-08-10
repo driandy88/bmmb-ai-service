@@ -1,7 +1,8 @@
-# Runtime deps. Pinned by major to match the other services in this repo
-# (see services/extraction/requirements.txt). google-genai is imported lazily
-# and only needed when LLM_BACKEND=vertex; the default stub path needs none of
-# the GCP packages.
+# Runtime deps. google-genai is imported lazily and only needed when
+# LLM_BACKEND=vertex; the default stub path needs none of the GCP packages.
+# Pinned to an exact version (not major) to match bbox_generator/validation
+# (see services/extraction/requirements.txt) -- google-genai 1.x has moved
+# fast enough that a major-only pin is too loose to trust across services.
 fastapi[standard]==0.115.*
 uvicorn[standard]==0.32.*
 pydantic==2.*
@@ -13,7 +14,7 @@ langgraph==0.2.*
 langchain-core==0.3.*
 
 # Vertex AI (Gemini) — used only by LLM_BACKEND=vertex.
-google-genai==0.3.*
+google-genai==1.47.0
 
 # GCS — used only by the citation source preview (SOURCE_PREVIEW_MODE=signed|proxy) to
 # sign / stream the original Sales-Kit PDFs. Imported lazily; not needed offline (mode=off).
