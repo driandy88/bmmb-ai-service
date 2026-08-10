@@ -25,9 +25,15 @@ redo work that's done and miss the two services that actually still need it.
   `deploy-mcp.yml`, `deploy-chat.yml`).
 - **`services/rag-ingestion/` is not an HTTP service** — it's an offline CLI pipeline
   (`cli.py stage1..stage7`), no Dockerfile, no deploy workflow, run manually/as a job.
-  It doesn't fit "mount as a router" and should stay **out of scope**. It also has an
-  **open PR #42** (`feat/rag`) actively changing it — another reason to leave it alone
-  for now and avoid conflicting with in-flight work.
+  It doesn't fit "mount as a router" and should stay **out of scope**. Despite the
+  name overlap, it is **not** touched by open PR #42 (`feat/rag`) — verified via
+  `gh pr diff 42 --name-only`: all 23 changed files live under
+  `services/chat/app/agents/rag/` (a same-named but separate in-app RAG feature of the
+  `chat` service) plus `services/chat/{requirements.txt,.env.example,tests/,scripts/,
+  docs/RAG_PLAN.md}`. The real coordination risk is therefore with Phase 2's `chat`
+  namespacing (which rewrites `services/chat/app`'s internal imports), not with this
+  directory — `rag-ingestion` needs no coordination at all and stays out of scope
+  regardless of #42's fate.
 - **4 of 6 services are already router-based and merge-ready**: `aggregation`,
   `bbox_generator`, `validation`, `mcp` each expose `router = APIRouter(...)` in their
   `api.py`, live under the `services.<name>` package (there's already a
@@ -100,6 +106,10 @@ This plan assumes **option 1**. Confirm before starting Phase 5 (deployment/cuto
   pipeline).
 - Do this work on a branch based on `main` after PR #42 (`feat/rag`) lands, or rebase
   onto it before merging, to avoid fighting an in-flight PR that touches `chat`/RAG.
+- **Status (2026-08-10):** PR #42 is still open/unmerged. This branch is based on
+  current `main` tip (merge-base = `main` HEAD), so it's current for now with nothing
+  to rebase yet — rebase onto `main` again right before merging this work, once #42
+  has landed, to pick up its changes under `services/chat/app/agents/rag/`.
 
 **Phase 1 — Dependency & env consolidation**
 - Pick one shared `fastapi`/`uvicorn` pin — mcp's (`0.139.2`/`0.51.0`) is the floor
