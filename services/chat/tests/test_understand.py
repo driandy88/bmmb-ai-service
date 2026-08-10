@@ -149,6 +149,22 @@ def test_named_unindexed_survives_a_misresolve_instead_of_funnelling():
     assert any("Sales" in s["label"] for s in res["suggestions"])
 
 
+def test_compare_wins_over_the_offer_followup_in_the_offer_stage():
+    # Stress-test bug: "compare GGSM and MHP-i" arriving in the post-answer offer stage was read as a
+    # follow-up about the last programme and reprompted ("would you like to apply for MHP-I?") instead
+    # of comparing. A typed compare must win over the offer heuristic.
+    class _Compare(StubLLMClient):
+        def understand(self, message, history=None, *, programs=None, stage=""):
+            return normalize_understanding({"turn_type": "compare",
+                                            "compare_programs": ["GGSM3", "MHP-I"],
+                                            "retrieval_query": "compare GGSM3 and MHP-i"})
+    adv = _adv(_Compare(), chunks=[_chunk("GGSM3 vs MHP-i › tenure, rate, size.")])
+    res = adv.handle("can you compare GGSM and MHP-i?", [],
+                     {"last_program": "MHP-I"}, stage="program_offer")
+    assert res.get("grounded") is True                                 # a real comparison answer
+    assert "apply for" not in res["reply"].lower()                     # NOT the offer reprompt
+
+
 def test_unhandled_turn_gets_soft_help_not_the_funnel():
     # A turn that maps to no programme, no action, and no guidance request must NOT trigger the
     # wizard — offer a warm hand and let the customer steer. The funnel is now opt-in.

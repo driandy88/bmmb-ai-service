@@ -24,6 +24,23 @@ def test_clean_text_untouched():
     assert r.clean and r.text == ok
 
 
+def test_deliberate_contrast_loan_is_kept_not_self_contradicted():
+    # The Islamic-framing case: the bot deliberately contrasts our financing with a conventional
+    # loan. The lint must NOT rewrite the contrast into "financing rather than conventional
+    # financing" (the exact awkwardness the stress test caught).
+    quoted = terminology.lint("We offer 'financing' rather than a conventional 'loan'.")
+    assert "'loan'" in quoted.text and quoted.clean          # quoted term kept, not a violation
+    qualified = terminology.lint("This is financing, not a conventional loan.")
+    assert "conventional loan" in qualified.text and qualified.clean
+
+
+def test_bare_loan_still_rewritten_after_the_exemption():
+    # Compliance backstop intact: a bare "loan" about our own product is still corrected.
+    r = terminology.lint("Apply for our business loan today.")
+    assert "loan" not in r.text.lower() and "financing" in r.text.lower()
+    assert r.violations == ["loan"]
+
+
 def test_pii_redacts_ic_email_phone_money():
     raw = "IC 900101-01-1234, email a.b@muamalat.com.my, call 017-621 5751, revenue RM 1,000,000"
     out = pii.redact(raw)

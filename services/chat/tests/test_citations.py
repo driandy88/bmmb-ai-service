@@ -60,26 +60,28 @@ def test_grounded_offer_drops_redundant_cta_sentence():
 
 
 class _LabeledLLM:
-    """A synthesiser that returns a plain lead + one labelled key fact."""
+    """A synthesiser that (mis)uses a `label` field — the real model does this for list items,
+    which used to strip the bullet flag and inject 'Label:' into the plain reply."""
 
     def synthesize_answer(self, query, chunks, history=None):
         return {"grounded": True, "sentences": [
-            {"text": "GGSM3 helps SMEs fund working capital.", "cites": [1]},
-            {"label": "Profit rate", "text": "BFR + 2% per annum", "cites": [1]},
+            {"text": "For GGSM3 you'll need to prepare:", "cites": [1]},
+            {"label": "bullet", "text": "A copy of your IC and SSM registration.", "cites": [1]},
+            {"label": "Bank statements", "text": "Six months of business bank statements.", "cites": [1]},
         ]}
 
 
-def test_grounded_answer_keeps_labels_and_builds_readable_reply():
-    # A labelled sentence is a key fact; the lead has no label. The plain-text reply reads
-    # "Label: value" so history/logging stay legible even without the structured UI.
+def test_grounded_answer_drops_stray_label_so_it_cannot_corrupt_the_reply():
+    # `label` is NOT part of the answer contract (the UI reads text + bullet only). The model
+    # sometimes emits it anyway; it must be dropped, never rendered as "Label: value" in the reply.
     from app.agents.rag.synthesize import grounded_answer
     from app.agents.rag.retriever import Corpus
 
-    chunks = [_chunk("GGSM3 › Financing rate › Profit rate is BFR + 2% per annum.")]
-    ans = grounded_answer(_LabeledLLM(), FakeRetriever(chunks, PROGRAMS), "tell me about GGSM3", Corpus.PROGRAM)
-    assert ans["sentences"][0].get("label") is None           # lead: no label
-    assert ans["sentences"][1]["label"] == "Profit rate"
-    assert "Profit rate: BFR + 2% per annum" in ans["reply"]
+    chunks = [_chunk("GGSM3 › documents › IC, SSM, 6-month bank statements.")]
+    ans = grounded_answer(_LabeledLLM(), FakeRetriever(chunks, PROGRAMS), "documents for GGSM3?", Corpus.PROGRAM)
+    assert all("label" not in s for s in ans["sentences"])     # never carried through
+    assert "bullet:" not in ans["reply"].lower()               # the exact leak the stress test caught
+    assert "Bank statements:" not in ans["reply"]
 
 
 class _BulletLLM:

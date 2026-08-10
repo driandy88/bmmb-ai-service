@@ -428,6 +428,14 @@ class ProgramAdvisor:
         if sig["turn_type"] == "catalog":
             return self._catalog_turn(message, history, slots)
 
+        # 2d. Compare two programmes we can detail — a clear, typed intent that must win even in the
+        #     offer stage. (Otherwise the offer-followup heuristic below reads "compare GGSM and MHP-i"
+        #     as a question about the last programme and reprompts instead of comparing.)
+        if sig["turn_type"] == "compare" and len([c for c in sig["compare_programs"] if c in valid]) >= 2:
+            cmp = self._grounded_compare(message, slots, history, retrieval_query)
+            if cmp:
+                return cmp
+
         # 3. Post-answer offer: read by MEANING (apply/decline/other), not a keyword list.
         browse_other = False
         if stage == "program_offer" and slots.get("last_program"):
@@ -459,12 +467,6 @@ class ProgramAdvisor:
         named = self._named_unindexed_program(message)
         if named and not program:
             return self._unindexed_redirect(named[0], named[1], slots)
-
-        # 5. Compare programmes we can detail.
-        if sig["turn_type"] == "compare" and len([c for c in sig["compare_programs"] if c in valid]) >= 2:
-            cmp = self._grounded_compare(message, slots, history, retrieval_query)
-            if cmp:
-                return cmp
 
         # 6. Grounded programme answer (the common case).
         if program:

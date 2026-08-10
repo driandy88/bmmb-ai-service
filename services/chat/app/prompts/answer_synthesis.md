@@ -55,6 +55,10 @@ A list answer (note the plain lead-in, then one bulleted sentence per document):
 ```
 
 ## Rules
+- **Rephrase, don't transcribe.** Write clean sentences in your OWN words. NEVER copy the source's
+  raw formatting or page furniture — no markdown tables (`|`, `:---`), headings (`###`), bullet
+  glyphs, section titles like "What Do We Need From You", phone numbers, URLs, logos, or award lines.
+  If a source lists documents as a table, turn each into one plain bulleted item naming the document.
 - Use **only** the SOURCES. Do not add facts, figures, rates, or products not in them. Never guess.
 - Each sentence carries `cites` — the source number(s) that support it. No unsupported sentence.
 - **1–2 sentences for a specific question**, up to ~4 for a broad one. Don't pad, don't answer what
