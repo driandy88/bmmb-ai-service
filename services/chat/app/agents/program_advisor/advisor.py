@@ -16,8 +16,8 @@ import difflib
 import re
 from typing import Any, Optional
 
-from ...agents.rag.retriever import Corpus, Retriever
-from ...agents.rag.synthesize import grounded_answer
+from ..rag.retriever import Corpus, Retriever
+from ..rag.synthesize import grounded_answer
 from ...config.loader import AppConfig, load_config
 from ...config.settings import get_settings
 from ...integrations.llm import LLMClient, normalize_understanding

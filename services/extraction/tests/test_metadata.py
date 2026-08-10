@@ -15,8 +15,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
-from app.metadata_extractor import MetadataError, get_file_metadata
+from services.extraction.api import app
+from services.extraction.metadata_extractor import MetadataError, get_file_metadata
 
 client = TestClient(app)
 
@@ -139,7 +139,7 @@ class TestExtractMetadataValidation:
         assert r.status_code == 422  # FastAPI form validation
 
     def test_oversized_file_413(self, monkeypatch):
-        from app import metadata
+        from services.extraction import metadata
         monkeypatch.setattr(metadata, "MAX_FILE_SIZE", 8)  # tiny cap for the test
         r = client.post(
             "/extract-metadata",
@@ -151,7 +151,7 @@ class TestExtractMetadataValidation:
 class TestExtractMetadataSuccess:
     @pytest.fixture(autouse=True)
     def mock_extractor(self, monkeypatch):
-        monkeypatch.setattr("app.metadata.get_file_metadata", lambda b: FAKE_DUMP)
+        monkeypatch.setattr("services.extraction.metadata.get_file_metadata", lambda b: FAKE_DUMP)
 
     def test_returns_raw_dump(self):
         r = client.post(
@@ -169,7 +169,7 @@ class TestExtractMetadataFailure:
     def test_extractor_failure_returns_502(self, monkeypatch):
         def _boom(_bytes):
             raise MetadataError("exiftool not found")
-        monkeypatch.setattr("app.metadata.get_file_metadata", _boom)
+        monkeypatch.setattr("services.extraction.metadata.get_file_metadata", _boom)
 
         r = client.post(
             "/extract-metadata",

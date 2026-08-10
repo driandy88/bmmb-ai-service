@@ -40,8 +40,8 @@ from ..integrations.audit import AuditWriter, get_audit_writer
 from ..integrations.extraction import ExtractionClient, get_extraction_client
 from ..integrations.llm import LLMClient, get_llm_client
 from ..integrations.session_store import get_checkpointer
-from ..orchestrator import nodes
-from ..orchestrator.state import SessionState, new_state
+from . import nodes
+from .state import SessionState, new_state
 from ..utils import pii
 
 _UI_TYPES = {"none", "render_eligibility_form", "show_eligibility_result",

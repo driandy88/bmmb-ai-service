@@ -12,7 +12,7 @@ the detection reasoning is never surfaced to the user (§12).
 """
 from __future__ import annotations
 
-from ...agents.guardrail.denylist import scan
+from .denylist import scan
 from ...integrations.llm import LLMClient
 
 

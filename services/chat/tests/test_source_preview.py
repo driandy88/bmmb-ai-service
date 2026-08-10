@@ -7,8 +7,8 @@ import types
 import pytest
 from fastapi.testclient import TestClient
 
-from app.integrations.source_preview import SourcePreview
-from app.main import app
+from services.chat.app.integrations.source_preview import SourcePreview
+from services.chat.api import app
 
 
 def _sp(mode="off"):

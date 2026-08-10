@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ..agents.program_advisor.program_match import mentions_program
-from ..orchestrator import routing
+from . import routing
 from ..utils import terminology
 from ..utils.suggestions import explore_suggestions
 

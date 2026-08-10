@@ -2,10 +2,10 @@
 `compose` returns the canned wording offline/on failure, so this only ever upgrades the reply."""
 import types
 
-from app.config.loader import load_config
-from app.integrations.llm import StubLLMClient
-from app.orchestrator import routing
-from app.orchestrator.nodes import canned_node
+from services.chat.app.config.loader import load_config
+from services.chat.app.integrations.llm import StubLLMClient
+from services.chat.app.orchestrator import routing
+from services.chat.app.orchestrator.nodes import canned_node
 
 cfg = load_config()
 

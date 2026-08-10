@@ -15,7 +15,7 @@ agent/orchestrator edit. See the Phase 6 notes.
 """
 from __future__ import annotations
 
-from ...agents.rag.retriever import CorpusScope, RetrievalChunk, Retriever
+from .retriever import CorpusScope, RetrievalChunk, Retriever
 from ...integrations.llm import LLMClient
 from ...utils.logging import get_logger
 

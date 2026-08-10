@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ...agents.rag.retriever import Corpus, Retriever, StubRetriever
+from .retriever import Corpus, Retriever, StubRetriever
 from ...config.settings import Settings, get_settings
 from ...utils.logging import get_logger
 
@@ -42,6 +42,6 @@ def get_retriever(settings: Optional[Settings] = None) -> Retriever:
     # Wrap the real backend with query rewrite + program scoping (§6 steps 1–3, §6a).
     # This is the seam that delivers §6a with zero agent/orchestrator edits: agents
     # still call retrieve(message, corpus, top_k); the wrapper rewrites + scopes.
-    from ...agents.rag.rewrite import RewriteScopingRetriever
+    from .rewrite import RewriteScopingRetriever
     from ...integrations.llm import get_llm_client
     return RewriteScopingRetriever(inner, get_llm_client(settings))

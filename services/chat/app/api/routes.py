@@ -14,7 +14,7 @@ from typing import Optional
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 
-from ..api.schemas import ChatRequest, ChatResponse, HealthResponse, SourceDocResponse
+from .schemas import ChatRequest, ChatResponse, HealthResponse, SourceDocResponse
 from ..config.settings import get_settings
 
 router = APIRouter()

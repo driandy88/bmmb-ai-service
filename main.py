@@ -4,8 +4,8 @@ Root FastAPI app for the BMMB AI service monorepo.
 Mounts all 6 per-service routers under one process / one port / one /docs,
 each behind its own path prefix:
 
-    /extraction     services.extraction  (app/main.py)
-    /chat           services.chat        (app/main.py)
+    /extraction     services.extraction  (api.py)
+    /chat           services.chat        (api.py)
     /validation     services.validation  (api.py)
     /aggregation    services.aggregation (api.py)
     /bbox_generator services.bbox_generator (api.py)
@@ -18,27 +18,28 @@ one more, root-level `GET /health` as an aggregate liveness check.
 
 FastAPI supports exactly one lifespan per app. Of the 6, only chat needs
 startup wiring: it builds the LangGraph orchestrator once and caches it on
-`app.state` (see services/chat/app/main.py). `app.include_router()` doesn't
-create a separate ASGI app, so chat's handlers -- which look up the
-orchestrator via `get_orchestrator(request.app)` -- see exactly the same
-`app.state` this root app's lifespan populates. So we just reuse chat's
-lifespan as-is for the root app; nothing else needs one.
+`app.state` (see services/chat/api.py). `app.include_router()` doesn't create
+a separate ASGI app, so chat's handlers -- which look up the orchestrator via
+`get_orchestrator(request.app)` -- see exactly the same `app.state` this root
+app's lifespan populates. So we just reuse chat's lifespan as-is for the root
+app; nothing else needs one.
 
 Run locally:
     uvicorn main:app --reload
 """
 from __future__ import annotations
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from services.aggregation.api import router as aggregation_router
 from services.bbox_generator.api import router as bbox_generator_router
+from services.chat.api import lifespan as chat_lifespan
+from services.chat.api import router as chat_router
 from services.chat.app.config.settings import get_settings as get_chat_settings
-from services.chat.app.main import lifespan as chat_lifespan
-from services.chat.app.main import router as chat_router
-from services.extraction.app.main import ALLOWED_ORIGINS as _extraction_origins
-from services.extraction.app.main import router as extraction_router
+from services.extraction.api import router as extraction_router
 from services.mcp.api import router as mcp_router
 from services.validation.api import router as validation_router
 
@@ -55,7 +56,14 @@ app = FastAPI(
 # extraction and chat configure CORS today -- the other four are internal
 # services with no CORSMiddleware of their own, so there's nothing of theirs
 # to union in. "*" from either side wins outright (it's a strict superset of
-# any explicit origin list).
+# any explicit origin list). Both services parse the same env var
+# (ALLOWED_ORIGINS) the same way -- see services/extraction/api.py and
+# services/chat/app/config/settings.py:Settings.origins_list().
+_raw_extraction_origins = os.getenv("ALLOWED_ORIGINS", "*")
+_extraction_origins = (
+    ["*"] if _raw_extraction_origins == "*"
+    else [o.strip() for o in _raw_extraction_origins.split(",")]
+)
 _chat_origins = get_chat_settings().origins_list()
 if "*" in _extraction_origins or "*" in _chat_origins:
     _allow_origins = ["*"]

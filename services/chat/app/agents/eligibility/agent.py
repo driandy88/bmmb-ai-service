@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from ...agents.eligibility import document_map, rules
+from . import document_map, rules
 from ...config.loader import AppConfig, load_config
 from ...integrations.llm import LLMClient
 

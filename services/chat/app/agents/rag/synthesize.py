@@ -16,7 +16,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
-from ...agents.rag.retriever import CorpusScope, Retriever
+from .retriever import CorpusScope, Retriever
 
 _PAGE_RE = re.compile(r"#page=(\d+)")
 
