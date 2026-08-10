@@ -1,5 +1,5 @@
 """
-Tests for app.config and app.schema_builder, run against the REAL bmmb_dev
+Tests for services.extraction.config and services.extraction.schema_builder, run against the REAL bmmb_dev
 Cloud SQL database (the 15 seeded BMMB document templates, from
 seed_templates_attributes.sql) so a broken config is caught immediately, not
 just a synthetic fixture. Requires Cloud SQL credentials -- see the `test`
@@ -13,8 +13,8 @@ leaves one behind -- which must not fail *these* tests too.
 """
 import pytest
 
-from app.config import TemplateNotFoundError, get_template, list_templates
-from app.schema_builder import build_gemini_schema, generate_extraction_prompt, reshape_locations
+from services.extraction.config import TemplateNotFoundError, get_template, list_templates
+from services.extraction.schema_builder import build_gemini_schema, generate_extraction_prompt, reshape_locations
 
 _SEEDED_TEMPLATE_NAMES = {
     "Company Act Section 14", "SSM Form 24", "SSM Form 44", "SSM Form 49",
@@ -51,7 +51,7 @@ def _schema_from_attrs(monkeypatch, attrs):
     otherwise keep breaking these."""
     tmpl = {"id": "synthetic", "name": "Synthetic", "description": "",
             "group_name": None, "llm_prompt": None, "template_attributes": attrs}
-    monkeypatch.setattr("app.schema_builder.get_template", lambda _id: tmpl)
+    monkeypatch.setattr("services.extraction.schema_builder.get_template", lambda _id: tmpl)
     return build_gemini_schema("synthetic")
 
 
@@ -214,7 +214,7 @@ class TestReshapeLocations:
         attrs = [_ta(c, "Numeric", "Multiple", row_group=group) for c in columns]
         tmpl = {"id": "synthetic", "name": "Synthetic", "description": "",
                 "group_name": None, "llm_prompt": None, "template_attributes": attrs}
-        monkeypatch.setattr("app.schema_builder.get_template", lambda _id: tmpl)
+        monkeypatch.setattr("services.extraction.schema_builder.get_template", lambda _id: tmpl)
 
     def test_folds_list_into_dict_keyed_by_row_key(self, monkeypatch):
         self._use_group(monkeypatch, "Financials By Year", ["Financial Statement Date", "Revenue"])

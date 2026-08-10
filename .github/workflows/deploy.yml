@@ -14,6 +14,7 @@ env:
   SERVICE_NAME: extraction-service
   REPO_NAME: bmmb-ai-service             # shared Artifact Registry repo across all services in this monorepo
   WORKDIR: services/extraction
+  DOCKERFILE: services/extraction/Dockerfile
 
 jobs:
   test:
@@ -80,9 +81,13 @@ jobs:
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
+      # Build context is the repo root ("."), not $WORKDIR -- see
+      # services/extraction/Dockerfile's header comment for why.
       - name: Build image
         run: |
-          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} ${{ env.WORKDIR }}
+          docker build -f ${{ env.DOCKERFILE }} \
+            -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} \
+            .
 
       - name: Push image
         run: |

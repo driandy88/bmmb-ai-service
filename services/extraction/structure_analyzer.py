@@ -1,7 +1,7 @@
 """Structural analysis via PyMuPDF (fitz) -- PyMuPDF-only, no exiftool/PIL here.
 
 PDFs -> container structure (revisions, trailer, fonts, embedded-image streams).
-Images -> decoded ground-truth pixels. The orchestrator (app.forensics) composes
+Images -> decoded ground-truth pixels. The orchestrator (services.extraction.forensics) composes
 these with exiftool + DQT. v1 collects raw facts only; no scoring.
 """
 import re
