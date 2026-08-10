@@ -1,6 +1,6 @@
-# NB: fastapi/uvicorn are newer than the other services here on purpose --
-# fastmcp 3.x requires the new starlette (1.x), which older FastAPI rejects.
-# This set is the resolved, compatible combination.
+# fastapi/uvicorn/pydantic/python-dotenv here set the shared floor for every
+# service in this repo (fastmcp 3.x needs the new starlette 1.x, which older
+# FastAPI rejects) -- see services/*/requirements.txt, all pinned to match.
 fastapi==0.139.2
 uvicorn==0.51.0
 pydantic==2.13.4

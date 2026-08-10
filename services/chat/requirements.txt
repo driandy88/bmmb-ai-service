@@ -1,12 +1,12 @@
-# Runtime deps. google-genai is imported lazily and only needed when
-# LLM_BACKEND=vertex; the default stub path needs none of the GCP packages.
-# Pinned to an exact version (not major) to match bbox_generator/validation
-# (see services/extraction/requirements.txt) -- google-genai 1.x has moved
-# fast enough that a major-only pin is too loose to trust across services.
-fastapi[standard]==0.115.*
-uvicorn[standard]==0.32.*
-pydantic==2.*
-python-dotenv==1.0.*
+# Runtime deps. fastapi/uvicorn/pydantic/python-dotenv are pinned exact to
+# match every other service in this repo (see services/mcp/requirements.txt,
+# whose fastmcp 3.x floor set these versions). google-genai is imported lazily
+# and only needed when LLM_BACKEND=vertex; the default stub path needs none of
+# the GCP packages.
+fastapi[standard]==0.139.2
+uvicorn[standard]==0.51.0
+pydantic==2.13.4
+python-dotenv==1.2.1
 PyYAML==6.*
 
 # Orchestration (brief §3 — LangGraph state machine).
