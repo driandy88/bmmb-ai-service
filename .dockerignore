@@ -1,0 +1,12 @@
+.git
+.github
+docs
+README.md
+**/__pycache__
+**/*.pyc
+.venv
+venv
+.env
+sample_docs/private
+services/extraction/sample_docs/private
+**/Dockerfile.old
