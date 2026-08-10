@@ -133,6 +133,33 @@ def test_known_but_unindexed_programme_is_a_named_redirect():
     assert any("Sales" in s["label"] for s in res["suggestions"])
 
 
+def test_programme_alias_becf_is_recognised_not_soft_helped():
+    # "BECF" is the abbreviation we DISPLAY for TERAJU in our own catalog. A customer typing the name
+    # we showed must get the honest "we have it, talk to the team" redirect — not a generic help reply.
+    # The model can't enum an unindexed code, so it returns only program_status; the alias match on the
+    # raw message carries the redirect.
+    class _Unresolved(StubLLMClient):
+        def understand(self, message, history=None, *, programs=None, stage=""):
+            return normalize_understanding({"turn_type": "program_info",
+                                            "program_status": "known_unindexed", "attribute": "tenure"})
+    res = _adv(_Unresolved()).handle("BECF tenure is?", [], {})
+    assert res["ui_action"]["type"] == "none" and not res.get("grounded")
+    assert "BECF" in res["reply"]                                      # named, not deflected generically
+    assert any("Sales" in s["label"] for s in res["suggestions"])
+
+
+def test_catalog_splits_what_it_can_detail_from_what_the_team_covers():
+    # The catalog must be honest: separate the programmes we can detail now (in the index) from the
+    # ones only the team covers, so the list never invites a question we then have to deflect.
+    class _Catalog(StubLLMClient):
+        def understand(self, message, history=None, *, programs=None, stage=""):
+            return normalize_understanding({"turn_type": "catalog"})
+    res = _adv(_Catalog()).handle("which programmes do you have detailed materials for?", [], {})
+    assert res["stage"] == "program_done" and res["ui_action"]["type"] == "none"
+    low = res["reply"].lower()
+    assert "full details" in low and "walk you through" in low         # the two honest groups
+
+
 def test_named_unindexed_survives_a_misresolve_instead_of_funnelling():
     # The screenshot bug: after a GGSM answer + catalog list, "what about SRF" — SRF is a real
     # programme we DON'T index. If the model anaphora-resolves it to an indexed code (GGSM3) and the

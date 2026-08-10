@@ -220,6 +220,15 @@ class ProgramAdvisor:
         norm = re.sub(r"[^A-Z]", "", (code or "").upper())
         return norm[:-1] if norm.endswith("I") else norm
 
+    @staticmethod
+    def _program_aliases(code: str, full_name: str) -> list[str]:
+        """The names a customer might type for a programme: its code PLUS any abbreviation the bank
+        shows in parentheses in the full name (e.g. 'TERAJU … (BECF)' → also 'BECF'). Config-derived,
+        so we recognise exactly the names we display — a name straight off our own catalog is never a
+        stranger. (Without this, 'BECF tenure?' fell through to a generic help reply.)"""
+        aliases = [code] + re.findall(r"\(([^)]+)\)", full_name or "")
+        return [a.strip() for a in aliases if a and a.strip()]
+
     def _named_unindexed_program(self, message: str) -> Optional[tuple[str, str]]:
         """A programme the bank HAS (products.yaml) but has no Sales Kit indexed for -> (code,
         full_name). None when the message names no known programme, names one we CAN answer (it's
@@ -231,10 +240,14 @@ class ProgramAdvisor:
             code = (p.get("program") or "").strip()
             if not code:
                 continue
-            # match the code with naming-drift suffixes (GGSM3, MHP-I, MIHP-i) as a whole word
-            if re.search(rf"\b{re.escape(code)}(?:[-\s]?i|[-\s]?\d+)?\b", message or "", re.IGNORECASE):
-                if self._norm_program(code) not in indexed:
-                    return code, (p.get("full_name") or code)
+            full_name = p.get("full_name") or code
+            # match the code OR any displayed abbreviation (BECF for TERAJU), tolerating the
+            # naming-drift suffix (GGSM3, MHP-I, MIHP-i), as a whole word.
+            for name in self._program_aliases(code, full_name):
+                if re.search(rf"\b{re.escape(name)}(?:[-\s]?i|[-\s]?\d+)?\b", message or "", re.IGNORECASE):
+                    if self._norm_program(code) not in indexed:
+                        return code, full_name
+                    break   # named programme IS indexed → answerable; stop checking its aliases
         return None
 
     # -- post-answer offer (apply / talk to our team) ----------------------
@@ -323,17 +336,42 @@ class ProgramAdvisor:
         """List the programmes we offer — a direct catalog answer for "what else / what do you have /
         do you have a loan product?", instead of the funnel. The LIST is our real catalog (products.yaml);
         the LLM decided it's a listing question and phrases the reply (incl. our Islamic 'financing not
-        loan' framing). Config-grounded, LLM-phrased — not a hardcoded canned reply."""
-        names = [(p.get("full_name") or p.get("program") or "").strip()
-                 for p in self._cfg.products.get("quantum", [])]
-        listing = "\n".join(f"- {n}" for n in names if n)
-        fallback = (
-            'As an Islamic bank, we offer Shariah-compliant SME financing (we say "financing" rather '
-            'than a conventional "loan"). Our programmes include:\n' + listing +
-            "\n\nWould you like details on any of these, or shall I help you find the best fit?"
-        )
+        loan' framing). Config-grounded, LLM-phrased — not a hardcoded canned reply.
+
+        Honest about depth: the list is SPLIT into the programmes we can detail right now (in the live
+        index) and the ones the SME team covers — so the catalog never invites a question we then have
+        to deflect (the "you listed BECF, but can't tell me about it" problem)."""
+        quantum = self._cfg.products.get("quantum", [])
+        indexed = {self._norm_program(c) for c, _ in (getattr(self._retriever, "programs", lambda: [])() or [])}
+
+        def _name(p: dict) -> str:
+            return (p.get("full_name") or p.get("program") or "").strip()
+
+        detailed = [_name(p) for p in quantum if _name(p) and self._norm_program(p.get("program") or "") in indexed]
+        others = [_name(p) for p in quantum if _name(p) and self._norm_program(p.get("program") or "") not in indexed]
+
+        if indexed and detailed and others:
+            programmes = (
+                "Programmes I can give full details on now:\n"
+                + "\n".join(f"- {n}" for n in detailed)
+                + "\n\nAlso available — our SME financing team can walk you through these:\n"
+                + "\n".join(f"- {n}" for n in others)
+            )
+            fallback = (
+                'As an Islamic bank, we offer Shariah-compliant SME financing (we say "financing" '
+                'rather than a conventional "loan").\n\n' + programmes +
+                "\n\nWould you like details on any of the first group, or shall I help you find the best fit?"
+            )
+        else:
+            # No live index (offline/stub) or everything is on one side → a single flat list.
+            programmes = "\n".join(f"- {n}" for n in (detailed + others))
+            fallback = (
+                'As an Islamic bank, we offer Shariah-compliant SME financing (we say "financing" '
+                'rather than a conventional "loan"). Our programmes include:\n' + programmes +
+                "\n\nWould you like details on any of these, or shall I help you find the best fit?"
+            )
         reply = self._llm.compose("catalog", message=message, history=history or [], fallback=fallback,
-                                  programmes=listing)
+                                  programmes=programmes)
         return _turn(reply, slots, stage="program_done", ui={"type": "none", "payload": {}},
                      suggestions=[
                          {"label": "Help me choose", "value": "Help me find the right SME financing"},
