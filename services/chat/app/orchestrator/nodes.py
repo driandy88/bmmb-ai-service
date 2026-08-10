@@ -12,10 +12,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from app.agents.program_advisor.program_match import mentions_program
-from app.orchestrator import routing
-from app.utils import terminology
-from app.utils.suggestions import explore_suggestions
+from ..agents.program_advisor.program_match import mentions_program
+from ..orchestrator import routing
+from ..utils import terminology
+from ..utils.suggestions import explore_suggestions
 
 # Intent buckets we're willing to override to a programme query: off-topic, social, and ambiguous.
 # A genuine in-scope intent (apply INS-05, eligibility INS-04, track INS-07…) that happens to name a

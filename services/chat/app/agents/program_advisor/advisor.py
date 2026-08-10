@@ -16,12 +16,12 @@ import difflib
 import re
 from typing import Any, Optional
 
-from app.agents.rag.retriever import Corpus, Retriever
-from app.agents.rag.synthesize import grounded_answer
-from app.config.loader import AppConfig, load_config
-from app.config.settings import get_settings
-from app.integrations.llm import LLMClient, normalize_understanding
-from app.utils.suggestions import explore_suggestions
+from ...agents.rag.retriever import Corpus, Retriever
+from ...agents.rag.synthesize import grounded_answer
+from ...config.loader import AppConfig, load_config
+from ...config.settings import get_settings
+from ...integrations.llm import LLMClient, normalize_understanding
+from ...utils.suggestions import explore_suggestions
 
 _MONEY_RE = re.compile(r"(?:rm\s*)?(\d[\d,]*(?:\.\d+)?)\s*(juta|million|mil|m|k|ribu|thousand)?\b", re.I)
 _UNIT_MULT = {"juta": 1e6, "million": 1e6, "mil": 1e6, "m": 1e6, "k": 1e3, "ribu": 1e3, "thousand": 1e3}

@@ -19,7 +19,7 @@ from typing import Any, Optional
 
 import yaml
 
-from app.config.settings import Settings, get_settings
+from ..config.settings import Settings, get_settings
 
 _CONFIG_DIR = Path(__file__).resolve().parent
 

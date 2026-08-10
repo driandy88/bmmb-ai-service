@@ -13,10 +13,10 @@ from __future__ import annotations
 
 from typing import Optional
 
-from app.agents.rag.retriever import Corpus, Retriever
-from app.agents.rag.synthesize import grounded_answer
-from app.config.loader import AppConfig, load_config
-from app.integrations.llm import LLMClient
+from ...agents.rag.retriever import Corpus, Retriever
+from ...agents.rag.synthesize import grounded_answer
+from ...config.loader import AppConfig, load_config
+from ...integrations.llm import LLMClient
 
 _FALLBACK = (
     "I can share general guidance on BMMB's SME financing and how our Shariah-compliant "

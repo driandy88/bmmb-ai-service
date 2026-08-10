@@ -18,9 +18,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import get_orchestrator, router
-from app.config.settings import get_settings
-from app.utils.logging import get_logger
+from .api.routes import get_orchestrator, router
+from .config.settings import get_settings
+from .utils.logging import get_logger
 
 log = get_logger("main")
 _settings = get_settings()

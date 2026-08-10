@@ -7,7 +7,7 @@ the same model the retriever queries with, upsert into CORPUS_NAMESPACE[corpus])
 """
 from __future__ import annotations
 
-from app.agents.rag.retriever import Corpus
+from ...agents.rag.retriever import Corpus
 
 
 def ingest(corpus: Corpus, documents: list[dict]) -> int:

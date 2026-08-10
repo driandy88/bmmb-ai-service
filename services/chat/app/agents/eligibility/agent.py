@@ -18,9 +18,9 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from app.agents.eligibility import document_map, rules
-from app.config.loader import AppConfig, load_config
-from app.integrations.llm import LLMClient
+from ...agents.eligibility import document_map, rules
+from ...config.loader import AppConfig, load_config
+from ...integrations.llm import LLMClient
 
 _SLOTFILL_STAGE = "eligibility_slotfill"
 _DONE_STAGE = "eligibility_done"

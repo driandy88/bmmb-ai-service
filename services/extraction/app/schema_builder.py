@@ -6,7 +6,7 @@ matches that project's exactly: per-attribute frequency (Unique/Multiple)
 drives scalar-vs-array, and attributes sharing a non-null row_group are
 extracted together as one correlated array of row-objects.
 """
-from app.config import get_template
+from .config import get_template
 
 _TYPE_MAP = {
     "Numeric": "NUMBER",

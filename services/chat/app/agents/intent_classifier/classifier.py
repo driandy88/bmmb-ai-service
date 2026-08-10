@@ -9,8 +9,8 @@ than dispatching on a hallucinated category.
 """
 from __future__ import annotations
 
-from app.config.loader import load_config
-from app.integrations.llm import LLMClient
+from ...config.loader import load_config
+from ...integrations.llm import LLMClient
 
 
 class IntentClassifier:

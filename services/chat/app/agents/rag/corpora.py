@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from typing import Optional
 
-from app.agents.rag.retriever import Corpus, Retriever, StubRetriever
-from app.config.settings import Settings, get_settings
-from app.utils.logging import get_logger
+from ...agents.rag.retriever import Corpus, Retriever, StubRetriever
+from ...config.settings import Settings, get_settings
+from ...utils.logging import get_logger
 
 log = get_logger("rag")
 
@@ -30,10 +30,10 @@ def get_retriever(settings: Optional[Settings] = None) -> Retriever:
     if backend == "stub":
         return StubRetriever()
     if backend == "vertex":
-        from app.integrations.vector_search import VertexVectorSearchRetriever
+        from ...integrations.vector_search import VertexVectorSearchRetriever
         inner: Retriever = VertexVectorSearchRetriever(settings, CORPUS_NAMESPACE)
     elif backend == "pgvector":
-        from app.integrations.vector_search import PgVectorRetriever
+        from ...integrations.vector_search import PgVectorRetriever
         inner = PgVectorRetriever(settings, CORPUS_NAMESPACE)
     else:
         log.warning("Unknown RAG_BACKEND=%r; using StubRetriever.", backend)
@@ -42,6 +42,6 @@ def get_retriever(settings: Optional[Settings] = None) -> Retriever:
     # Wrap the real backend with query rewrite + program scoping (§6 steps 1–3, §6a).
     # This is the seam that delivers §6a with zero agent/orchestrator edits: agents
     # still call retrieve(message, corpus, top_k); the wrapper rewrites + scopes.
-    from app.agents.rag.rewrite import RewriteScopingRetriever
-    from app.integrations.llm import get_llm_client
+    from ...agents.rag.rewrite import RewriteScopingRetriever
+    from ...integrations.llm import get_llm_client
     return RewriteScopingRetriever(inner, get_llm_client(settings))

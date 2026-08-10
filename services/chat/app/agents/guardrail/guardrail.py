@@ -12,8 +12,8 @@ the detection reasoning is never surfaced to the user (§12).
 """
 from __future__ import annotations
 
-from app.agents.guardrail.denylist import scan
-from app.integrations.llm import LLMClient
+from ...agents.guardrail.denylist import scan
+from ...integrations.llm import LLMClient
 
 
 class Guardrail:
