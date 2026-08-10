@@ -24,14 +24,15 @@ from pathlib import Path
 import certifi
 
 _EXTRACTION_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_EXTRACTION_DIR))
+_REPO_ROOT = _EXTRACTION_DIR.parent.parent  # services/extraction -> services -> repo root
+sys.path.insert(0, str(_REPO_ROOT))
 
 from dotenv import load_dotenv  # noqa: E402
 load_dotenv(_EXTRACTION_DIR / ".env")
 os.environ.setdefault("SSL_CERT_FILE", certifi.where())
 
-from app import config  # noqa: E402
-from app.schema_builder import render_extraction_prompt  # noqa: E402
+from services.extraction import config  # noqa: E402
+from services.extraction.schema_builder import render_extraction_prompt  # noqa: E402
 
 TEMPLATE_NAME = "Financial Statements (Sdn Bhd)"
 GROUP = "Financials By Year"

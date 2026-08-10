@@ -1,12 +1,12 @@
 """
 Builds the Gemini `response_schema` dict and the extraction prompt for a
-given template, driven by app.config (Cloud SQL). Ported from
+given template, driven by services.extraction.config (Cloud SQL). Ported from
 universal_data_extractor's utils.py so this service's schema/prompt shape
 matches that project's exactly: per-attribute frequency (Unique/Multiple)
 drives scalar-vs-array, and attributes sharing a non-null row_group are
 extracted together as one correlated array of row-objects.
 """
-from app.config import get_template
+from .config import get_template
 
 _TYPE_MAP = {
     "Numeric": "NUMBER",
