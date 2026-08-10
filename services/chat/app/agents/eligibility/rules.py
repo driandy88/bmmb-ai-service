@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from app.config.loader import AppConfig, load_config
+from ...config.loader import AppConfig, load_config
 
 # The six Tier-1 slots (Sheet 5 upper table), in ask order.
 SLOT_KEYS = [

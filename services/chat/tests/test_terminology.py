@@ -1,5 +1,5 @@
 """Terminology lint + PII redaction (brief §10 Part A, §2, §12)."""
-from app.utils import pii, terminology
+from services.chat.app.utils import pii, terminology
 
 
 def test_loan_rewritten_to_financing():

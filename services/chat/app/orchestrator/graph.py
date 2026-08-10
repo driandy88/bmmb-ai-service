@@ -20,29 +20,29 @@ from typing import Optional
 
 from langgraph.graph import END, START, StateGraph
 
-from app.agents.eligibility.agent import EligibilityAgent
-from app.agents.guardrail.guardrail import Guardrail
-from app.agents.guidelines.guidelines import GuidelinesAgent
-from app.agents.intent_classifier.classifier import IntentClassifier
-from app.agents.program_advisor.advisor import ProgramAdvisor
-from app.agents.rag.corpora import get_retriever
-from app.agents.rag.retriever import Retriever
-from app.agents.sales_handoff.handoff import SalesHandoff
-from app.agents.application.initiate import Initiate
-from app.agents.application.lookup import ApplicationLookup
-from app.api.schemas import (
+from ..agents.eligibility.agent import EligibilityAgent
+from ..agents.guardrail.guardrail import Guardrail
+from ..agents.guidelines.guidelines import GuidelinesAgent
+from ..agents.intent_classifier.classifier import IntentClassifier
+from ..agents.program_advisor.advisor import ProgramAdvisor
+from ..agents.rag.corpora import get_retriever
+from ..agents.rag.retriever import Retriever
+from ..agents.sales_handoff.handoff import SalesHandoff
+from ..agents.application.initiate import Initiate
+from ..agents.application.lookup import ApplicationLookup
+from ..api.schemas import (
     AnswerSentence, AuditBlock, ChatRequest, ChatResponse, Citation, GuardrailVerdict, HandoffBlock,
     HandoffContact, IntentBlock, ResponseState, Suggestion, UiAction,
 )
-from app.config.loader import AppConfig, load_config
-from app.config.settings import Settings, get_settings
-from app.integrations.audit import AuditWriter, get_audit_writer
-from app.integrations.extraction import ExtractionClient, get_extraction_client
-from app.integrations.llm import LLMClient, get_llm_client
-from app.integrations.session_store import get_checkpointer
-from app.orchestrator import nodes
-from app.orchestrator.state import SessionState, new_state
-from app.utils import pii
+from ..config.loader import AppConfig, load_config
+from ..config.settings import Settings, get_settings
+from ..integrations.audit import AuditWriter, get_audit_writer
+from ..integrations.extraction import ExtractionClient, get_extraction_client
+from ..integrations.llm import LLMClient, get_llm_client
+from ..integrations.session_store import get_checkpointer
+from . import nodes
+from .state import SessionState, new_state
+from ..utils import pii
 
 _UI_TYPES = {"none", "render_eligibility_form", "show_eligibility_result",
              "open_application_link", "show_contact_card", "render_contact_form",

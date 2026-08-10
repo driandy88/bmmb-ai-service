@@ -23,7 +23,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from app.config.settings import Settings, get_settings
+from ..config.settings import Settings, get_settings
 
 log = logging.getLogger(__name__)
 

@@ -12,8 +12,8 @@ from typing import Optional
 
 from langgraph.checkpoint.memory import MemorySaver
 
-from app.config.settings import Settings, get_settings
-from app.utils.logging import get_logger
+from ..config.settings import Settings, get_settings
+from ..utils.logging import get_logger
 
 log = get_logger("session_store")
 

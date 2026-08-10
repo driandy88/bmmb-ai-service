@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 from functools import lru_cache
 
-from app.config.loader import load_config
+from ...config.loader import load_config
 
 
 @lru_cache(maxsize=1)
