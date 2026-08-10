@@ -176,6 +176,21 @@ def test_named_unindexed_survives_a_misresolve_instead_of_funnelling():
     assert any("Sales" in s["label"] for s in res["suggestions"])
 
 
+def test_compare_of_lookalikes_compares_not_disambiguates():
+    # "difference between MHP-i and MIHP-i" — the two are near look-alikes, so the deterministic fuzzy
+    # backstop flags them as ambiguous; but the customer named BOTH and wants a comparison. A confident
+    # compare (turn_type=compare, 2 known programmes) must win over the "did you mean?" prompt.
+    class _Compare(StubLLMClient):
+        def understand(self, message, history=None, *, programs=None, stage=""):
+            return normalize_understanding({"turn_type": "compare",
+                                            "compare_programs": ["MHP-I", "MIHP-I"],
+                                            "retrieval_query": "difference between MHP-i and MIHP-i"})
+    adv = _adv(_Compare(), chunks=[_chunk("MHP-i vs MIHP-i › tenure, rate, size.")])
+    res = adv.handle("what is the difference between MHP-i and MIHP-i", [], {})
+    assert "did you mean" not in res["reply"].lower()      # NOT the disambiguation prompt
+    assert res.get("grounded") is True                     # a real, grounded comparison
+
+
 def test_compare_wins_over_the_offer_followup_in_the_offer_stage():
     # Stress-test bug: "compare GGSM and MHP-i" arriving in the post-answer offer stage was read as a
     # follow-up about the last programme and reprompted ("would you like to apply for MHP-I?") instead

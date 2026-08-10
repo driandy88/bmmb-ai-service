@@ -103,8 +103,14 @@ def build_graph(deps: Deps):
     b.add_node("terminology", lambda s: nodes.terminology_node(s, deps))
     b.add_node("audit", lambda s: nodes.audit_node(s, deps))
 
+    # The guardrail (screen) and the classifier (classify) are INDEPENDENT reads of the same message —
+    # each is its own LLM call. Run them in PARALLEL (both fan out from START) and join at `decide`,
+    # which needs both. This shaves the whole guardrail call (~1.5s) off every turn's latency; they
+    # write disjoint state keys ({guardrail} vs {intent, understanding}) so there's no merge conflict,
+    # and `decide` still applies adversarial precedence first, so parallelising can't weaken it.
     b.add_edge(START, "screen")
-    b.add_edge("screen", "classify")
+    b.add_edge(START, "classify")
+    b.add_edge("screen", "decide")
     b.add_edge("classify", "decide")
     b.add_conditional_edges("decide", nodes.route_selector, {
         "refuse": "refuse", "clarify": "clarify", "handoff": "human_handoff",
