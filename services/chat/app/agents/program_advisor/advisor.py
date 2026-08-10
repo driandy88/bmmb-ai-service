@@ -411,11 +411,12 @@ class ProgramAdvisor:
 
     # -- Phase 1: one-understanding path (settings.use_understand) --------------
     def _grounded_compare(self, message: str, slots: dict, history: Optional[list],
-                          retrieval_query: str) -> Optional[dict]:
-        """A grounded comparison spanning programmes — no single program_code, so retrieval isn't
-        scoped to one kit. Offers Sales (there's no single 'Apply for X' to show)."""
+                          retrieval_query: str, codes: Optional[list] = None) -> Optional[dict]:
+        """A grounded comparison across the named programmes. Retrieval is scoped to EACH of `codes`
+        (fetched per kit and combined) so a confusable neighbour — MIHP-i vs MHP-i — can't leak in
+        from an unscoped search and get compared by mistake. Offers Sales (no single 'Apply for X')."""
         ans = grounded_answer(self._llm, self._retriever, message, Corpus.PROGRAM,
-                              top_k=6, program_code=None, history=history, retrieval_query=retrieval_query)
+                              top_k=6, program_codes=codes, history=history, retrieval_query=retrieval_query)
         if not ans:
             return None
         return _turn(ans["reply"], slots, stage="program_offer", ui={"type": "none", "payload": {}},
@@ -468,9 +469,11 @@ class ProgramAdvisor:
 
         # 2d. Compare two programmes we can detail — a clear, typed intent that must win even in the
         #     offer stage. (Otherwise the offer-followup heuristic below reads "compare GGSM and MHP-i"
-        #     as a question about the last programme and reprompts instead of comparing.)
-        if sig["turn_type"] == "compare" and len([c for c in sig["compare_programs"] if c in valid]) >= 2:
-            cmp = self._grounded_compare(message, slots, history, retrieval_query)
+        #     as a question about the last programme and reprompts instead of comparing.) Retrieval is
+        #     scoped to exactly these codes so a confusable neighbour can't be compared by mistake.
+        cmp_codes = [c for c in sig["compare_programs"] if c in valid]
+        if sig["turn_type"] == "compare" and len(cmp_codes) >= 2:
+            cmp = self._grounded_compare(message, slots, history, retrieval_query, cmp_codes)
             if cmp:
                 return cmp
 

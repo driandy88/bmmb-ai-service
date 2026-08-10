@@ -55,6 +55,7 @@ def _plain_reply(sentences: list) -> str:
 def grounded_answer(llm, retriever: Retriever, message: str, corpus: CorpusScope, *,
                     top_k: int = 4, channel: str = "customer",
                     program_code: Optional[str] = None,
+                    program_codes: Optional[list] = None,
                     history: Optional[list] = None,
                     retrieval_query: Optional[str] = None) -> Optional[dict]:
     """-> {reply, sentences:[{text,cites}], citations:[…], grounded:True} or None.
@@ -63,9 +64,18 @@ def grounded_answer(llm, retriever: Retriever, message: str, corpus: CorpusScope
     follow-up ("what about GGSM?", "and the profit rate?") against `history` and answers only that.
     `retrieval_query` (optional) is a standalone rewrite used ONLY to FETCH chunks — better recall on
     a terse follow-up — and is never shown to the synthesiser, so a broad rewrite can't wash out the
-    anaphoric intent and turn a focused question into a whole-programme dump."""
-    chunks = retriever.retrieve(retrieval_query or message, corpus, top_k=top_k,
-                                program_code=program_code, channel=channel)
+    anaphoric intent and turn a focused question into a whole-programme dump.
+    `program_codes` (optional) scopes a MULTI-programme answer (a compare) to exactly those programmes
+    — we fetch chunks per code and combine, so an unscoped search can't drag in a confusable
+    neighbour (MIHP-i leaking into a GGSM-vs-MHP-i compare) and answer about the wrong product."""
+    query = retrieval_query or message
+    if program_codes:
+        per = max(2, top_k // len(program_codes))
+        chunks = []
+        for code in program_codes:
+            chunks += retriever.retrieve(query, corpus, top_k=per, program_code=code, channel=channel)
+    else:
+        chunks = retriever.retrieve(query, corpus, top_k=top_k, program_code=program_code, channel=channel)
     if not chunks:
         return None
     out = llm.synthesize_answer(message, chunks, history or []) or {}
