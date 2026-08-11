@@ -15,9 +15,9 @@ def _sp(mode="off"):
     return SourcePreview(types.SimpleNamespace(source_preview_mode=mode, source_url_ttl_seconds=900))
 
 
-def test_allowlist_resolves_the_five_kits():
+def test_allowlist_resolves_the_deck_sections():
     sp = _sp()
-    assert sp.resolve("ggsm3").source_uri.endswith("SalesKit_GGSM3.pdf")
+    assert sp.resolve("ggsm").source_uri.endswith("TALK_PP_COMMERCIAL_FINANCING_SOLUTION.pdf")
     assert sp.resolve("mihp_i").access_tier == "customer"
     assert sp.resolve("not-a-doc") is None
 
@@ -28,28 +28,28 @@ def test_internal_doc_blocked_on_customer_channel():
     assert internal.access_tier == "internal"
     assert sp.allowed(internal, "customer") is False          # never to a customer
     assert sp.allowed(internal, "internal") is True
-    assert sp.allowed(sp.resolve("ggsm3"), "customer") is True  # a kit is fine
+    assert sp.allowed(sp.resolve("ggsm"), "customer") is True  # a kit is fine
 
 
 def test_off_mode_yields_no_url():
-    assert _sp("off").url_for(_sp().resolve("ggsm3"), "customer") is None
+    assert _sp("off").url_for(_sp().resolve("ggsm"), "customer") is None
 
 
 def test_proxy_mode_returns_stream_path():
     sp = _sp("proxy")
-    assert sp.url_for(sp.resolve("ggsm3"), "customer") == "/chat/source/raw?doc_id=ggsm3&channel=customer"
+    assert sp.url_for(sp.resolve("ggsm"), "customer") == "/chat/source/raw?doc_id=ggsm&channel=customer"
 
 
 def test_signed_mode_signs_then_degrades_to_proxy(monkeypatch):
     sp = _sp("signed")
     monkeypatch.setattr(SourcePreview, "_signed_url", lambda self, uri: f"https://signed/{uri}")
-    assert sp.url_for(sp.resolve("ggsm3"), "customer").startswith("https://signed/")
+    assert sp.url_for(sp.resolve("ggsm"), "customer").startswith("https://signed/")
 
     def _boom(self, uri):
         raise RuntimeError("no signBlob permission")
 
     monkeypatch.setattr(SourcePreview, "_signed_url", _boom)  # signing not permitted → proxy fallback
-    assert sp.url_for(sp.resolve("ggsm3"), "customer") == "/chat/source/raw?doc_id=ggsm3&channel=customer"
+    assert sp.url_for(sp.resolve("ggsm"), "customer") == "/chat/source/raw?doc_id=ggsm&channel=customer"
 
 
 @pytest.fixture(scope="module")
@@ -70,4 +70,4 @@ def test_endpoint_internal_doc_forbidden_on_customer(client):
 
 def test_endpoint_off_mode_is_503(client):
     # Test env has no GCP project → SOURCE_PREVIEW_MODE defaults to "off" → preview unavailable.
-    assert client.get("/chat/source", params={"doc_id": "ggsm3"}).status_code == 503
+    assert client.get("/chat/source", params={"doc_id": "ggsm"}).status_code == 503
