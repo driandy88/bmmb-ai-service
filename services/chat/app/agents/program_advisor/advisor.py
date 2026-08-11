@@ -430,17 +430,18 @@ class ProgramAdvisor:
         fallback. This is the honest dead-end for 'documents for GGSM' now that the deck carries a
         single shared documents page rather than one per programme."""
         title = self._program_title(code)
+        short = (re.search(r"\(([^)]+)\)\s*$", title) or [None, code])[1]  # "…(MHP-i)" -> MHP-i, else code
         attr = {"documents": "required documents", "eligibility": "eligibility details",
                 "financing_size": "financing amounts", "profit_rate": "profit rate",
                 "tenure": "financing tenure"}.get(attribute, attribute)
-        fallback = (f"I don't have the {attr} for {title} on hand here — our SME financing team keeps "
-                    f"the most up-to-date list. Shall I connect you?")
+        fallback = (f"I don't have {short}'s {attr} on hand, but our SME team can tell you exactly what's "
+                    f"needed — want me to connect you?")
         reply = self._llm.compose("attribute_gap", message=message, history=history or [],
-                                  fallback=fallback, programme=title, attribute=attr)
+                                  fallback=fallback, programme=short, attribute=attr)
         return _turn(reply, slots, stage="program_done", ui={"type": "none", "payload": {}},
                      suggestions=[
                          {"label": "Connect to Sales team", "value": "I'd like to talk to your SME financing team"},
-                         {"label": f"More about {code}", "value": f"Tell me more about {title}"},
+                         {"label": f"More about {short}", "value": f"Tell me more about {title}"},
                      ])
 
     def _soft_help(self, slots: dict) -> dict:
