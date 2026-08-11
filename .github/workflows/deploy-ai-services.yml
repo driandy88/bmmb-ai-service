@@ -5,9 +5,9 @@ name: Refactor CI — per-service tests, unified deploy
 # merge. This does NOT touch the six main-branch deploy-*.yml workflows.
 on:
   push:
-    branches: [refactor/agents-services]
+    branches: [dev]
   pull_request:
-    branches: [refactor/agents-services]
+    branches: [dev]
   workflow_dispatch:
 
 jobs:
