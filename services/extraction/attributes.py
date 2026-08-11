@@ -13,7 +13,7 @@ from .config import (
 )
 from .schemas import AttributeCreate, AttributeOut, AttributeUpdate
 
-router = APIRouter(prefix="/attributes", tags=["Attributes"])
+router = APIRouter(prefix="/attributes", tags=["attributes"])
 
 
 @router.get("/", response_model=list[AttributeOut])

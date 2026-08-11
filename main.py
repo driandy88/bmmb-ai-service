@@ -134,11 +134,6 @@ app.openapi = _custom_openapi
 _MOUNTED = ("extraction", "chat", "validation", "aggregation", "bbox_generator", "mcp")
 
 
-@app.get("/", tags=["health"])
-def root():
-    return {"message": "BMMB Unified AI Service is running.", "docs": "/docs", "services": _MOUNTED}
-
-
 @app.get("/health", tags=["health"])
 def health():
     """Root-level aggregate liveness check -- if this process is up and

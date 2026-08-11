@@ -14,7 +14,7 @@ from .config import (
 from .schema_builder import render_extraction_prompt
 from .schemas import TemplateCreate, TemplateOut, TemplateUpdate
 
-router = APIRouter(prefix="/templates", tags=["Templates"])
+router = APIRouter(prefix="/templates", tags=["templates"])
 
 
 @router.get("/", response_model=list[TemplateOut])

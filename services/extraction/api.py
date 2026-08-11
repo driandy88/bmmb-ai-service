@@ -34,11 +34,6 @@ router.include_router(templates_router)
 router.include_router(attributes_router)
 
 
-@router.get("/")
-def root():
-    return {"message": "Document Extraction Service is running.", "docs": "/docs"}
-
-
 # Standalone app, for `uvicorn services.extraction.api:app`. Hosts embedding
 # this elsewhere should include `router` above instead.
 app = FastAPI(
