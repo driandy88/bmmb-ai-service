@@ -5,7 +5,7 @@ from .gemini_client import GeminiCallError, GeminiConfigError, GeminiParseError,
 from .schema_builder import build_gemini_schema, generate_extraction_prompt, reshape_locations
 from .schemas import ApiResponse
 
-router = APIRouter(tags=["Extraction"])
+router = APIRouter(tags=["extraction"])
 
 ALLOWED_MIME_TYPES = {
     "application/pdf",
