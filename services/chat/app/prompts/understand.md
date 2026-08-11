@@ -54,6 +54,15 @@ invent its facts.
    question about X. We're an Islamic bank, so "loan" means our Shariah-compliant financing — still
    `catalog`, don't refuse it. (A bare "what programmes do you offer?" and true guidance requests — "I
    need financing for machinery" — are `recommend`, i.e. the guided funnel, NOT catalog.)
+5d. **Conventional-banking TERM, no specific programme.** A standalone conventional-finance word or a
+   question framed in those terms with no programme attached — "loan", "interest", "interest rate?",
+   "do you charge interest?", "is there riba?", "do you give out loans?" — is a terminology moment, not
+   out-of-scope. Route it to `turn_type="catalog"` and `intent.primary="INS-02"`: the advisor gently
+   reframes ("financing", "profit rate", no riba) and shows what we offer. IN scope — do NOT mark it
+   `out_of_scope`. (But "fixed-deposit interest rate", "personal loan", "home loan" stay
+   `out_of_scope` — those are other products, not a wording issue. And when the conventional word rides
+   ALONGSIDE a real programme question — "interest rate for GGSM?" — keep the normal `program_info`
+   turn; the advisor reframes as it answers.)
 6. **Read Malay and English.** Customers mix Bahasa Malaysia and English ("berapa tempoh", "boleh saya
    mohon", "tak nak dulu", "kadar untung"). Understand both; always write `retrieval_query` /
    `clarify.question` in English.
@@ -96,6 +105,10 @@ Import · 4=Machinery/Vehicles/Equipment · 5=Project/Contract.
 - "can you compare two programmes?" → `{"turn_type":"capability","intent":{"primary":"INS-02","confidence":0.9},"confidence":0.9}`
 - "what other financing products do you have besides GGSM and MHP-i?" → `{"turn_type":"catalog","intent":{"primary":"INS-02","confidence":0.9},"confidence":0.9}`
 - "do you have a loan product?" → `{"turn_type":"catalog","intent":{"primary":"INS-02","confidence":0.9},"confidence":0.88}`
+- "do you charge interest?" → (terminology moment, IN scope — reframe + show the range) `{"turn_type":"catalog","intent":{"primary":"INS-02","confidence":0.85},"confidence":0.85}`
+- "loan" / "interest" (bare) → `{"turn_type":"catalog","intent":{"primary":"INS-02","confidence":0.8},"confidence":0.8}`
+- "what is the interest rate for GGSM?" → (programme named — normal answer; the advisor reframes as it answers) `{"turn_type":"program_info","program_code":"GGSM3","program_status":"indexed","attribute":"profit_rate","retrieval_query":"profit rate for GGSM3","intent":{"primary":"INS-02","confidence":0.9},"confidence":0.9}`
+- "what's the fixed deposit interest rate?" → (a different PRODUCT, not a wording issue) `{"turn_type":"out_of_scope","out_of_scope_topic":"fixed deposit rates","confidence":0.9}`
 
 ## Programmes in the live index (the only valid program_code values you can DETAIL)
 {programs}
