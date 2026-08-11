@@ -35,6 +35,15 @@ The proxy authenticates itself once at startup (via its own ADC/gcloud
 login), so the app process needs no credentials of its own in this mode --
 just DB_USER/DB_PASS for Postgres auth. INSTANCE_CONNECTION_NAME is unused
 when DB_HOST is set.
+
+DB_HOST is also how `chat`'s own PgVectorRetriever connects (via psycopg,
+which treats a `/`-prefixed host as a Unix socket directory -- see
+services/chat/app/integrations/vector_search.py). Both services read the
+same env var in the unified deploy, so when DB_HOST is a socket directory
+(starts with "/", e.g. `/cloudsql/<instance>` from `--add-cloudsql-instances`)
+this connects pg8000 via its `unix_sock` parameter instead of TCP host:port
+-- pg8000 doesn't share libpq's "path-as-host" convention, so passing the
+directory straight through as `host` fails with a DNS lookup error.
 """
 import os
 import time
@@ -82,16 +91,31 @@ def _get_engine() -> sqlalchemy.engine.Engine:
     # reads templates (a handful of small queries per cache refresh), not
     # request-volume traffic.
     if DB_HOST:
-        # Plain TCP -- e.g. a local `cloud-sql-proxy` listener. No Cloud SQL
-        # Python Connector / ADC involved; see module docstring.
-        url = sqlalchemy.engine.URL.create(
-            "postgresql+pg8000",
-            username=DB_USER,
-            password=DB_PASS,
-            host=DB_HOST,
-            port=DB_PORT,
-            database=DB_NAME,
-        )
+        # No Cloud SQL Python Connector / ADC involved either way; see module
+        # docstring. Two shapes:
+        if DB_HOST.startswith("/"):
+            # Unix socket directory (e.g. `/cloudsql/<instance>`, mounted by
+            # Cloud Run's --add-cloudsql-instances) -- pg8000 needs the actual
+            # socket file via `unix_sock`, not `host`/`port` (unlike psycopg's
+            # libpq, it doesn't treat a path-as-host as "look for the socket
+            # here").
+            url = sqlalchemy.engine.URL.create(
+                "postgresql+pg8000",
+                username=DB_USER,
+                password=DB_PASS,
+                database=DB_NAME,
+                query={"unix_sock": f"{DB_HOST}/.s.PGSQL.{DB_PORT}"},
+            )
+        else:
+            # Plain TCP -- e.g. a local `cloud-sql-proxy` listener.
+            url = sqlalchemy.engine.URL.create(
+                "postgresql+pg8000",
+                username=DB_USER,
+                password=DB_PASS,
+                host=DB_HOST,
+                port=DB_PORT,
+                database=DB_NAME,
+            )
         _engine = sqlalchemy.create_engine(
             url,
             pool_size=5,
