@@ -26,6 +26,7 @@ from typing import Any, Optional
 from app.config.loader import load_config
 from app.config.settings import Settings, get_settings
 from app.utils.logging import get_logger
+from app.utils.timeouts import call_with_timeout
 from app.utils.prompts import load_prompt, render, system_prompt
 
 log = get_logger("llm")
@@ -489,6 +490,7 @@ class VertexGeminiClient(LLMClient):
             location=settings.vertex_location,
         )
         self._model = settings.model_id
+        self._timeout = settings.vertex_timeout_seconds
         self._fallback = StubLLMClient()
 
     # -- helpers --
@@ -504,14 +506,20 @@ class VertexGeminiClient(LLMClient):
             response_schema=schema,
             temperature=0.0,
         )
-        resp = self._client.models.generate_content(model=self._model, contents=filled, config=cfg)
-        return json.loads(resp.text)
+
+        def _do() -> dict:
+            resp = self._client.models.generate_content(model=self._model, contents=filled, config=cfg)
+            return json.loads(resp.text)
+        return call_with_timeout(_do, timeout=self._timeout, label=f"vertex.json:{prompt_name}")
 
     def _generate_text(self, prompt_name: str, filled: str) -> str:
         from google.genai import types
         cfg = types.GenerateContentConfig(system_instruction=system_prompt(prompt_name), temperature=0.3)
-        resp = self._client.models.generate_content(model=self._model, contents=filled, config=cfg)
-        return (resp.text or "").strip()
+
+        def _do() -> str:
+            resp = self._client.models.generate_content(model=self._model, contents=filled, config=cfg)
+            return (resp.text or "").strip()
+        return call_with_timeout(_do, timeout=self._timeout, label=f"vertex.text:{prompt_name}")
 
     # -- interface --
     def classify_intent(self, message: str, history: list[dict]) -> dict:

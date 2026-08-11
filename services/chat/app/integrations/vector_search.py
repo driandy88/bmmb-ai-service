@@ -102,9 +102,13 @@ class PgVectorRetriever(Retriever):
     # ── query embedding (RETRIEVAL_QUERY, matches ingest) ────────────────────
     def _embed(self, query: str) -> str:
         from google.genai import types
+        from app.utils.timeouts import call_with_timeout
         client = _genai_client(self._s.gcp_project_id, self._s.vertex_location)
         cfg = types.EmbedContentConfig(task_type=_QUERY_TASK, output_dimensionality=self._s.embedding_dimensions)
-        resp = client.models.embed_content(model=self._s.embedding_model_id, contents=[query], config=cfg)
+        resp = call_with_timeout(
+            lambda: client.models.embed_content(model=self._s.embedding_model_id, contents=[query], config=cfg),
+            timeout=self._s.vertex_timeout_seconds, label="vertex.embed",
+        )
         v = list(resp.embeddings[0].values)
         n = math.sqrt(sum(x * x for x in v)) or 1.0
         return _vec_literal([x / n for x in v])

@@ -34,6 +34,10 @@ class Settings:
     gcp_project_id: str | None = os.getenv("GCP_PROJECT_ID") or None
     vertex_location: str = os.getenv("VERTEX_LOCATION", "asia-southeast1")
     model_id: str = os.getenv("MODEL_ID", "gemini-2.5-flash")
+    # Hard wall-clock cap (seconds) on any single Gemini / embedding call. google-genai has no request
+    # timeout, so without this a hung response stalls the whole turn indefinitely. On timeout we retry
+    # once, then fall back to the deterministic stub — nothing ever hangs the "typing…" forever.
+    vertex_timeout_seconds: float = float(os.getenv("VERTEX_TIMEOUT_SECONDS", "12"))
 
     # ── Backend selection (stub vs real) ─────────────────────────────────────
     # Default to the real backend only when a project is configured; otherwise
