@@ -176,6 +176,20 @@ def test_named_unindexed_survives_a_misresolve_instead_of_funnelling():
     assert any("Sales" in s["label"] for s in res["suggestions"])
 
 
+def test_greeting_prefix_still_answers_the_programme_question():
+    # "hi, what is tenure for GGSM" — a greeting/filler prefix can make the model drop program_code.
+    # The deterministic backstop resolves the INDEXED programme the message names, so it still answers
+    # instead of falling to the generic help reply. (The plain question already worked.)
+    class _DroppedCode(StubLLMClient):
+        def understand(self, message, history=None, *, programs=None, stage=""):
+            return normalize_understanding({"turn_type": "program_info", "program_code": None,
+                                            "attribute": "tenure", "retrieval_query": "financing tenure for GGSM3"})
+    adv = _adv(_DroppedCode(), chunks=[_chunk("GGSM3 › tenure › up to 5 years.")])
+    res = adv.handle("hi, what is tenure for GGSM", [], {})
+    assert res.get("grounded") is True                     # answered, not soft-helped
+    assert "did you mean" not in res["reply"].lower()      # not a disambiguation either
+
+
 def test_compare_of_lookalikes_compares_not_disambiguates():
     # "difference between MHP-i and MIHP-i" — the two are near look-alikes, so the deterministic fuzzy
     # backstop flags them as ambiguous; but the customer named BOTH and wants a comparison. A confident

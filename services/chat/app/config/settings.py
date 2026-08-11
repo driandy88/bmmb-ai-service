@@ -34,6 +34,16 @@ class Settings:
     gcp_project_id: str | None = os.getenv("GCP_PROJECT_ID") or None
     vertex_location: str = os.getenv("VERTEX_LOCATION", "asia-southeast1")
     model_id: str = os.getenv("MODEL_ID", "gemini-2.5-flash")
+    # Hard wall-clock cap (seconds) on any single Gemini / embedding call. google-genai has no request
+    # timeout, so without this a hung response stalls the whole turn indefinitely. On timeout we fall
+    # back to the deterministic stub — nothing ever hangs the "typing…" forever.
+    vertex_timeout_seconds: float = float(os.getenv("VERTEX_TIMEOUT_SECONDS", "12"))
+    # `understand` is the heaviest call (full taxonomy + every programme + history + the biggest
+    # schema) and the ONLY call observed to hang in production. It normally completes in 1-2s, and when
+    # it degrades the advisor's deterministic backstops still answer — so it gets a tighter cap than
+    # the generous global (which answer_synthesis needs headroom under). This is what bounds the "took
+    # forever" turns to a few seconds instead of a full timeout window.
+    vertex_understand_timeout_seconds: float = float(os.getenv("VERTEX_UNDERSTAND_TIMEOUT_SECONDS", "8"))
 
     # ── Backend selection (stub vs real) ─────────────────────────────────────
     # Default to the real backend only when a project is configured; otherwise

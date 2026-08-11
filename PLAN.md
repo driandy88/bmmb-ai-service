@@ -111,7 +111,7 @@ redo work that's done and miss the two services that actually still need it.
 
 ## Open decision — flag before Phase 5
 
-Prefixing routes (`/extraction/extract`, `/chat/chat`, `/validation/validate`, ...) is
+Prefixing routes (`/extraction/extract`, `/chatbot/chat`, `/validation/validate`, ...) is
 mandatory (six services collide on `/health` alone) and **breaks every current public
 path**. Two ways to handle it:
 1. **Update all known callers** (chat's own `EXTRACTION_SERVICE_URL`, any frontend,
@@ -209,8 +209,8 @@ This plan assumes **option 1**. Confirm before starting Phase 5 (deployment/cuto
   touching Docker.
 - `docker build -t unified-agents .` / `docker run -p 8080:8080 --env-file .env
   unified-agents`; hit `/docs` and exercise one real endpoint per mounted router
-  (`/extraction/extract`, `/chat/chat`, `/validation/validate`,
-  `/aggregation/aggregate/bank`, `/bbox/align`, `/mcp/mcp/servers`).
+  (`/extraction/extract`, `/chatbot/chat`, `/validation/validate`,
+  `/aggregation/aggregate/bank`, `/bbox/align`, `/mcp/servers`).
 - Measure memory/cold-start explicitly: the merged image now always pays for
   `langchain`+`fastmcp`+`langchain-google-genai` (mcp), `langgraph` (chat), `PyMuPDF`
   (extraction), and `tesseract` (bbox) simultaneously — materially heavier than any

@@ -35,6 +35,14 @@ class RewriteScopingRetriever(Retriever):
                  program_code: str | None = None, channel: str = "customer") -> list[RetrievalChunk]:
         programs = self.programs()
         valid = {c for c, _ in programs}
+        # The understand path has ALREADY produced a standalone retrieval query and resolved the
+        # programme, so it passes `program_code` explicitly. Re-running the rewrite LLM here is pure
+        # redundant work — its inferred code is discarded in favour of the caller's, and it adds a whole
+        # extra Gemini round-trip (the slowest, most spike-prone step) to every grounded/compare turn.
+        # Skip it when the caller scoped the query; keep it only when nothing was passed (the funnel /
+        # guidelines paths that still rely on the wrapper for §6 scoping).
+        if program_code is not None:
+            return self._inner.retrieve(query, corpus, top_k, program_code=program_code, channel=channel)
         try:
             rw = self._llm.rewrite_query(query, programs)
         except Exception as e:  # never break retrieval on a rewrite failure

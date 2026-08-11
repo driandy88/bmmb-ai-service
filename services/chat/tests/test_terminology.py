@@ -41,6 +41,33 @@ def test_bare_loan_still_rewritten_after_the_exemption():
     assert r.violations == ["loan"]
 
 
+def test_reframe_survives_negation_and_contrast():
+    # The terminology REFRAME must read naturally — when the bot deliberately names the conventional
+    # term to correct the customer, a negation / contrast cue before it keeps it (otherwise the lint
+    # turns "we don't charge interest" into the nonsense "we don't charge profit").
+    for reframe in [
+        "We don't charge interest — we share a profit rate instead.",
+        "We share a profit rate rather than interest.",
+        "As an Islamic bank we offer financing, not a conventional loan.",
+        "We provide financing instead of a conventional loan.",
+    ]:
+        r = terminology.lint(reframe)
+        assert r.clean and r.text == reframe, reframe   # kept verbatim, not flagged
+
+
+def test_quoted_term_with_trailing_punctuation_is_kept():
+    # People often say "loan," — the bot quotes the customer's word; the closing quote sits AFTER a
+    # comma, which the lint must still recognise as quoted (so it isn't rewritten mid-sentence).
+    r = terminology.lint('People say "loan," but we call it financing.')
+    assert '"loan,"' in r.text and r.clean
+
+
+def test_bare_interest_in_plain_sentence_still_corrected():
+    # No cue, no quotes → a genuine slip about our own product is still fixed.
+    r = terminology.lint("The interest on this is low.")
+    assert "interest" not in r.text.lower() and "profit" in r.text.lower()
+
+
 def test_pii_redacts_ic_email_phone_money():
     raw = "IC 900101-01-1234, email a.b@muamalat.com.my, call 017-621 5751, revenue RM 1,000,000"
     out = pii.redact(raw)

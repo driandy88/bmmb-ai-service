@@ -5,7 +5,7 @@ Mounts all 6 per-service routers under one process / one port / one /docs,
 each behind its own path prefix:
 
     /extraction     services.extraction  (api.py)
-    /chat           services.chat        (api.py)
+    /chatbot        services.chat        (api.py)
     /validation     services.validation  (api.py)
     /aggregation    services.aggregation (api.py)
     /bbox_generator services.bbox_generator (api.py)
@@ -15,6 +15,12 @@ Routing-prefix decision: each service keeps its routes exactly as it defines
 them -- including its own `GET /health` -- just mounted under its prefix, e.g.
 extraction's health check becomes `GET /extraction/health`. This module adds
 one more, root-level `GET /health` as an aggregate liveness check.
+
+chat is mounted under `/chatbot` rather than `/chat` -- its own router already
+defines `POST /chat`, `POST /chat/stream`, etc. (see
+services/chat/app/api/routes.py), so mounting it at `/chat` would produce
+`/chat/chat`, `/chat/chat/stream`, .... `/chatbot` keeps the service prefix
+distinct from the resource name underneath it.
 
 FastAPI supports exactly one lifespan per app. Of the 6, only chat needs
 startup wiring: it builds the LangGraph orchestrator once and caches it on
@@ -84,7 +90,7 @@ app.add_middleware(
 # /extract would carry both "Extraction" and "extraction"), so we only pass
 # it where the router doesn't already carry one (chat).
 app.include_router(extraction_router, prefix="/extraction")
-app.include_router(chat_router, prefix="/chat", tags=["chat"])
+app.include_router(chat_router, prefix="/chatbot", tags=["chat"])
 app.include_router(validation_router, prefix="/validation")
 app.include_router(aggregation_router, prefix="/aggregation")
 app.include_router(bbox_generator_router, prefix="/bbox_generator")
