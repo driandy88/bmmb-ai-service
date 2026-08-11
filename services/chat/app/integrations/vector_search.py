@@ -102,7 +102,7 @@ class PgVectorRetriever(Retriever):
     # ── query embedding (RETRIEVAL_QUERY, matches ingest) ────────────────────
     def _embed(self, query: str) -> str:
         from google.genai import types
-        from app.utils.timeouts import call_with_timeout
+        from ..utils.timeouts import call_with_timeout
         client = _genai_client(self._s.gcp_project_id, self._s.vertex_location)
         cfg = types.EmbedContentConfig(task_type=_QUERY_TASK, output_dimensionality=self._s.embedding_dimensions)
         resp = call_with_timeout(
