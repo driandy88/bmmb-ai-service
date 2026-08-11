@@ -229,6 +229,26 @@ class ProgramAdvisor:
         aliases = [code] + re.findall(r"\(([^)]+)\)", full_name or "")
         return [a.strip() for a in aliases if a and a.strip()]
 
+    def _resolve_indexed_program(self, message: str, programs: list) -> Optional[str]:
+        """The INDEXED programme the message plainly names, or None — a deterministic backstop for when
+        the model drops `program_code` (a greeting/filler prefix throws off its extraction). Matches the
+        code OR a displayed abbreviation as a whole word, normalising naming drift (GGSM == GGSM3). Only
+        returns a programme we can actually detail; unindexed names fall through to the honest redirect."""
+        by_norm = {self._norm_program(c): c for c, _ in (programs or [])}
+        if not by_norm:
+            return None
+        for p in self._cfg.products.get("quantum", []):
+            code = (p.get("program") or "").strip()
+            if not code:
+                continue
+            indexed_code = by_norm.get(self._norm_program(code))
+            if not indexed_code:
+                continue   # this programme isn't in the live index
+            for name in self._program_aliases(code, p.get("full_name") or code):
+                if re.search(rf"\b{re.escape(name)}(?:[-\s]?i|[-\s]?\d+)?\b", message or "", re.IGNORECASE):
+                    return indexed_code
+        return None
+
     def _named_unindexed_program(self, message: str) -> Optional[tuple[str, str]]:
         """A programme the bank HAS (products.yaml) but has no Sales Kit indexed for -> (code,
         full_name). None when the message names no known programme, names one we CAN answer (it's
@@ -449,6 +469,13 @@ class ProgramAdvisor:
         # turn where the customer clearly named BOTH and wants them compared.
         cmp_codes = [c for c in sig["compare_programs"] if c in valid]
         is_compare = sig["turn_type"] == "compare" and len(cmp_codes) >= 2
+
+        # Deterministic backstop: a greeting / filler prefix ("hi, what is tenure for GGSM") can make
+        # the model drop the programme code even though the name is right there. If nothing resolved and
+        # this isn't a compare, resolve an INDEXED programme the message plainly names — so a friendly
+        # "hi," doesn't send a real question to the generic help reply.
+        if not program and not is_compare:
+            program = self._resolve_indexed_program(message, programs)
 
         # 1. Ambiguous / mistyped name → clarify with topic-carrying chips. Signal first; the
         #    deterministic near-match is a backstop for when the model doesn't flag it. Skipped for a
