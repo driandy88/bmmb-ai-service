@@ -15,7 +15,23 @@ def test_a_hang_is_capped_not_infinite():
     start = time.perf_counter()
     with pytest.raises(ExternalTimeout):
         call_with_timeout(lambda: time.sleep(30), timeout=0.15, retries=1)
-    assert time.perf_counter() - start < 2.0  # two 0.15s attempts, not 30s
+    assert time.perf_counter() - start < 1.0  # one 0.15s window, not 30s and not a retried 0.30s
+
+
+def test_a_hang_is_not_retried():
+    # A hang won't heal on a second try, so we degrade on the FIRST window instead of doubling the
+    # wait. The call runs exactly once even though retries is budgeted for errors.
+    calls = {"n": 0}
+
+    def hangs():
+        calls["n"] += 1
+        time.sleep(30)
+
+    start = time.perf_counter()
+    with pytest.raises(ExternalTimeout):
+        call_with_timeout(hangs, timeout=0.15, retries=3)
+    assert calls["n"] == 1                        # not retried on timeout
+    assert time.perf_counter() - start < 0.5      # one window, not 4 × 0.15s
 
 
 def test_errors_retry_then_surface():

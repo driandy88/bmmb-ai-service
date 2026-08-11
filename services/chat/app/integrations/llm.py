@@ -491,6 +491,7 @@ class VertexGeminiClient(LLMClient):
         )
         self._model = settings.model_id
         self._timeout = settings.vertex_timeout_seconds
+        self._understand_timeout = settings.vertex_understand_timeout_seconds
         self._fallback = StubLLMClient()
 
     # -- helpers --
@@ -498,7 +499,8 @@ class VertexGeminiClient(LLMClient):
         lines = [f"{t.get('role', 'user')}: {t.get('content', '')}" for t in (history or [])]
         return "\n".join(lines) if lines else "(no prior turns)"
 
-    def _generate_json(self, prompt_name: str, filled: str, schema: dict) -> dict:
+    def _generate_json(self, prompt_name: str, filled: str, schema: dict,
+                       *, timeout: Optional[float] = None) -> dict:
         from google.genai import types
         cfg = types.GenerateContentConfig(
             system_instruction=system_prompt(prompt_name),
@@ -510,7 +512,7 @@ class VertexGeminiClient(LLMClient):
         def _do() -> dict:
             resp = self._client.models.generate_content(model=self._model, contents=filled, config=cfg)
             return json.loads(resp.text)
-        return call_with_timeout(_do, timeout=self._timeout, label=f"vertex.json:{prompt_name}")
+        return call_with_timeout(_do, timeout=timeout or self._timeout, label=f"vertex.json:{prompt_name}")
 
     def _generate_text(self, prompt_name: str, filled: str) -> str:
         from google.genai import types
@@ -656,7 +658,8 @@ class VertexGeminiClient(LLMClient):
             listing = "\n".join(f"  {c} — {t}" for c, t in programs) or "  (none configured)"
             filled = render(load_prompt("understand"), programs=listing, taxonomy=taxonomy, message=message,
                             history=self._history_text(history or []), stage=stage or "(none)")
-            out = self._generate_json("understand", filled, understand_schema(codes, cat_ids))
+            out = self._generate_json("understand", filled, understand_schema(codes, cat_ids),
+                                      timeout=self._understand_timeout)
             code_set, cat_set = set(codes), set(cat_ids)
             sig = normalize_understanding(out)
             # honour the index / taxonomy: never hand back a program_code or cat_id we can't serve
