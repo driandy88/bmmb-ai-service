@@ -28,7 +28,9 @@ def test_financing_max_too_low_flags():
 
 
 def test_financing_max_too_high_flags():
-    result = _page_with_max(80000000, "RM 80,000,000")
+    # Ceiling is RM 100,000,000 (raised for Biz Jamin's real RM 60m Group Exposure
+    # Limit — see config/sanity_rules.yaml), so this must clear that to still flag.
+    result = _page_with_max(150000000, "RM 150,000,000")
     assert result["status"] == "flag"
     assert any(c["category"] == "out_of_bounds" for c in result["checks"])
 

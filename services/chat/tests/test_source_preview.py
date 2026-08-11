@@ -75,4 +75,4 @@ def test_endpoint_off_mode_is_503(client, monkeypatch):
     # real GCP_PROJECT_ID is set locally). Pin app.state directly so this test asserts the
     # "off" behavior deterministically, regardless of ambient env.
     monkeypatch.setattr(client.app.state, "source_preview", _sp("off"), raising=False)
-    assert client.get("/chat/source", params={"doc_id": "ggsm3"}).status_code == 503
+    assert client.get("/chat/source", params={"doc_id": "ggsm"}).status_code == 503
