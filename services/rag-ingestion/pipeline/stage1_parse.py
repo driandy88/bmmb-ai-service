@@ -107,7 +107,11 @@ def _extract_facts(client, model: str, prompt: str, png: bytes, *, retries: int 
     flags the page rather than silently trusting a page it could not fact-check."""
     from google.genai import types
     part = types.Part.from_bytes(data=png, mime_type="image/png")
-    cfg = types.GenerateContentConfig(temperature=0, max_output_tokens=4096,
+    # 8192, not 4096: a dense table page (e.g. the Biz Jamin financing-rate matrix) emits a facts
+    # array whose JSON runs past 4096 output tokens, so the response is cut off mid-value
+    # (finish_reason=MAX_TOKENS) -> JSONDecodeError -> the page is falsely quarantined as
+    # `fact_parse` even though its markdown parsed perfectly. 8192 lets the JSON close cleanly.
+    cfg = types.GenerateContentConfig(temperature=0, max_output_tokens=8192,
                                       response_mime_type="application/json")
     last = ""
     for attempt in range(retries):

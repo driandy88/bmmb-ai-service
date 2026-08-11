@@ -1,114 +1,139 @@
-# Source manifest — ONE entry per program document (brief §7, §7b).
-# One deck = one program = one independently versioned document. That is what
-# makes the annual refresh a single-document operation (§7b): re-run one doc_id,
-# re-embed one doc's pages, never rebuild the corpus.
+# Source manifest — the corpus is now ONE deck (§7, §7b).
 #
-# Local files live at data/00_raw/<doc_id>.pdf (or `source_pdf` if the on-disk
-# name differs). `source_uri` is the authoritative GCS location + becomes the
-# chunk deep-link. Page numbers are 1-based and match the PDF.
+# Change from Phase 1: instead of five separately-supplied per-program Sales Kit
+# PDFs, the whole corpus comes from a SINGLE combined deck — "TALK PP COMMERCIAL
+# FINANCING SOLUTION" — where each programme is a SECTION (page range) of the one
+# file. So every entry below shares `source_pdf` and `source_uri`, and carves its
+# programme out with `include_pages`. The pipeline is unchanged: `source_pdf`
+# points every entry at the same on-disk PDF, `include_pages` selects the section,
+# and page numbers stay ORIGINAL so the source_uri deep-link (#page=N) resolves
+# against the full deck.
 #
-# Page numbers below were VERIFIED against the supplied Sales Kits (§7c). Where
-# the brief's example numbers disagreed with the actual file (PROUD), the file
-# wins and the discrepancy is noted inline.
+# Page ranges were VERIFIED against the file's bookmarks AND per-page text
+# (39 pages). Local file: data/00_raw/talk_pp_commercial_financing.pdf
+# (md5 D5go3K51koMouYvsil6erw==, identical to the GCS object below).
+#
+# Programme set differs from Phase 1 — this deck covers MHP-i, MIHP-i, the
+# Business Credit Card-i (CGC), GGSM (Madani 4) and Biz Jamin (BIZJAMIN); it does
+# NOT contain SJUM or PROUD, which therefore leave the index. GGSM keeps its
+# `GGSM` code even though the deck is "Madani 4" (was Madani 3) — retrieval
+# continuity; update products.yaml's GGSM label + corpora.yaml `programs` to match.
 
-# ── Program corpus — the five SME Sales Kits ────────────────────────────────
-
-- doc_id: mihp_i
-  program_code: MIHP-I
-  title: Muamalat Industrial Hire Purchase (MIHP-i) Sales Kit
-  source_uri: gs://bmmb-rag-sources/SalesKit_MIHP-i.pdf
-  default_corpus: program
-  version: "2025.1"
-  effective_date: 2025-01-01
-  expiry_date: 2026-12-31
-  lang: en
-  disambiguate_from: [MHP-I]        # near-identical sibling — §7c-2
-  page_overrides:
-    - pages: [6]
-      corpus: sales_dir             # CONTACT US — Commercial Sales Management Team
+# ── Program corpus — the programmes, each a section of the one deck ──────────
 
 - doc_id: mhp_i
   program_code: MHP-I
-  title: Muamalat Hire Purchase-i Financing Programme (MHP-i) Sales Kit
-  source_uri: gs://bmmb-rag-sources/SalesKit_MHP-i.pdf
+  title: Muamalat Hire Purchase-i Financing Programme (MHP-i)
+  source_pdf: talk_pp_commercial_financing.pdf
+  source_uri: gs://bmmb-rag-sources/TALK_PP_COMMERCIAL_FINANCING_SOLUTION.pdf
   default_corpus: program
-  version: "2025.1"
-  effective_date: 2025-01-01
-  expiry_date: 2026-12-31
+  version: "2026.1"
+  effective_date: 2026-01-01
+  expiry_date: 2027-12-31
   lang: en
-  disambiguate_from: [MIHP-I]       # §7c-2
-  page_overrides:
-    - pages: [6]
-      corpus: sales_dir             # CONTACT US
+  disambiguate_from: [MIHP-I]        # near-identical sibling — §7c-2
+  include_pages: [3, 4, 5]
 
-- doc_id: ggsm3
-  program_code: GGSM3               # deck = "Madani 3"; align product config off GGSM/GGSM4 — §7c-5
-  title: Government Guarantee Scheme Madani 3 (GGSM3) Sales Kit
-  source_uri: gs://bmmb-rag-sources/SalesKit_GGSM3.pdf
+- doc_id: mihp_i
+  program_code: MIHP-I
+  title: Muamalat Industrial Hire Purchase (MIHP-i)
+  source_pdf: talk_pp_commercial_financing.pdf
+  source_uri: gs://bmmb-rag-sources/TALK_PP_COMMERCIAL_FINANCING_SOLUTION.pdf
   default_corpus: program
-  version: "2025.1"
-  effective_date: 2025-01-01
-  expiry_date: 2026-12-31
+  version: "2026.1"
+  effective_date: 2026-01-01
+  expiry_date: 2027-12-31
   lang: en
-  page_overrides:
-    - pages: [5]
-      content_type: indicative      # installment table (BFR + 2% p.a.) — §7c-3
-    - pages: [7]
-      corpus: sales_dir             # CONTACT US
+  disambiguate_from: [MHP-I]         # §7c-2
+  include_pages: [6, 7, 8, 9]
 
-- doc_id: sjum
-  program_code: SJUM
-  title: Skim Jaminan Usahawan MARA (SJUM) Sales Kit
-  source_uri: gs://bmmb-rag-sources/SalesKit_SJUM.pdf
+- doc_id: cgc
+  program_code: CGC
+  title: Muamalat Business Credit Card-i (CGC)
+  source_pdf: talk_pp_commercial_financing.pdf
+  source_uri: gs://bmmb-rag-sources/TALK_PP_COMMERCIAL_FINANCING_SOLUTION.pdf
   default_corpus: program
-  version: "2025.1"
-  effective_date: 2025-01-01
-  expiry_date: 2026-12-31
-  lang: en                          # bilingual (EN/MS) content present
-  page_overrides:
-    - pages: [5]
-      corpus: sales_dir             # CONTACT US
-
-- doc_id: proud
-  program_code: PROUD
-  title: Program Untuk Dealer (PROUD) Sales Kit
-  source_uri: gs://bmmb-rag-sources/SalesKit_PROUD.pdf
-  default_corpus: program
-  audience: dealer                  # NOT a general SME retail product — route accordingly
-  version: "2024.1"
-  effective_date: 2024-01-01
-  expiry_date: 2025-12-31
+  version: "2026.1"
+  effective_date: 2026-01-01
+  expiry_date: 2027-12-31
   lang: en
-  # CORRECTED vs brief §7 (verified against the file — §7c-1):
-  #   brief said skip [8..15] + p7 sales_dir + p5,6 indicative.
-  #   actual: p5 BLANK; p6,7,8 are REAL content (incl. Required Documents on p8);
-  #   p9 is the real dealer contacts; p10-15 are the Studio Shodwe / Lorem-ipsum
-  #   Canva template filler. Trusting the brief's numbers would drop required docs
-  #   + contacts and index nothing useful.
+  include_pages: [16, 17, 18, 19, 20, 21]   # p21 = WHAT DO WE NEED FROM YOU (documents)
+
+- doc_id: ggsm
+  program_code: GGSM
+  title: Government Guarantee Scheme Madani 4 (GGSM)
+  source_pdf: talk_pp_commercial_financing.pdf
+  source_uri: gs://bmmb-rag-sources/TALK_PP_COMMERCIAL_FINANCING_SOLUTION.pdf
+  default_corpus: program
+  version: "2026.1"
+  effective_date: 2026-01-01
+  expiry_date: 2027-12-31
+  lang: en
+  include_pages: [22, 23, 24, 25, 26, 27]
   page_overrides:
-    - pages: [5]
-      skip: true                    # blank slide
+    - pages: [22]
+      skip: true                    # title-only divider ("...MADANI 4 (GGSM4)"); its self-name
+                                    # trips the program-identity guard vs the GGSM code — redundant
+                                    # with doc_title, so drop it rather than quarantine the section
+    - pages: [27]
+      content_type: indicative      # INDICATIVE INSTALLMENT AMOUNT table (BFR + 2% p.a.)
+
+- doc_id: bizjamin
+  program_code: BIZJAMIN
+  title: CGC Biz Jamin Bumi 2.0 (BIZJAMIN)
+  source_pdf: talk_pp_commercial_financing.pdf
+  source_uri: gs://bmmb-rag-sources/TALK_PP_COMMERCIAL_FINANCING_SOLUTION.pdf
+  default_corpus: program
+  version: "2026.1"
+  effective_date: 2026-01-01
+  expiry_date: 2027-12-31
+  lang: en
+  include_pages: [28, 29, 30, 31]
+  page_overrides:
+    - pages: [28]
+      skip: true                    # title-only divider ("CGC BIZ JAMIN BUMI 2.0"); self-name trips
+                                    # the program-identity guard vs the BIZJAMIN code — redundant
+
+# ── Cross-programme campaign (no single programme) ──────────────────────────
+- doc_id: al_ijarah_combo
+  program_code: null
+  title: Al-Ijarah For All Combo 2026 (campaign)
+  source_pdf: talk_pp_commercial_financing.pdf
+  source_uri: gs://bmmb-rag-sources/TALK_PP_COMMERCIAL_FINANCING_SOLUTION.pdf
+  default_corpus: program
+  version: "2026.1"
+  effective_date: 2026-01-01
+  expiry_date: 2026-12-31            # campaign year
+  lang: en
+  include_pages: [10, 11, 12, 13, 14, 15]
+  page_overrides:
     - pages: [10, 11, 12, 13, 14, 15]
-      skip: true                    # unremoved Canva template filler (Lorem ipsum, fake address)
-    - pages: [9]
-      corpus: sales_dir             # dealer contacts (Ivan Teoh, Nik Mohd A...)
+      content_type: campaign         # a promotional rate-reduction bundle, not a standing programme
 
-# ── Internal tier — filtering criteria (brief §11) ──────────────────────────
-# Only the internal credit-filtering pages of the combined event deck. Everything
-# else in that deck is out of scope (superseded by the per-program kits above).
-# access_tier=internal means the customer channel must NEVER retrieve these; this
-# is the doc that gives the §11 SQL access-tier control real content to prove
-# against in run_deterministic.py.
-
+# ── Internal tier — filtering criteria (§11) ────────────────────────────────
+# access_tier=internal means the customer channel must NEVER retrieve these.
 - doc_id: commercial_financing_internal_criteria
   program_code: null
   title: Commercial Financing — Internal Filtering Criteria
   source_pdf: talk_pp_commercial_financing.pdf
   source_uri: gs://bmmb-rag-sources/TALK_PP_COMMERCIAL_FINANCING_SOLUTION.pdf
   default_corpus: program
-  default_access_tier: internal     # whole document is internal (§11)
-  version: "2025.1"
-  effective_date: 2025-01-01
-  expiry_date: 2026-12-31
+  default_access_tier: internal      # whole section is internal (§11)
+  version: "2026.1"
+  effective_date: 2026-01-01
+  expiry_date: 2027-12-31
   lang: en
-  include_pages: [32, 33, 34, 35]   # FILTERING CRITERIA / CHECKLIST / KEY AREAS / cut-offs only
+  include_pages: [32, 33, 34, 35]    # FILTERING CRITERIA / CHECKLIST / KEY AREAS / cut-offs
+
+# ── Sales directory — named commercial-financing contacts ───────────────────
+- doc_id: commercial_sales_directory
+  program_code: null
+  title: Commercial Financing — Sales Contacts
+  source_pdf: talk_pp_commercial_financing.pdf
+  source_uri: gs://bmmb-rag-sources/TALK_PP_COMMERCIAL_FINANCING_SOLUTION.pdf
+  default_corpus: sales_dir
+  version: "2026.1"
+  effective_date: 2026-01-01
+  expiry_date: 2027-12-31
+  lang: en
+  include_pages: [39]                # named reps (Aqilah Padzil, Azam Fakhrullah, ...)
