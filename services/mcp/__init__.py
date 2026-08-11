@@ -12,9 +12,11 @@ Module map:
                              returns a structured result.
   schemas.py              -- pydantic request/response models + the server
                              catalog that drives the UI form.
-  api.py                  -- FastAPI app/router: /health, /mcp/servers,
-                             /mcp/gmail/send.
+  api.py                  -- FastAPI app/router: /health, /servers,
+                             /gmail/send. (Mounted under `/mcp` in main.py's
+                             unified app, so those become /mcp/health,
+                             /mcp/servers, /mcp/gmail/send there.)
 
 Adding another MCP server later is: a new servers/<x>_server.py, a runner in
-agent.py, a POST /mcp/<x>/... endpoint, and one more entry in the catalog.
+agent.py, a POST /<x>/... endpoint, and one more entry in the catalog.
 """

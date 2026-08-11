@@ -10,7 +10,9 @@ same convention as services.aggregation / services.validation):
     uvicorn services.mcp.api:app --reload
 
 Requires SENDER_EMAIL, APP_PASSWORD (Gmail App Password) and GOOGLE_API_KEY in
-the environment for /mcp/gmail/send to work; /health and /mcp/servers do not.
+the environment for /gmail/send to work; /health and /servers do not. When
+mounted elsewhere under a `/mcp` prefix (see main.py), these become
+/mcp/health, /mcp/servers, /mcp/gmail/send.
 """
 from fastapi import APIRouter, FastAPI, HTTPException
 
@@ -47,14 +49,14 @@ def health():
     return {"status": "ok"}
 
 
-@router.get("/mcp/servers", response_model=list[McpServerInfo])
+@router.get("/servers", response_model=list[McpServerInfo])
 def list_servers():
     """Catalog of available MCP servers and the fields each one needs, so the UI
     can render its form dynamically. Only Gmail today."""
     return list(_CATALOG.values())
 
 
-@router.post("/mcp/gmail/send", response_model=GmailSendResponse)
+@router.post("/gmail/send", response_model=GmailSendResponse)
 async def gmail_send(req: GmailSendRequest):
     """Compose + send one email via the Gmail MCP server.
 

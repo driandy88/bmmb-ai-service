@@ -1,7 +1,7 @@
 """Pydantic request/response models for the MCP service, plus the server
 catalog that drives the frontend form. Keeping the field metadata server-side
 means adding an MCP server (or a field) needs no frontend change -- the UI
-renders whatever /mcp/servers returns."""
+renders whatever /servers returns."""
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
@@ -42,7 +42,7 @@ class McpField(BaseModel):
 
 
 class McpServerInfo(BaseModel):
-    key: str                          # e.g. "gmail" -> POST /mcp/gmail/send
+    key: str                          # e.g. "gmail" -> POST /gmail/send
     name: str
     description: str
     fields: List[McpField]
