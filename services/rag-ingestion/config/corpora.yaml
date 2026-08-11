@@ -7,13 +7,16 @@ corpora:
   program:
     description: Per-program Sales Kits — the financing programs (§7).
     default_access_tier: customer
-    # The five Sales Kits supplied for Phase 1. NOTE the naming: the deck is
-    # "Madani 3" -> GGSM3 (not GGSM / GGSM4); align products.yaml + intents.yaml
-    # before indexing or product-code retrieval will miss (§7c-5).
-    programs: [MIHP-I, MHP-I, GGSM3, SJUM, PROUD]
-    # Other programs (AL-IJARAH, CGC, SRF, BIZJAMIN, TERAJU, Business Credit Card-i,
-    # GGSM4) exist as brochures/combined-deck slides but are OUT of scope until
-    # supplied as their own per-program documents (§7b rule 1).
+    # Now sourced from the ONE combined deck (TALK PP COMMERCIAL FINANCING
+    # SOLUTION) — each programme is a page-range section, not its own PDF. The
+    # chat learns its scope set from the DB (distinct program_code in rag_chunks),
+    # so this list is documentation; still align products.yaml + intents.yaml to
+    # these codes or product-code retrieval will miss (§7c-5). GGSM here is the
+    # deck's "Madani 4" but keeps the `GGSM` code for retrieval continuity.
+    programs: [MHP-I, MIHP-I, CGC, GGSM, BIZJAMIN]
+    # SJUM & PROUD are NOT in this deck and have left the index. SRF & TERAJU
+    # remain out of scope (no source content). AL-IJARAH is a cross-programme
+    # campaign section (program_code null), not a standing programme.
 
   guidelines_shariah:
     description: BMMB SME policy, Shariah rulings, prohibited-activity lists.

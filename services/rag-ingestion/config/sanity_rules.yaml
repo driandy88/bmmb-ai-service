@@ -20,11 +20,14 @@ bounds:
   # A financing MAXIMUM has a higher floor: an SME product whose maximum reads as
   # RM 5,000 is the "RM 5 million -> RM 5,000" misread §4 calls out. A legitimate
   # minimum can be small, but a maximum this low is a transcription error, so the
-  # max field is bounded [RM 50,000, RM 50,000,000]. (Editable here, not in code.)
+  # max field is bounded [RM 50,000, RM 100,000,000]. Ceiling raised from RM 50m to
+  # RM 100m: the Biz Jamin (BIZJAMIN) Group Exposure Limit is a real RM 60m, which
+  # the old RM 50m ceiling falsely flagged. RM 100m still catches order-of-magnitude
+  # misreads. (Editable here, not in code.)
   - kind: financing_max
     unit: MYR
     min: 50000
-    max: 50000000
+    max: 100000000
     fields: [financing_size_max, quantum_max]
   - kind: profit_rate
     unit: "%"

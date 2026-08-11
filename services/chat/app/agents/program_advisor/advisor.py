@@ -411,6 +411,38 @@ class ProgramAdvisor:
                          {"label": "Explore programmes", "value": "What SME financing programmes do you offer?"},
                      ])
 
+    def _program_title(self, code: str) -> str:
+        """A human display name for an indexed programme code — the index doc_title (deck-accurate,
+        e.g. 'Madani 4'), then products.yaml, then the bare code."""
+        for c, title in (getattr(self._retriever, "programs", lambda: [])() or []):
+            if c == code and title:
+                return title
+        for p in self._cfg.products.get("quantum", []):
+            if (p.get("program") or "").strip() == code:
+                return (p.get("full_name") or code).strip()
+        return code
+
+    def _attribute_gap_redirect(self, code: str, attribute: str, message: str,
+                                history: Optional[list], slots: dict) -> dict:
+        """The programme IS one we detail, but the ONE thing they asked for (usually documents) has no
+        page in the combined deck. Don't fall back to the generic soft-help — smoothly point them to
+        Sales for the up-to-date detail on THIS programme + attribute. LLM-phrased, deterministic
+        fallback. This is the honest dead-end for 'documents for GGSM' now that the deck carries a
+        single shared documents page rather than one per programme."""
+        title = self._program_title(code)
+        attr = {"documents": "required documents", "eligibility": "eligibility details",
+                "financing_size": "financing amounts", "profit_rate": "profit rate",
+                "tenure": "financing tenure"}.get(attribute, attribute)
+        fallback = (f"I don't have the {attr} for {title} on hand here — our SME financing team keeps "
+                    f"the most up-to-date list. Shall I connect you?")
+        reply = self._llm.compose("attribute_gap", message=message, history=history or [],
+                                  fallback=fallback, programme=title, attribute=attr)
+        return _turn(reply, slots, stage="program_done", ui={"type": "none", "payload": {}},
+                     suggestions=[
+                         {"label": "Connect to Sales team", "value": "I'd like to talk to your SME financing team"},
+                         {"label": f"More about {code}", "value": f"Tell me more about {title}"},
+                     ])
+
     def _soft_help(self, slots: dict) -> dict:
         """The turn didn't map to a programme, an action, or a request for guidance. Rather than
         ambush the customer with the Program Finder wizard — which is what made it a non-sequitur —
@@ -552,6 +584,13 @@ class ProgramAdvisor:
             # than dropping them into the funnel — the exact ambush behind "what about SRF".
             if named:
                 return self._unindexed_redirect(named[0], named[1], slots)
+            # Indexed programme, but the ONE attribute they asked for isn't in the deck (e.g. it has no
+            # per-programme 'documents' page). Smoothly send them to Sales for the up-to-date detail —
+            # not the generic soft-help. Only for a SPECIFIC attribute; a broad/overview miss still
+            # falls through to the warm hand below.
+            attribute = sig.get("attribute")
+            if attribute and attribute != "overview":
+                return self._attribute_gap_redirect(program, attribute, message, history, slots)
 
         # 7. No programme in play. What the customer WANTS decides the reply — the guided Program
         #    Finder is a tool for "help me choose", NOT a catch-all for everything else, which is what

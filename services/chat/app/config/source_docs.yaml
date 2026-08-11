@@ -3,27 +3,40 @@
 # This is an explicit ALLOWLIST + access-tier boundary. Only docs listed here can be
 # signed/streamed to a browser; `access_tier: internal` is NEVER served to the customer
 # channel. `doc_id` matches the value carried in each citation (chunk metadata). Keep in
-# sync with services/rag-ingestion/config/documents.yaml when a new kit is ingested.
+# sync with services/rag-ingestion/config/documents.yaml when the corpus is re-ingested.
+#
+# The corpus is now ONE combined deck (TALK PP COMMERCIAL FINANCING SOLUTION) — every
+# programme is a page-range section of the same file, so all entries share one source_uri
+# and the page fragment (#page=N, appended client-side from the citation) lands on the
+# right slide of the deck.
 docs:
-  mihp_i:
-    source_uri: gs://bmmb-rag-sources/SalesKit_MIHP-i.pdf
-    title: Muamalat Industrial Hire Purchase (MIHP-i) Sales Kit
-    access_tier: customer
   mhp_i:
-    source_uri: gs://bmmb-rag-sources/SalesKit_MHP-i.pdf
-    title: Muamalat Hire Purchase-i (MHP-i) Sales Kit
+    source_uri: gs://bmmb-rag-sources/TALK_PP_COMMERCIAL_FINANCING_SOLUTION.pdf
+    title: Muamalat Hire Purchase-i Financing Programme (MHP-i)
     access_tier: customer
-  ggsm3:
-    source_uri: gs://bmmb-rag-sources/SalesKit_GGSM3.pdf
-    title: Government Guarantee Scheme Madani 3 (GGSM3) Sales Kit
+  mihp_i:
+    source_uri: gs://bmmb-rag-sources/TALK_PP_COMMERCIAL_FINANCING_SOLUTION.pdf
+    title: Muamalat Industrial Hire Purchase (MIHP-i)
     access_tier: customer
-  sjum:
-    source_uri: gs://bmmb-rag-sources/SalesKit_SJUM.pdf
-    title: Skim Jaminan Usahawan MARA (SJUM) Sales Kit
+  cgc:
+    source_uri: gs://bmmb-rag-sources/TALK_PP_COMMERCIAL_FINANCING_SOLUTION.pdf
+    title: Muamalat Business Credit Card-i (CGC)
     access_tier: customer
-  proud:
-    source_uri: gs://bmmb-rag-sources/SalesKit_PROUD.pdf
-    title: Program Untuk Dealer (PROUD) Sales Kit
+  ggsm:
+    source_uri: gs://bmmb-rag-sources/TALK_PP_COMMERCIAL_FINANCING_SOLUTION.pdf
+    title: Government Guarantee Scheme Madani 4 (GGSM)
+    access_tier: customer
+  bizjamin:
+    source_uri: gs://bmmb-rag-sources/TALK_PP_COMMERCIAL_FINANCING_SOLUTION.pdf
+    title: CGC Biz Jamin Bumi 2.0 (BIZJAMIN)
+    access_tier: customer
+  al_ijarah_combo:
+    source_uri: gs://bmmb-rag-sources/TALK_PP_COMMERCIAL_FINANCING_SOLUTION.pdf
+    title: Al-Ijarah For All Combo 2026
+    access_tier: customer
+  commercial_sales_directory:
+    source_uri: gs://bmmb-rag-sources/TALK_PP_COMMERCIAL_FINANCING_SOLUTION.pdf
+    title: Commercial Financing — Sales Contacts
     access_tier: customer
   # Internal filtering criteria — access_tier internal: the customer channel must NEVER
   # retrieve OR preview this. Listed so the gate is explicit and tested.
