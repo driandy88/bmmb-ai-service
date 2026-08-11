@@ -62,9 +62,49 @@ if [ "$WITH_DOCKER" -eq 1 ]; then
   sed -i '' -E 's/[[:space:]]+#.*$//' .env
   echo "    stripped inline comments from .env (backup saved as .env.bak)"
 
+  # The container has no Application Default Credentials of its own, so
+  # extraction's Cloud SQL Python Connector (config.py's default path) fails
+  # with DefaultCredentialsError the moment it's used -- /health stays green
+  # (doesn't touch the DB) but /extraction/templates 500s. Prefer mounting
+  # the host's ADC into the container read-only (same connector code path
+  # Cloud Run uses in prod, just via a mounted file instead of the attached
+  # service account); only fall back to a host-side Cloud SQL Auth Proxy +
+  # config.py's DB_HOST if ADC isn't actually set up locally.
+  #
+  # Array, guarded with the ${arr[@]+"${arr[@]}"} idiom below -- macOS's
+  # default bash 3.2 treats an empty array expanded with "${arr[@]}" as an
+  # unbound variable under `set -u` (fixed in bash 4.4+, but that's not
+  # what ships as /bin/bash on macOS).
+  DOCKER_EXTRA_ARGS=()
+
+  ADC_FILE=""
+  if command -v gcloud >/dev/null 2>&1 && gcloud auth application-default print-access-token >/dev/null 2>&1; then
+    ADC_FILE="$(gcloud info --format='value(config.paths.global_config_dir)')/application_default_credentials.json"
+    [ -f "$ADC_FILE" ] || ADC_FILE=""
+  fi
+
+  if [ -n "$ADC_FILE" ]; then
+    echo "==> Found working Application Default Credentials -- mounting into container"
+    DOCKER_EXTRA_ARGS+=(-v "$ADC_FILE:/tmp/adc.json:ro" -e "GOOGLE_APPLICATION_CREDENTIALS=/tmp/adc.json")
+  else
+    echo "==> No local ADC found (gcloud auth application-default login) -- falling back to a Cloud SQL Auth Proxy for extraction (127.0.0.1:5433)"
+    DB_PROXY_PORT=5433
+    services/extraction/scripts/db_proxy.sh "$DB_PROXY_PORT" > /tmp/dev_setup_db_proxy.log 2>&1 &
+    DB_PROXY_PID=$!
+    trap 'kill "$DB_PROXY_PID" 2>/dev/null' EXIT
+    sleep 2
+    DOCKER_EXTRA_ARGS+=(-e "DB_HOST=host.docker.internal" -e "DB_PORT=$DB_PROXY_PORT")
+    # host.docker.internal reaches the proxy from inside the container --
+    # works out of the box on Docker Desktop (Mac/Windows); Linux needs this.
+    if [[ "$(uname -s)" == "Linux" ]]; then
+      DOCKER_EXTRA_ARGS+=(--add-host=host.docker.internal:host-gateway)
+    fi
+  fi
+
   echo "==> Building Docker image"
   docker build -t unified-agents .
 
   echo "==> Running Docker image on :8080"
-  docker run -p 8080:8080 --env-file .env unified-agents
+  docker run -p 8080:8080 ${DOCKER_EXTRA_ARGS[@]+"${DOCKER_EXTRA_ARGS[@]}"} \
+    --env-file .env unified-agents
 fi
