@@ -33,6 +33,7 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 
 from services.aggregation.api import router as aggregation_router
 from services.bbox_generator.api import router as bbox_generator_router
@@ -87,6 +88,41 @@ app.include_router(validation_router, prefix="/validation")
 app.include_router(aggregation_router, prefix="/aggregation")
 app.include_router(bbox_generator_router, prefix="/bbox_generator")
 app.include_router(mcp_router, prefix="/mcp")
+
+
+def _add_binary_format(node: object) -> None:
+    """Pydantic v2 emits OpenAPI 3.1 style file schemas (`contentMediaType`
+    only, no `format`). Swagger UI's array-of-files widget only checks
+    `items.format == "binary"` and never falls back to `contentMediaType`,
+    so every `list[UploadFile]` field (e.g. POST /extraction/extract's
+    `files`) renders as a plain string-array input instead of a file
+    picker. Adding `format` alongside `contentMediaType` fixes the widget
+    without changing what the schema describes."""
+    if isinstance(node, dict):
+        if node.get("type") == "string" and "contentMediaType" in node:
+            node.setdefault("format", "binary")
+        for value in node.values():
+            _add_binary_format(value)
+    elif isinstance(node, list):
+        for item in node:
+            _add_binary_format(item)
+
+
+def _custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(
+        title=app.title,
+        description=app.description,
+        version=app.version,
+        routes=app.routes,
+    )
+    _add_binary_format(schema.get("components", {}).get("schemas", {}))
+    app.openapi_schema = schema
+    return app.openapi_schema
+
+
+app.openapi = _custom_openapi
 
 _MOUNTED = ("extraction", "chat", "validation", "aggregation", "bbox_generator", "mcp")
 
