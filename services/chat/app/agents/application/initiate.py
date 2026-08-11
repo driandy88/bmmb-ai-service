@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from app.config.settings import get_settings
+from ...config.settings import get_settings
 
 _MESSAGE = "Great — I'll take you to the application form to get started."
 

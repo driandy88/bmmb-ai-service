@@ -1,18 +1,20 @@
 """
 End-to-end tests of the FastAPI wiring (routing, validation, error handling)
-with app.extraction.run_extraction monkeypatched -- these never call the real
-Gemini/Vertex AI API, so they run in CI with no credentials and no network access.
+with services.extraction.extraction.run_extraction monkeypatched -- these
+never call the real Gemini/Vertex AI API, so they run in CI with no
+credentials and no network access.
 
 /templates and /templates/{id} still hit the real bmmb_dev Cloud SQL database
-(same as test_schema_builder.py) since app.config is not mocked here.
+(same as test_schema_builder.py) since services.extraction.config is not
+mocked here.
 """
 import io
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import list_templates
-from app.main import app
+from services.extraction.config import list_templates
+from services.extraction.api import app
 
 client = TestClient(app)
 
@@ -37,7 +39,7 @@ def mock_gemini(monkeypatch):
     def _fake_run_extraction(files, prompt, schema, model="gemini-2.5-flash"):
         return {"mocked": True}
 
-    monkeypatch.setattr("app.extraction.run_extraction", _fake_run_extraction)
+    monkeypatch.setattr("services.extraction.extraction.run_extraction", _fake_run_extraction)
 
 
 class TestHealthAndTemplates:
@@ -156,12 +158,12 @@ class TestMissingConfig:
         """If GCP_PROJECT_ID isn't set, the real run_extraction raises
         GeminiConfigError -- confirm the endpoint surfaces that as a 500,
         not an unhandled crash. Bypasses the autouse mock for this one test."""
-        from app.gemini_client import GeminiConfigError
+        from services.extraction.gemini_client import GeminiConfigError
 
         def _raise_config_error(*args, **kwargs):
             raise GeminiConfigError("GCP_PROJECT_ID is not set.")
 
-        monkeypatch.setattr("app.extraction.run_extraction", _raise_config_error)
+        monkeypatch.setattr("services.extraction.extraction.run_extraction", _raise_config_error)
 
         r = client.post(
             "/extract",

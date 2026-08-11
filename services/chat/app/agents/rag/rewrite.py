@@ -15,9 +15,9 @@ agent/orchestrator edit. See the Phase 6 notes.
 """
 from __future__ import annotations
 
-from app.agents.rag.retriever import CorpusScope, RetrievalChunk, Retriever
-from app.integrations.llm import LLMClient
-from app.utils.logging import get_logger
+from .retriever import CorpusScope, RetrievalChunk, Retriever
+from ...integrations.llm import LLMClient
+from ...utils.logging import get_logger
 
 log = get_logger("rag.rewrite")
 

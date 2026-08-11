@@ -16,11 +16,25 @@ This is the ONLY place that understands the raw table shapes. Everything
 downstream (schema_builder, prompts) works off get_template()'s normalised
 output and doesn't care that the source is Cloud SQL.
 
-Connects via the Cloud SQL Python Connector (not a raw host:port), so the
-same code path works unchanged locally (IAM user + `gcloud auth
-application-default login`) and on Cloud Run (attached service account) --
-no Cloud SQL Auth Proxy sidecar needed. See README "Cloud SQL setup" for the
-one-time instance/database/IAM setup this depends on.
+Connects via the Cloud SQL Python Connector by default (not a raw
+host:port), so the same code path works unchanged locally (IAM user +
+`gcloud auth application-default login`) and on Cloud Run (attached service
+account) -- no Cloud SQL Auth Proxy sidecar needed. See README "Cloud SQL
+setup" for the one-time instance/database/IAM setup this depends on.
+
+Local dev escape hatch: if `gcloud auth application-default login` isn't
+set up (the connector needs ADC to mint its own connection, separately from
+`gcloud auth login`), set DB_HOST (and optionally DB_PORT) to connect
+through a plain TCP listener instead -- e.g. a `cloud-sql-proxy` instance
+run by hand:
+
+    cloud-sql-proxy --port 5433 $INSTANCE_CONNECTION_NAME
+    DB_HOST=127.0.0.1 DB_PORT=5433 uvicorn ...
+
+The proxy authenticates itself once at startup (via its own ADC/gcloud
+login), so the app process needs no credentials of its own in this mode --
+just DB_USER/DB_PASS for Postgres auth. INSTANCE_CONNECTION_NAME is unused
+when DB_HOST is set.
 """
 import os
 import time
@@ -33,13 +47,18 @@ if APP_ENV not in ("dev", "prod"):
     raise RuntimeError(f"APP_ENV must be 'dev' or 'prod', got {APP_ENV!r}")
 
 # "project:region:instance", e.g. prototype-bmmb-1b62:asia-southeast1:docs-extractor
-INSTANCE_CONNECTION_NAME = os.environ["INSTANCE_CONNECTION_NAME"]
+# Only required when DB_HOST isn't set (see module docstring).
+INSTANCE_CONNECTION_NAME = os.getenv("INSTANCE_CONNECTION_NAME")
 DB_USER = os.environ["DB_USER"]
 DB_PASS = os.environ["DB_PASS"]
 DB_NAME = os.getenv("DB_NAME", f"bmmb_{APP_ENV}")
 # Private IP requires the Cloud Run service to have a VPC connector attached;
 # defaults to public IP (still TLS-encrypted + IAM-authorized by the connector).
 _USE_PRIVATE_IP = os.getenv("DB_USE_PRIVATE_IP", "false").lower() == "true"
+# Set to bypass the Cloud SQL Python Connector entirely and connect over
+# plain TCP instead -- e.g. a local `cloud-sql-proxy` listener.
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = int(os.getenv("DB_PORT", "5432"))
 
 # Re-query Cloud SQL at most once per this many seconds. There's no external
 # signal available to invalidate the cache on write (the Express admin routes
@@ -56,30 +75,59 @@ _engine = None
 
 def _get_engine() -> sqlalchemy.engine.Engine:
     global _connector, _engine
-    if _engine is None:
-        _connector = Connector()
+    if _engine is not None:
+        return _engine
 
-        def _getconn():
-            return _connector.connect(
-                INSTANCE_CONNECTION_NAME,
-                "pg8000",
-                user=DB_USER,
-                password=DB_PASS,
-                db=DB_NAME,
-                ip_type=IPTypes.PRIVATE if _USE_PRIVATE_IP else IPTypes.PUBLIC,
-            )
-
-        # Pool is process-local and kept small: this service only reads
-        # templates (a handful of small queries per cache refresh), not
-        # request-volume traffic.
+    # Pool is process-local and kept small either way: this service only
+    # reads templates (a handful of small queries per cache refresh), not
+    # request-volume traffic.
+    if DB_HOST:
+        # Plain TCP -- e.g. a local `cloud-sql-proxy` listener. No Cloud SQL
+        # Python Connector / ADC involved; see module docstring.
+        url = sqlalchemy.engine.URL.create(
+            "postgresql+pg8000",
+            username=DB_USER,
+            password=DB_PASS,
+            host=DB_HOST,
+            port=DB_PORT,
+            database=DB_NAME,
+        )
         _engine = sqlalchemy.create_engine(
-            "postgresql+pg8000://",
-            creator=_getconn,
+            url,
             pool_size=5,
             max_overflow=2,
             pool_timeout=30,
             pool_recycle=1800,
         )
+        return _engine
+
+    if not INSTANCE_CONNECTION_NAME:
+        raise RuntimeError(
+            "Set either DB_HOST (to connect through a local Cloud SQL Auth "
+            "Proxy) or INSTANCE_CONNECTION_NAME (to use the Cloud SQL "
+            "Python Connector) -- see config.py's module docstring."
+        )
+
+    _connector = Connector()
+
+    def _getconn():
+        return _connector.connect(
+            INSTANCE_CONNECTION_NAME,
+            "pg8000",
+            user=DB_USER,
+            password=DB_PASS,
+            db=DB_NAME,
+            ip_type=IPTypes.PRIVATE if _USE_PRIVATE_IP else IPTypes.PUBLIC,
+        )
+
+    _engine = sqlalchemy.create_engine(
+        "postgresql+pg8000://",
+        creator=_getconn,
+        pool_size=5,
+        max_overflow=2,
+        pool_timeout=30,
+        pool_recycle=1800,
+    )
     return _engine
 
 

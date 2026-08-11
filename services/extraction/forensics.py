@@ -11,9 +11,9 @@ now). `schema_version` keeps the envelope forward-compatible: a later
 feature-extraction / fraud-flag phase can add fields additively without a break.
 See docs/metadata-extraction.md §8.
 """
-from app import structure_analyzer
-from app.dqt import jpeg_dqt
-from app.metadata_extractor import MetadataError, get_file_metadata
+from . import structure_analyzer
+from .dqt import jpeg_dqt
+from .metadata_extractor import MetadataError, get_file_metadata
 
 SCHEMA_VERSION = "1"
 

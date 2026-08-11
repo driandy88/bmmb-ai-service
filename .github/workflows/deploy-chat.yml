@@ -18,6 +18,7 @@ env:
   SERVICE_NAME: chat-service
   REPO_NAME: bmmb-ai-service             # shared Artifact Registry repo across all services in this monorepo
   WORKDIR: services/chat
+  DOCKERFILE: services/chat/Dockerfile
 
 jobs:
   test:
@@ -63,12 +64,14 @@ jobs:
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
-      # Chat is self-contained -- its Dockerfile COPYs requirements.txt + app/ from
-      # this dir, with no libs/ dependency -- so the build context is $WORKDIR, not
-      # the repo root (unlike Validation/MCP).
+      # Build context is the repo root ("."), not $WORKDIR -- see
+      # services/chat/Dockerfile's header comment for why (chat now imports
+      # itself as the package `services.chat`, same convention as Validation/MCP).
       - name: Build image
         run: |
-          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} ${{ env.WORKDIR }}
+          docker build -f ${{ env.DOCKERFILE }} \
+            -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} \
+            .
 
       - name: Push image
         run: |

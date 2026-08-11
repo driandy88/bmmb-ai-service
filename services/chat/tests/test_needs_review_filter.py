@@ -6,8 +6,8 @@ access_tier boundary. We assert the WHERE clause it builds (no DB needed): the
 customer channel filters `needs_review = false`; the internal channel does not,
 so operators can still see flagged content.
 """
-from app.config.settings import get_settings
-from app.integrations.vector_search import PgVectorRetriever
+from services.chat.app.config.settings import get_settings
+from services.chat.app.integrations.vector_search import PgVectorRetriever
 
 
 def _where(channel: str) -> str:

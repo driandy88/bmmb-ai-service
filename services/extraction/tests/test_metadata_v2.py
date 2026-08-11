@@ -11,10 +11,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app import forensics
-from app.dqt import jpeg_dqt
-from app.main import app
-from app.metadata_extractor import MetadataError
+from services.extraction import forensics
+from services.extraction.dqt import jpeg_dqt
+from services.extraction.api import app
+from services.extraction.metadata_extractor import MetadataError
 
 client = TestClient(app)
 
@@ -46,7 +46,7 @@ class TestValidation:
         assert client.post("/extract-metadata-v2", data={}).status_code == 422
 
     def test_oversized_413(self, monkeypatch):
-        from app import metadata
+        from services.extraction import metadata
         monkeypatch.setattr(metadata, "MAX_FILE_SIZE", 4)
         r = client.post("/extract-metadata-v2",
                         files={"file": ("x.pdf", io.BytesIO(b"123456789"), "application/pdf")})
