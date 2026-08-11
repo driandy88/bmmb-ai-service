@@ -43,21 +43,28 @@ def _match_case(replacement: str, original: str) -> str:
 
 
 _QUOTES = set("\"'“”‘’")
-# A qualifier that makes "loan"/"interest" refer to a NON-Islamic product the bot is contrasting
-# with, not to our own offering — so it's compliant to keep it ("a conventional loan").
-_CONTRAST_BEFORE = re.compile(r"(?:conventional|traditional|ordinary|non[- ]?islamic)\W+$", re.I)
+# The forbidden term appears here LEGITIMATELY — the bot is NAMING or CONTRASTING the conventional
+# concept (the customer's own word, or a conventional-bank product it sets us apart from), not
+# mislabelling our own offering. A contrast / naming / negation cue just before the term is the
+# tell. This is what lets the terminology REFRAME read naturally without the lint wrecking it:
+#   "financing, not a conventional loan"  ·  "we don't charge interest — we share a profit rate".
+_KEEP_CUES = re.compile(
+    r"\b(?:conventional|traditional|ordinary|non[- ]?islamic|so[- ]?called|rather|instead|unlike|"
+    r"versus|vs|not|never|without|don['’]?t|doesn['’]?t|won['’]?t|isn['’]?t|aren['’]?t|can['’]?t|"
+    r"term|word)\b", re.I)
 
 
 def _deliberate(text: str, start: int, end: int) -> bool:
-    """The forbidden term is used LEGITIMATELY here — a deliberate contrast, not the bot mislabelling
-    our own product — so keep it rather than rewrite it into a self-contradiction ("financing rather
-    than conventional financing"). Signals: the term is in quotes (the bot is naming it), or a
-    'conventional / traditional' qualifier precedes it. Compliance still catches a bare slip."""
-    before = text[start - 1] if start > 0 else ""
-    after = text[end] if end < len(text) else ""
-    if before in _QUOTES and after in _QUOTES:
+    """The forbidden term is used LEGITIMATELY here — a deliberate contrast / naming, not the bot
+    mislabelling our own product — so keep it rather than rewrite it into a self-contradiction
+    ("financing rather than conventional financing", "we don't charge profit"). Signals: a
+    contrast/naming/negation cue precedes it, or it's wrapped in quotes (the bot is quoting the word).
+    Compliance still catches a bare slip (no cue, no quotes)."""
+    if _KEEP_CUES.search(text[max(0, start - 28):start]):
         return True
-    return bool(_CONTRAST_BEFORE.search(text[max(0, start - 20):start]))
+    before = text[start - 1] if start > 0 else ""
+    tail = text[end:end + 3]  # tolerate trailing punctuation inside the closing quote ("loan,")
+    return before in _QUOTES and any(q in tail for q in _QUOTES)
 
 
 def lint(text: str) -> LintResult:
