@@ -84,6 +84,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+_MOUNTED = ("extraction", "chat", "validation", "aggregation", "bbox_generator", "mcp")
+
+
+# Registered before the include_router calls below so "health" is the first
+# tag group FastAPI emits -- Swagger UI orders tag sections by where each
+# tag's paths first appear, and this puts the root/health checks at the top
+# of the docs page instead of buried under the six mounted services.
+@app.get("/", tags=["health"])
+def root():
+    return {"message": "BMMB Unified AI Service is running.", "docs": "/docs", "services": _MOUNTED}
+
+
+@app.get("/health", tags=["health"])
+def health():
+    """Root-level aggregate liveness check -- if this process is up and
+    serving, all 6 routers below are mounted and importable (a broken import
+    would have failed at startup, before this was ever reachable). Each
+    service also keeps its own check under its prefix (e.g. GET
+    /extraction/health) for per-service probes."""
+    return {"status": "ok", "services": _MOUNTED}
+
+
 # aggregation/bbox_generator/mcp/validation/extraction already tag their own
 # router (APIRouter(tags=[...])) -- passing `tags=` again here would just
 # duplicate that tag on every operation (e.g. extraction's /health and
@@ -130,15 +152,3 @@ def _custom_openapi():
 
 
 app.openapi = _custom_openapi
-
-_MOUNTED = ("extraction", "chat", "validation", "aggregation", "bbox_generator", "mcp")
-
-
-@app.get("/health", tags=["health"])
-def health():
-    """Root-level aggregate liveness check -- if this process is up and
-    serving, all 6 routers below are mounted and importable (a broken import
-    would have failed at startup, before this was ever reachable). Each
-    service also keeps its own check under its prefix (e.g. GET
-    /extraction/health) for per-service probes."""
-    return {"status": "ok", "services": _MOUNTED}
