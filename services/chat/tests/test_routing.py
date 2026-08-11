@@ -2,8 +2,8 @@
 Pure: fabricate classifier + guardrail outputs, assert the decided action."""
 import pytest
 
-from app.config.loader import load_config
-from app.orchestrator import routing
+from services.chat.app.config.loader import load_config
+from services.chat.app.orchestrator import routing
 
 cfg = load_config()
 TH = cfg.settings.confidence_threshold  # 0.7

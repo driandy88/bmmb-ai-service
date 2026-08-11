@@ -25,9 +25,9 @@ from pathlib import Path
 import pymupdf as fitz  # PyMuPDF — use the 'pymupdf' name to dodge the unrelated
                         # 'fitz' PyPI package (its "No module named 'frontend'" error)
 
-# Make the service root importable so this runs from the notebooks/ dir.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from app.metadata_extractor import MetadataError, get_file_metadata  # noqa: E402  exiftool wrapper
+# Make the repo root importable so this runs from the notebooks/ dir.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from services.extraction.metadata_extractor import MetadataError, get_file_metadata  # noqa: E402  exiftool wrapper
 
 try:
     from PIL import Image  # for DQT (JPEG quantization tables) — exiftool can't expose these

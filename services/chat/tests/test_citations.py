@@ -4,10 +4,10 @@ A fake retriever supplies chunks + a programs() set so the whole path runs
 deterministically under the stub LLM: name a programme -> retrieve -> synthesize ->
 sentences[] + numbered citations. A general question keeps running the funnel.
 """
-from app.agents.guidelines.guidelines import GuidelinesAgent
-from app.agents.program_advisor.advisor import ProgramAdvisor
-from app.agents.rag.retriever import RetrievalChunk, Retriever
-from app.integrations.llm import StubLLMClient
+from services.chat.app.agents.guidelines.guidelines import GuidelinesAgent
+from services.chat.app.agents.program_advisor.advisor import ProgramAdvisor
+from services.chat.app.agents.rag.retriever import RetrievalChunk, Retriever
+from services.chat.app.integrations.llm import StubLLMClient
 
 
 class FakeRetriever(Retriever):
@@ -74,8 +74,8 @@ class _LabeledLLM:
 def test_grounded_answer_drops_stray_label_so_it_cannot_corrupt_the_reply():
     # `label` is NOT part of the answer contract (the UI reads text + bullet only). The model
     # sometimes emits it anyway; it must be dropped, never rendered as "Label: value" in the reply.
-    from app.agents.rag.synthesize import grounded_answer
-    from app.agents.rag.retriever import Corpus
+    from services.chat.app.agents.rag.synthesize import grounded_answer
+    from services.chat.app.agents.rag.retriever import Corpus
 
     chunks = [_chunk("GGSM3 › documents › IC, SSM, 6-month bank statements.")]
     ans = grounded_answer(_LabeledLLM(), FakeRetriever(chunks, PROGRAMS), "documents for GGSM3?", Corpus.PROGRAM)
@@ -99,8 +99,8 @@ def test_grounded_answer_carries_bullet_flag_and_renders_list_reply():
     # Adaptive formatting: when the synthesiser lists discrete items it flags each with bullet=True.
     # The flag must survive into sentences[] (the UI groups a run of them into a <ul>), and the
     # plain-text reply must render each on its own "- " line so a list still reads as a list.
-    from app.agents.rag.synthesize import grounded_answer
-    from app.agents.rag.retriever import Corpus
+    from services.chat.app.agents.rag.synthesize import grounded_answer
+    from services.chat.app.agents.rag.retriever import Corpus
 
     chunks = [_chunk("GGSM3 › documents › IC, SSM, 6-month bank statements.")]
     ans = grounded_answer(_BulletLLM(), FakeRetriever(chunks, PROGRAMS), "what documents for GGSM3?", Corpus.PROGRAM)
@@ -215,7 +215,7 @@ def test_program_offer_other_programmes_opens_funnel(monkeypatch):
     # LEGACY path: "what else do you have?" in the offer leaves the current programme and opens the
     # discovery funnel. (The understand path answers this with the catalog list instead — see
     # test_understand.test_what_else_lists_the_catalog.) Pin the flag off so this tests legacy either way.
-    import app.agents.program_advisor.advisor as advmod
+    import services.chat.app.agents.program_advisor.advisor as advmod
     monkeypatch.setattr(advmod, "get_settings", lambda: type("S", (), {"use_understand": False})())
     adv = ProgramAdvisor(StubLLMClient(), FakeRetriever([_chunk("x")], PROGRAMS))
     res = adv.handle("what else do you have?", [],
@@ -352,7 +352,7 @@ def test_guidelines_empty_corpus_uses_fallback():
 
 def test_envelope_surfaces_grounded_sentences_and_citations():
     # The dispatch → ChatResponse seam: sentences[] + enriched citations survive.
-    from app.orchestrator.graph import _assemble
+    from services.chat.app.orchestrator.graph import _assemble
     final = {
         "session_id": "s1", "reply": "Profit rate is 3% flat per annum.",
         "sentences": [{"text": "Profit rate is 3% flat per annum.", "cites": [1]}],
@@ -374,7 +374,7 @@ def test_envelope_surfaces_grounded_sentences_and_citations():
 def test_envelope_carries_bullet_flag_to_response():
     # The bullet flag must survive AnswerSentence (extra fields are dropped by default) so the UI
     # can group items into a <ul>. A prose sentence has bullet=None; a list item has bullet=True.
-    from app.orchestrator.graph import _assemble
+    from services.chat.app.orchestrator.graph import _assemble
     final = {
         "session_id": "s1", "reply": "You'll need to prepare:\n- Your IC and SSM.",
         "sentences": [{"text": "You'll need to prepare:", "cites": [1]},

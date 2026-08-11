@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.auth import require_admin_key
-from app.config import (
+from .auth import require_admin_key
+from .config import (
     AttributeInUseError,
     AttributeNotFoundError,
     NameAlreadyExistsError,
@@ -11,7 +11,7 @@ from app.config import (
     list_attributes,
     update_attribute,
 )
-from app.schemas import AttributeCreate, AttributeOut, AttributeUpdate
+from .schemas import AttributeCreate, AttributeOut, AttributeUpdate
 
 router = APIRouter(prefix="/attributes", tags=["Attributes"])
 

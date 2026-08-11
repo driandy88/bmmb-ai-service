@@ -39,8 +39,8 @@ tests, and the notebook all work with zero credentials. Set `GCP_PROJECT_ID` +
 ## Layout
 
 ```
+api.py                        FastAPI app + startup wiring (builds the orchestrator) -- run this
 app/
-  main.py                     FastAPI app + startup wiring (builds the orchestrator)
   api/          routes.py     POST /chat, GET /health   · schemas.py  Pydantic envelope
   orchestrator/ graph.py      LangGraph build + Deps + Orchestrator.handle()
                 state.py      SessionState (TypedDict)
@@ -64,22 +64,26 @@ routing. `config/` + `prompts/` hold *content*, never logic.
 ## Run it
 
 ```bash
+cd services/chat
 cp .env.example .env                     # defaults are offline/stub — no creds needed
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-uvicorn app.main:app --reload --port 8080
+cd ../..                                 # back to the repo root (build context / package root is `services`)
+uvicorn services.chat.api:app --reload --port 8080
 # POST http://localhost:8080/chat   ·   GET http://localhost:8080/health   ·   docs at /docs
 ```
 
 Real Gemini: set `GCP_PROJECT_ID`, `LLM_BACKEND=vertex`, and `gcloud auth
 application-default login` (ADC — no API keys). A dev `.env` already points at Vertex
-(`prototype-bmmb-1b62`); delete it or set `LLM_BACKEND=stub` to run offline. Docker:
-`docker build -t chat . && docker run -p 8080:8080 --env-file .env chat` (Cloud Run injects
-`$PORT`).
+(`prototype-bmmb-1b62`); delete it or set `LLM_BACKEND=stub` to run offline. Docker (build
+context is the repo root -- see `Dockerfile`'s header comment):
+`docker build -f services/chat/Dockerfile -t chat . && docker run -p 8080:8080 --env-file services/chat/.env chat`
+(Cloud Run injects `$PORT`).
 
 ### Tests & notebook
 ```bash
+cd services/chat                                           # tests run from the service dir
 pip install -r requirements-dev.txt
 pytest -q                                                  # deterministic core, offline (stub)
 jupyter notebook notebooks/chat_e2e_test.ipynb             # Parts A/B/C, top-to-bottom

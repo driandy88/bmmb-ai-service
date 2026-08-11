@@ -3,7 +3,7 @@ import json
 
 from fastapi.testclient import TestClient
 
-from app.main import app
+from services.chat.api import app
 
 client = TestClient(app)
 

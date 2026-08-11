@@ -3,7 +3,7 @@ Runs on the deterministic stub backends — no credentials needed."""
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
+from services.chat.api import app
 
 
 @pytest.fixture(scope="module")

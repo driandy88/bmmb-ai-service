@@ -17,8 +17,8 @@ from __future__ import annotations
 import random
 from typing import Optional
 
-from app.config.loader import AppConfig, load_config
-from app.config.settings import get_settings
+from ...config.loader import AppConfig, load_config
+from ...config.settings import get_settings
 
 # Stage the client echoes back after turn 1 so turn 2 resolves the contact.
 _AWAIT_LOCATION_STAGE = "await_contact_location"

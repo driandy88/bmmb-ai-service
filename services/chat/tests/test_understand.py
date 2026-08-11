@@ -9,10 +9,10 @@ resolution are proven LIVE via `poc/run.py --live`. Here we lock the wiring dete
 """
 import pytest
 
-import app.agents.program_advisor.advisor as advmod
-from app.agents.program_advisor.advisor import ProgramAdvisor
-from app.agents.rag.retriever import RetrievalChunk, Retriever
-from app.integrations.llm import StubLLMClient, normalize_understanding
+import services.chat.app.agents.program_advisor.advisor as advmod
+from services.chat.app.agents.program_advisor.advisor import ProgramAdvisor
+from services.chat.app.agents.rag.retriever import RetrievalChunk, Retriever
+from services.chat.app.integrations.llm import StubLLMClient, normalize_understanding
 
 
 class FakeRetriever(Retriever):
@@ -295,9 +295,9 @@ def test_classify_via_understand_stores_signal_and_keeps_routing_parity():
     # classify_node with the flag ON produces the same routing intent as the classic path, and stores
     # the one-read signal for the advisor to reuse. (Stub delegates intent to classify_intent.)
     from types import SimpleNamespace
-    from app.config.loader import load_config
-    from app.agents.intent_classifier.classifier import IntentClassifier
-    from app.orchestrator.nodes import classify_node
+    from services.chat.app.config.loader import load_config
+    from services.chat.app.agents.intent_classifier.classifier import IntentClassifier
+    from services.chat.app.orchestrator.nodes import classify_node
 
     stub, cfg, ret = StubLLMClient(), load_config(), FakeRetriever([_chunk("x")], PROGS)
     state = {"message": "what is the profit rate for MIHP-I?", "history": [], "stage": None}

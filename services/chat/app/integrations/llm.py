@@ -23,11 +23,11 @@ import re
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
-from app.config.loader import load_config
-from app.config.settings import Settings, get_settings
-from app.utils.logging import get_logger
-from app.utils.timeouts import call_with_timeout
-from app.utils.prompts import load_prompt, render, system_prompt
+from ..config.loader import load_config
+from ..config.settings import Settings, get_settings
+from ..utils.logging import get_logger
+from ..utils.timeouts import call_with_timeout
+from ..utils.prompts import load_prompt, render, system_prompt
 
 log = get_logger("llm")
 
@@ -340,7 +340,7 @@ class StubLLMClient(LLMClient):
         return {"primary": primary, "confidence": round(confidence, 2), "secondary": secondary}
 
     def detect_adversarial(self, message: str) -> dict:
-        from app.agents.guardrail.denylist import scan
+        from ..agents.guardrail.denylist import scan
         hit = scan(message)
         if hit:
             return {"flagged": True, "category": hit.category}
