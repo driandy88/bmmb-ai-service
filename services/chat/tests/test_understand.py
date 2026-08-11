@@ -187,8 +187,8 @@ def test_documents_gap_for_indexed_programme_redirects_to_sales_not_soft_help():
     res = adv.handle("what documents do I need for GGSM", [], {}, stage="")
     low = res["reply"].lower()
     assert not res.get("grounded")
-    assert "up-to-date" in low or "up to date" in low                  # the "latest list" framing
     assert "team" in low                                               # points to the SME team
+    assert "connect" in low or "put you in touch" in low               # offers to hand off
     assert any("Sales" in s["label"] for s in res["suggestions"])      # a Connect-to-Sales chip
     assert "what would be most useful" not in low                      # NOT the generic soft-help
 

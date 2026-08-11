@@ -84,14 +84,27 @@ class SourcePreview:
     def _signed_url(self, source_uri: str) -> str:
         from datetime import timedelta
 
+        import google.auth
+        from google.auth import compute_engine
+        from google.auth.transport import requests as gauth_requests
         from google.cloud import storage  # lazy: not needed offline / in stub mode
 
         bucket, obj = _parse_gs(source_uri)
         blob = storage.Client().bucket(bucket).blob(obj)
-        return blob.generate_signed_url(
+        kwargs = dict(
             version="v4", expiration=timedelta(seconds=self._ttl), method="GET",
             response_type="application/pdf", response_disposition="inline",  # render in the iframe, don't download
         )
+        # On Cloud Run the runtime credentials come from the metadata server and carry ONLY a token, so
+        # generate_signed_url() can't sign a v4 URL locally ("you need a private key to sign
+        # credentials"). Detect those creds and sign through the IAM SignBlob API instead — hand it the
+        # SA email + a fresh access token (the runtime SA holds serviceAccountTokenCreator on itself).
+        # A local key-based ADC still has a usable signer and signs directly, so leave it untouched.
+        creds, _ = google.auth.default()
+        if isinstance(creds, compute_engine.Credentials):
+            creds.refresh(gauth_requests.Request())
+            kwargs.update(service_account_email=creds.service_account_email, access_token=creds.token)
+        return blob.generate_signed_url(**kwargs)
 
     # ── proxy-mode bytes (used only by /chat/source/raw) ────────────────────
     def download(self, doc: SourceDoc) -> Optional[bytes]:
