@@ -3,7 +3,7 @@ import time
 
 import pytest
 
-from app.utils.timeouts import ExternalTimeout, call_with_timeout
+from services.chat.app.utils.timeouts import ExternalTimeout, call_with_timeout
 
 
 def test_fast_call_returns_its_value():
