@@ -78,11 +78,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# aggregation/bbox_generator/mcp/validation already tag their own router
-# (APIRouter(tags=[...])) -- passing `tags=` again here would just duplicate
-# that tag on every operation, so we only pass it where the router doesn't
-# already carry one (extraction, chat).
-app.include_router(extraction_router, prefix="/extraction", tags=["extraction"])
+# aggregation/bbox_generator/mcp/validation/extraction already tag their own
+# router (APIRouter(tags=[...])) -- passing `tags=` again here would just
+# duplicate that tag on every operation (e.g. extraction's /health and
+# /extract would carry both "Extraction" and "extraction"), so we only pass
+# it where the router doesn't already carry one (chat).
+app.include_router(extraction_router, prefix="/extraction")
 app.include_router(chat_router, prefix="/chat", tags=["chat"])
 app.include_router(validation_router, prefix="/validation")
 app.include_router(aggregation_router, prefix="/aggregation")
