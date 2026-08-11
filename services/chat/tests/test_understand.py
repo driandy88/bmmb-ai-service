@@ -176,6 +176,23 @@ def test_named_unindexed_survives_a_misresolve_instead_of_funnelling():
     assert any("Sales" in s["label"] for s in res["suggestions"])
 
 
+def test_documents_gap_for_indexed_programme_redirects_to_sales_not_soft_help():
+    # The combined deck has no per-programme 'documents' page for GGSM. A documents question must
+    # SMOOTHLY point to Sales for the up-to-date list — not drop to the generic soft-help.
+    class _DocsAsk(StubLLMClient):
+        def understand(self, message, history=None, *, programs=None, stage=""):
+            return normalize_understanding({"turn_type": "program_info", "program_code": "GGSM3",
+                                            "program_status": "indexed", "attribute": "documents"})
+    adv = ProgramAdvisor(_DocsAsk(), FakeRetriever([], PROGS))          # index returns nothing for documents
+    res = adv.handle("what documents do I need for GGSM", [], {}, stage="")
+    low = res["reply"].lower()
+    assert not res.get("grounded")
+    assert "up-to-date" in low or "up to date" in low                  # the "latest list" framing
+    assert "team" in low                                               # points to the SME team
+    assert any("Sales" in s["label"] for s in res["suggestions"])      # a Connect-to-Sales chip
+    assert "what would be most useful" not in low                      # NOT the generic soft-help
+
+
 def test_greeting_prefix_still_answers_the_programme_question():
     # "hi, what is tenure for GGSM" — a greeting/filler prefix can make the model drop program_code.
     # The deterministic backstop resolves the INDEXED programme the message names, so it still answers
