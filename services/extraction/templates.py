@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.auth import require_admin_key
-from app.config import (
+from .auth import require_admin_key
+from .config import (
     AttributeNotFoundError,
     NameAlreadyExistsError,
     TemplateNotFoundError,
@@ -11,10 +11,10 @@ from app.config import (
     list_templates,
     update_template,
 )
-from app.schema_builder import render_extraction_prompt
-from app.schemas import TemplateCreate, TemplateOut, TemplateUpdate
+from .schema_builder import render_extraction_prompt
+from .schemas import TemplateCreate, TemplateOut, TemplateUpdate
 
-router = APIRouter(prefix="/templates", tags=["Templates"])
+router = APIRouter(prefix="/templates", tags=["templates"])
 
 
 @router.get("/", response_model=list[TemplateOut])

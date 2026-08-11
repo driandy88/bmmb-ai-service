@@ -1,11 +1,11 @@
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
-from app.config import TemplateNotFoundError, get_template
-from app.gemini_client import GeminiCallError, GeminiConfigError, GeminiParseError, run_extraction
-from app.schema_builder import build_gemini_schema, generate_extraction_prompt, reshape_locations
-from app.schemas import ApiResponse
+from .config import TemplateNotFoundError, get_template
+from .gemini_client import GeminiCallError, GeminiConfigError, GeminiParseError, run_extraction
+from .schema_builder import build_gemini_schema, generate_extraction_prompt, reshape_locations
+from .schemas import ApiResponse
 
-router = APIRouter(tags=["Extraction"])
+router = APIRouter(tags=["extraction"])
 
 ALLOWED_MIME_TYPES = {
     "application/pdf",

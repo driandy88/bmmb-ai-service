@@ -4,12 +4,12 @@ Repo: [`driandy88/bmmb-ai-service`](https://github.com/driandy88/bmmb-ai-service
 
 Standalone document extraction API. Upload a PDF or image, pick a template, get
 back structured JSON — powered by Gemini (via Vertex AI). No database, no
-CRUD UI: templates are defined declaratively in `app/templates_config.json`.
+CRUD UI: templates are defined declaratively in `services/extraction/templates_config.json`.
 
 This is a deliberately narrow extraction of the original Universal Data
 Extractor project (Phase 3 of `dev_plans.md`) — the CRUD-based
 Attribute/Template management UI is out of scope here. If you need to define
-a new template, edit `app/templates_config.json` directly (see below).
+a new template, edit `services/extraction/templates_config.json` directly (see below).
 
 > This repo currently holds only the extraction service. The judgement-RAG and
 > memo/LO services are planned to land here later — see the note at the
@@ -250,13 +250,14 @@ configure there beyond the IAM role it already has.
 ### Run it
 
 ```bash
-uv run uvicorn app.main:app --reload
-# no uv? fallback: uvicorn app.main:app --reload   (with venv activated)
+uv run uvicorn services.extraction.api:app --reload
+# no uv? fallback: uvicorn services.extraction.api:app --reload   (with venv activated)
 ```
 
 Open `http://localhost:8000/docs` for the interactive Swagger UI. Run it
-**from the repo root** — `.env` is loaded relative to the current working
-directory, so running from inside `app/` or `notebooks/` won't find it.
+**from the repo root** — imports are `services.extraction.*` and `.env` is
+loaded relative to the current working directory, so running from inside
+`services/extraction/` or `notebooks/` won't find it.
 
 ---
 
@@ -298,7 +299,7 @@ local server needed — the deployed service is already fully configured.
    your Google account Vertex AI access (see "Auth" above — this is a
    one-time grant tied to *your* account, not something you inherit
    automatically), then run `gcloud auth application-default login`.
-2. Run it: `uv run uvicorn app.main:app --reload` (leave this running in a terminal).
+2. Run it: `uv run uvicorn services.extraction.api:app --reload` (leave this running in a terminal).
 3. Drop your own test document into `sample_docs/private/` — this folder is
    **git-ignored** (except its README), so real/sensitive test documents
    never risk getting committed. Never put real documents anywhere else in the repo.
@@ -323,13 +324,13 @@ local server needed — the deployed service is already fully configured.
    git checkout -b feature/<short-description>
    ```
 2. Make your change:
-   - New/changed template field → edit `app/templates_config.json` (see "Adding or changing a template" below)
-   - New field type or extraction logic → edit `app/schema_builder.py`
-   - Prompt wording → edit `SYSTEM_INSTRUCTION` or `generate_extraction_prompt()` in `app/schema_builder.py` / `app/gemini_client.py`
-3. Test locally, in this order:
+   - New/changed template field → edit `services/extraction/templates_config.json` (see "Adding or changing a template" below)
+   - New field type or extraction logic → edit `services/extraction/schema_builder.py`
+   - Prompt wording → edit `SYSTEM_INSTRUCTION` or `generate_extraction_prompt()` in `services/extraction/schema_builder.py` / `services/extraction/gemini_client.py`
+3. Test locally, in this order (from the repo root):
    ```bash
-   pytest tests/ -v                          # fast, no credentials needed — must pass
-   uv run uvicorn app.main:app --reload       # then re-run the notebook's Local cell
+   pytest services/extraction/tests/ -v                # fast, no credentials needed — must pass
+   uv run uvicorn services.extraction.api:app --reload  # then re-run the notebook's Local cell
    ```
    Use your own test document in `sample_docs/private/` if the change affects
    a specific document type, so you're testing against something realistic.
@@ -353,29 +354,30 @@ local server needed — the deployed service is already fully configured.
 
 ## Adding or changing a template
 
-Templates live entirely in `app/templates_config.json` — no code change
-needed for a new field or template, only for a new field **type**.
+Templates live entirely in `services/extraction/templates_config.json` — no
+code change needed for a new field or template, only for a new field
+**type**.
 
 1. Add a new top-level key with either a `fields` object (single-object
    template) or a `<something>_object_fields` object (array template).
 2. Each field needs `field_name`, `description`, `example`, `data_type`
    (`string`, `float`, `date`, or `list[string]`).
-3. Run `pytest tests/test_schema_builder.py` — add a case if it's a new
-   template you want permanently covered.
+3. Run `pytest services/extraction/tests/test_schema_builder.py` — add a case
+   if it's a new template you want permanently covered.
 
-To add a new `data_type`, extend `_TYPE_MAP` in `app/schema_builder.py`.
+To add a new `data_type`, extend `_TYPE_MAP` in `services/extraction/schema_builder.py`.
 
 ---
 
 ## Testing (reference)
 
 ```bash
-pytest tests/ -v
+pytest services/extraction/tests/ -v
 ```
 
-Tests never call the real Gemini/Vertex AI API — `app.extraction.run_extraction`
-is monkeypatched in `tests/test_api.py`, so CI runs with no credentials and no
-network access.
+Tests never call the real Gemini/Vertex AI API —
+`services.extraction.extraction.run_extraction` is monkeypatched in
+`tests/test_api.py`, so CI runs with no credentials and no network access.
 
 For a real end-to-end test (actual Gemini call, both local and deployed), see
 **"For collaborators" → A** above.
@@ -459,7 +461,7 @@ Delete the local `github-deployer-key.json` file once it's pasted into the secre
 - Branch names: `feature/<short-description>`, `fix/<short-description>`.
 
 **PR checklist**
-- [ ] `pytest tests/` passes locally
+- [ ] `pytest services/extraction/tests/` passes locally
 - [ ] New template? Added a case to `test_schema_builder.py`
 - [ ] Tested against a real document locally (see "For collaborators" → A/B above)
 - [ ] Notebook output cleared if it contains real extracted data
@@ -474,7 +476,7 @@ Delete the local `github-deployer-key.json` file once it's pasted into the secre
 
 | Problem | Fix |
 |---|---|
-| `ModuleNotFoundError: app` | Run commands from the repo root, not from inside `app/` |
+| `ModuleNotFoundError: services` | Run commands from the repo root, not from inside `services/extraction/` |
 | `500 Service misconfigured: GCP_PROJECT_ID is not set` | `.env` is missing, misnamed (must be exactly `.env`, not `.env.example`), in the wrong folder (must be repo root), or uvicorn was started before `.env` existed — stop it fully (Ctrl+C) and restart; `--reload` does not re-read `.env` |
 | `.env` seems right but still not picked up | Sanity-check in isolation: `python3 -c "from dotenv import load_dotenv; import os; load_dotenv(); print(os.getenv('GCP_PROJECT_ID'))"` from the repo root — should print `prototype-bmmb-1b62` |
 | `502 Gemini API error` (local) | Run `gcloud auth application-default login`; if the error mentions `PERMISSION_DENIED`, your Google account hasn't been granted Vertex AI access on `prototype-bmmb-1b62` yet — ask a project owner to run the `add-iam-policy-binding ... roles/aiplatform.user` command in "Auth" above for your account |

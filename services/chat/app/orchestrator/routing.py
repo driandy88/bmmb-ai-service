@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from app.config.loader import Responses, Taxonomy
+from ..config.loader import Responses, Taxonomy
 
 # ROUTE-* (from intents.yaml) -> (graph node key, human-readable audit label).
 # This is dispatch WIRING, not taxonomy data — the ROUTE-* strings themselves

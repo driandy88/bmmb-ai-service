@@ -7,8 +7,8 @@ import types
 import pytest
 from fastapi.testclient import TestClient
 
-from app.integrations.source_preview import SourcePreview
-from app.main import app
+from services.chat.app.integrations.source_preview import SourcePreview
+from services.chat.api import app
 
 
 def _sp(mode="off"):
@@ -68,6 +68,11 @@ def test_endpoint_internal_doc_forbidden_on_customer(client):
     assert r.status_code == 403
 
 
-def test_endpoint_off_mode_is_503(client):
-    # Test env has no GCP project → SOURCE_PREVIEW_MODE defaults to "off" → preview unavailable.
-    assert client.get("/chat/source", params={"doc_id": "ggsm"}).status_code == 503
+def test_endpoint_off_mode_is_503(client, monkeypatch):
+    # get_source_preview() lazily caches its SourcePreview on app.state from get_settings()
+    # (a process-wide lru_cache) -- earlier tests in this module already forced that cache
+    # to build against whatever mode the ambient environment resolves to (e.g. "signed" if a
+    # real GCP_PROJECT_ID is set locally). Pin app.state directly so this test asserts the
+    # "off" behavior deterministically, regardless of ambient env.
+    monkeypatch.setattr(client.app.state, "source_preview", _sp("off"), raising=False)
+    assert client.get("/chat/source", params={"doc_id": "ggsm3"}).status_code == 503

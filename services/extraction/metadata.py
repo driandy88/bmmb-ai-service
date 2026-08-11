@@ -1,11 +1,11 @@
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
-from app import forensics
-from app.extraction import ALLOWED_MIME_TYPES, MAX_FILE_SIZE
-from app.metadata_extractor import MetadataError, get_file_metadata
-from app.schemas import ApiResponse
+from . import forensics
+from .extraction import ALLOWED_MIME_TYPES, MAX_FILE_SIZE
+from .metadata_extractor import MetadataError, get_file_metadata
+from .schemas import ApiResponse
 
-router = APIRouter(tags=["Metadata"])
+router = APIRouter(tags=["metadata"])
 
 
 async def _read_validated(file: UploadFile) -> tuple[bytes, str]:

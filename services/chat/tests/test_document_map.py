@@ -7,7 +7,7 @@ boundary (Tier-2 fields in the same document are never mapped).
 """
 from datetime import date
 
-from app.agents.eligibility import document_map as dm
+from services.chat.app.agents.eligibility import document_map as dm
 
 TODAY = date(2026, 7, 28)
 

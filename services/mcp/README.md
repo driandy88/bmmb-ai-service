@@ -9,10 +9,13 @@ sends an email, with a Gemini agent writing the body from a short description.
 | Method & path | Auth / env | Purpose |
 |---|---|---|
 | `GET /health` | none | Liveness. |
-| `GET /mcp/servers` | none | Catalog of available MCP servers + the form fields each needs. Drives the UI. |
-| `POST /mcp/gmail/send` | needs credentials (below) | Compose + send one email via the Gmail MCP server. |
+| `GET /servers` | none | Catalog of available MCP servers + the form fields each needs. Drives the UI. |
+| `POST /gmail/send` | needs credentials (below) | Compose + send one email via the Gmail MCP server. |
 
-### `POST /mcp/gmail/send`
+Mounted standalone as above. When embedded in the unified app (`main.py`) under
+its `/mcp` prefix, these become `/mcp/health`, `/mcp/servers`, `/mcp/gmail/send`.
+
+### `POST /gmail/send`
 
 ```json
 // request

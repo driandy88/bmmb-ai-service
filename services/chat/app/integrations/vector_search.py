@@ -22,9 +22,9 @@ from __future__ import annotations
 import math
 from functools import lru_cache
 
-from app.agents.rag.retriever import Corpus, CorpusScope, RetrievalChunk, Retriever
-from app.config.settings import Settings
-from app.utils.logging import get_logger
+from ..agents.rag.retriever import Corpus, CorpusScope, RetrievalChunk, Retriever
+from ..config.settings import Settings
+from ..utils.logging import get_logger
 
 log = get_logger("rag.pgvector")
 
@@ -102,7 +102,7 @@ class PgVectorRetriever(Retriever):
     # ── query embedding (RETRIEVAL_QUERY, matches ingest) ────────────────────
     def _embed(self, query: str) -> str:
         from google.genai import types
-        from app.utils.timeouts import call_with_timeout
+        from ..utils.timeouts import call_with_timeout
         client = _genai_client(self._s.gcp_project_id, self._s.vertex_location)
         cfg = types.EmbedContentConfig(task_type=_QUERY_TASK, output_dimensionality=self._s.embedding_dimensions)
         resp = call_with_timeout(

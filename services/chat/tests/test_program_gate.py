@@ -2,9 +2,9 @@
 off-topic (the classifier is blind to the acronyms) so it reaches the programme advisor."""
 import types
 
-from app.agents.program_advisor.program_match import mentions_program
-from app.config.loader import load_config
-from app.orchestrator.nodes import classify_node
+from services.chat.app.agents.program_advisor.program_match import mentions_program
+from services.chat.app.config.loader import load_config
+from services.chat.app.orchestrator.nodes import classify_node
 
 _cfg = load_config()
 

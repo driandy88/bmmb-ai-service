@@ -1,0 +1,76 @@
+# Unified requirements for the single-image build of all 6 agent services
+# (aggregation, bbox_generator, chat, extraction, mcp, validation) plus
+# services/rag-ingestion's runtime deps (see PLAN.md Phase 0/1 -- it's folded
+# into the shared image now even though it isn't mounted as a router yet).
+# This is the union of each service's services/*/requirements.txt (production
+# deps only -- requirements-dev.txt and rag-ingestion's eval-only deps
+# (ragas/datasets/langchain-google-vertexai/pytest) are not part of this
+# runtime image; see PLAN.md for the deferred requirements-eval.txt).
+#
+# Phase 1 (see PLAN.md) already unified fastapi/uvicorn/pydantic/python-dotenv
+# to 0.139.2/0.51.0/2.13.4/1.2.1 and google-genai to 1.47.0 across all 6
+# per-service requirements.txt files. Unioning them as-is is NOT
+# pip-installable, though -- dry-run resolving the full set surfaced two
+# floors Phase 1 didn't account for, both bumped here:
+#
+#   - google-genai: Phase 1 pinned 1.47.0 everywhere, but mcp's
+#     langchain-google-genai==4.2.7 requires google-genai>=1.65.0 (pip
+#     ResolutionImpossible otherwise). Bumped to 1.65.0 -- both versions are
+#     within the 1.x stable client API (unlike the old pre-1.0 line), so this
+#     is a low-risk minor-version bump, not an API break.
+#   - python-multipart: bbox_generator/extraction pinned 0.0.20/0.0.*, but
+#     fastmcp (mcp, via its "server" extra) requires >=0.0.26. Bumped to
+#     0.0.32.
+#
+# One conflict Phase 1 left unresolved: chat pins langgraph==0.2.* +
+# langchain-core==0.3.* (langgraph 0.2.x requires langchain-core<0.4); mcp
+# pins langchain-core==1.4.9 via langchain==1.3.14 (which requires
+# langchain-core>=1.4.9). These two families cannot coexist as pinned --
+# resolved here to the newer line, langgraph==1.2.10 (the first langgraph
+# release supporting langchain-core 1.x) + langchain-core==1.4.9. chat's
+# LangGraph orchestration code (services/chat/app/orchestrator/) targeted the
+# 0.2.x API and will need a follow-up migration to the 1.x API to actually
+# run correctly under this pin -- this file only guarantees `pip install`
+# succeeds, not that chat's graph still behaves.
+#
+# pip install of this exact set was dry-run verified to resolve cleanly
+# against the real PyPI index.
+
+# --- Web framework (aggregation, bbox_generator, chat, extraction, mcp, validation) ---
+fastapi[standard]==0.139.2
+uvicorn[standard]==0.51.0
+pydantic==2.13.4
+python-multipart==0.0.32
+
+# --- Shared utilities (chat, extraction, mcp, validation, rag-ingestion) ---
+python-dotenv==1.2.1
+PyYAML==6.0.3
+python-dateutil==2.9.0.post0
+
+# --- Vertex AI (Gemini) client (bbox_generator, chat, extraction, validation, rag-ingestion) ---
+google-genai==1.65.0
+
+# --- LangChain / LangGraph orchestration (chat, mcp) ---
+langgraph==1.2.10
+langchain==1.3.14
+langchain-core==1.4.9
+langchain-google-genai==4.2.7
+langchain-mcp-adapters==0.3.0
+fastmcp==3.4.4
+
+# --- Cloud SQL / storage (chat, extraction, rag-ingestion) ---
+google-cloud-storage==2.19.0
+cloud-sql-python-connector[pg8000]==1.21.0
+SQLAlchemy==2.0.51
+psycopg[binary]==3.3.4
+
+# --- Document parsing / OCR (bbox_generator, extraction, rag-ingestion) ---
+pdfplumber==0.11.4
+pytesseract==0.3.13
+Pillow==11.0.0
+PyMuPDF==1.24.14
+
+# --- rag-ingestion only (pipeline/stage1_parse.py, stage4_chunk.py, stage6_embed.py, stage7_index.py) ---
+tiktoken==0.13.0
+google-cloud-aiplatform==1.145.0
+pgvector==0.5.0

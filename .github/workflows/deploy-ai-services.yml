@@ -1,0 +1,283 @@
+name: Refactor CI — per-service tests, unified deploy
+
+# Scoped to the refactor/agents-services integration branch (see PLAN.md Phase 0):
+# tickets branch off it and open PRs back into it, and it's pushed to directly on
+# merge. This does NOT touch the six main-branch deploy-*.yml workflows.
+on:
+  push:
+    branches: [refactor/agents-services]
+  pull_request:
+    branches: [refactor/agents-services]
+  workflow_dispatch:
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      extraction: ${{ steps.filter.outputs.extraction }}
+      chat: ${{ steps.filter.outputs.chat }}
+      validation: ${{ steps.filter.outputs.validation }}
+      aggregation: ${{ steps.filter.outputs.aggregation }}
+      bbox_generator: ${{ steps.filter.outputs.bbox_generator }}
+      mcp: ${{ steps.filter.outputs.mcp }}
+      rag_ingestion: ${{ steps.filter.outputs.rag_ingestion }}
+      shared: ${{ steps.filter.outputs.shared }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            # Root files every service is built/imported from (unified main.py +
+            # Dockerfile). A change here can affect any mounted router, so it runs
+            # every service's tests rather than none of them.
+            shared:
+              - 'main.py'
+              - 'requirements.txt'
+              - 'Dockerfile'
+              - 'services/__init__.py'
+              - '.github/workflows/deploy-ai-services.yml'
+            extraction:
+              - 'services/extraction/**'
+            chat:
+              - 'services/chat/**'
+            validation:
+              - 'services/validation/**'
+            aggregation:
+              - 'services/aggregation/**'
+            bbox_generator:
+              - 'services/bbox_generator/**'
+            mcp:
+              - 'services/mcp/**'
+            rag_ingestion:
+              - 'services/rag-ingestion/**'
+
+  test-extraction:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.extraction == 'true' || needs.detect-changes.outputs.shared == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          # tests hit the real bmmb_dev Cloud SQL database (see
+          # services/extraction/tests/test_schema_builder.py) — read-only against dev.
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r services/extraction/requirements.txt -r services/extraction/requirements-dev.txt
+
+      - name: Run tests
+        env:
+          APP_ENV: dev
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          INSTANCE_CONNECTION_NAME: ${{ secrets.INSTANCE_CONNECTION_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASS: ${{ secrets.DB_PASS }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+        run: pytest services/extraction/tests -v
+
+  test-chat:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.chat == 'true' || needs.detect-changes.outputs.shared == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r services/chat/requirements.txt -r services/chat/requirements-dev.txt
+
+      # Hermetic: LLM/RAG/audit/session backends default to offline stubs
+      # (LLM_BACKEND=stub), so no Vertex/Gemini calls and no credentials needed.
+      - name: Run tests
+        run: pytest services/chat/tests -v
+
+  test-validation:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.validation == 'true' || needs.detect-changes.outputs.shared == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r services/validation/requirements.txt -r services/validation/requirements-dev.txt
+
+      # genai.Client is monkeypatched in tests/test_api.py — no real Gemini calls.
+      - name: Run tests
+        run: pytest services/validation/tests -v
+
+  test-aggregation:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.aggregation == 'true' || needs.detect-changes.outputs.shared == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r services/aggregation/requirements.txt -r services/aggregation/requirements-dev.txt
+
+      # Pure deterministic Python, no Vertex AI / Cloud SQL — no credentials needed.
+      - name: Run tests
+        run: pytest services/aggregation/tests -v
+
+  test-bbox-generator:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.bbox_generator == 'true' || needs.detect-changes.outputs.shared == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tesseract (for pytesseract OCR tests)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r services/bbox_generator/requirements.txt -r services/bbox_generator/requirements-dev.txt
+
+      # genai.Client is monkeypatched in tests/test_llm_bbox.py — no real Gemini calls.
+      - name: Run tests
+        run: pytest services/bbox_generator/tests -v
+
+  test-mcp:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.mcp == 'true' || needs.detect-changes.outputs.shared == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r services/mcp/requirements-dev.txt
+
+      # Hermetic: no Gmail, no Gemini, no network — no credentials needed.
+      - name: Run tests
+        run: pytest services/mcp/tests -v
+
+  test-rag-ingestion:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.rag_ingestion == 'true' || needs.detect-changes.outputs.shared == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # pytest is bundled in this service's own requirements.txt (no separate
+      # requirements-dev.txt here yet, unlike the other six services).
+      - name: Install dependencies
+        run: pip install -r services/rag-ingestion/requirements.txt
+
+      # Pure unit tests against pipeline/verify.py + config/sanity_rules.yaml —
+      # no Vertex AI / Cloud SQL calls, no credentials needed.
+      - name: Run tests
+        run: pytest services/rag-ingestion/tests -v
+
+  # One image, one Cloud Run service (services/*/Dockerfile were renamed to
+  # Dockerfile.old — see root Dockerfile/main.py). Deploys the same
+  # oneflow-ai-services-dev service that was stood up manually; this job
+  # replicates that config so future pushes keep it in sync instead of drifting.
+  # Runs after whatever test jobs above actually ran (skipped ones count as
+  # passing), only on a direct push to refactor/agents-services -- never on a PR.
+  deploy:
+    needs:
+      - test-extraction
+      - test-chat
+      - test-validation
+      - test-aggregation
+      - test-bbox-generator
+      - test-mcp
+      - test-rag-ingestion
+    if: |
+      always() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/refactor/agents-services' &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # required for keyless auth if you switch to Workload Identity later
+    env:
+      PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      REGION: asia-southeast1
+      SERVICE_NAME: oneflow-ai-services-dev
+      REPO_NAME: bmmb-ai-service
+      IMAGE_NAME: ai-services
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      # Build context is the repo root ("."), not a per-service dir -- the
+      # unified image bundles all 7 services behind one main.py.
+      - name: Build image
+        run: |
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }} .
+
+      - name: Push image
+        run: |
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      # Env vars are the union of what the 6 original per-service deploy workflows
+      # set (extraction's Cloud SQL vars, chat's Vertex/RAG vars, mcp's secrets),
+      # matching the live oneflow-ai-services-dev revision. bmmb-unified-service-sa
+      # needs the union of the original SAs' IAM roles (aiplatform.user,
+      # cloudsql.client) plus secretAccessor on the 5 secrets below.
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            --region=${{ env.REGION }} \
+            --platform=managed \
+            --allow-unauthenticated \
+            --memory=2Gi --cpu=2 \
+            --concurrency=160 \
+            --timeout=300 \
+            --cpu-boost \
+            --service-account=bmmb-unified-service-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+            --add-cloudsql-instances=${{ secrets.INSTANCE_CONNECTION_NAME }} \
+            --set-env-vars=GCP_PROJECT_ID=${{ env.PROJECT_ID }},VERTEX_LOCATION=${{ env.REGION }},APP_ENV=prod,ALLOWED_ORIGINS='*',INSTANCE_CONNECTION_NAME=${{ secrets.INSTANCE_CONNECTION_NAME }},DB_USER=${{ secrets.DB_USER }},DB_HOST=/cloudsql/${{ secrets.INSTANCE_CONNECTION_NAME }},DB_PORT=5432,DB_NAME=bmmb_dev,LLM_BACKEND=vertex,MODEL_ID=gemini-2.5-flash,RAG_BACKEND=pgvector,AUDIT_BACKEND=memory,SESSION_STORE_BACKEND=none,EXTRACTION_BACKEND=stub,USE_UNDERSTAND=1,EMBEDDING_MODEL_ID=gemini-embedding-001,EMBEDDING_DIMENSIONS=1536 \
+            --set-secrets=DB_PASS=${{ secrets.DB_PASS_SECRET_NAME }}:latest,ADMIN_API_KEY=${{ secrets.ADMIN_API_KEY_SECRET_NAME }}:latest,GOOGLE_API_KEY=MCP_GOOGLE_API_KEY:latest,SENDER_EMAIL=MCP_SENDER_EMAIL:latest,APP_PASSWORD=MCP_APP_PASSWORD:latest
+
+      - name: Show deployed URL
+        run: gcloud run services describe ${{ env.SERVICE_NAME }} --region=${{ env.REGION }} --format="value(status.url)"

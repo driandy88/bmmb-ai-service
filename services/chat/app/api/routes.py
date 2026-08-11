@@ -14,8 +14,8 @@ from typing import Optional
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 
-from app.api.schemas import ChatRequest, ChatResponse, HealthResponse, SourceDocResponse
-from app.config.settings import get_settings
+from .schemas import ChatRequest, ChatResponse, HealthResponse, SourceDocResponse
+from ..config.settings import get_settings
 
 router = APIRouter()
 
@@ -40,7 +40,7 @@ def get_orchestrator(app):
     the lifespan wasn't run (e.g. a bare TestClient in a notebook)."""
     orch = getattr(app.state, "orchestrator", None)
     if orch is None:
-        from app.orchestrator.graph import build_orchestrator
+        from ..orchestrator.graph import build_orchestrator
         orch = build_orchestrator()
         app.state.orchestrator = orch
     return orch
@@ -145,7 +145,7 @@ def health(request: Request) -> HealthResponse:
 
     # Config load is a cheap liveness proxy for the deterministic core.
     try:
-        from app.config.loader import load_config
+        from ..config.loader import load_config
         load_config()
         checks["config"] = "loaded"
     except Exception as exc:  # noqa: BLE001
@@ -169,7 +169,7 @@ def get_source_preview(app):
     """Lazily build + cache the source-preview resolver on app.state."""
     sp = getattr(app.state, "source_preview", None)
     if sp is None:
-        from app.integrations.source_preview import SourcePreview
+        from ..integrations.source_preview import SourcePreview
         sp = SourcePreview(get_settings())
         app.state.source_preview = sp
     return sp
