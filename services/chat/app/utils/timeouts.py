@@ -18,7 +18,7 @@ from __future__ import annotations
 import threading
 from typing import Callable, TypeVar
 
-from app.utils.logging import get_logger
+from .logging import get_logger
 
 log = get_logger("timeout")
 T = TypeVar("T")
