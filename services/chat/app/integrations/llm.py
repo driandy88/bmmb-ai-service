@@ -289,6 +289,29 @@ def _chunk_text(c: Any) -> str:
     return getattr(c, "text", None) or (c.get("text") if isinstance(c, dict) else "") or ""
 
 
+def _clean_context(text: str) -> str:
+    """Strip source-deck markdown STRUCTURE from a chunk before it goes to the synthesiser. Handed a
+    "### PURPOSE OF FINANCING\\n* Working Capital\\n| a | b |" block, gemini-flash tends to echo it
+    verbatim (a copied section, not an answer); given plain prose instead it summarises. Keeps every word
+    and figure — only the markup goes: headings, bold, bullet glyphs, and table rows flattened to
+    "a, b, c" so the numbers survive."""
+    out: list[str] = []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if re.fullmatch(r"\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?", s):  # table separator row
+            continue
+        if "|" in s:                                                       # table row -> "a, b, c"
+            s = ", ".join(c.strip() for c in s.strip().strip("|").split("|") if c.strip())
+        s = re.sub(r"^#{1,6}\s*", "", s)                                   # heading hashes
+        s = re.sub(r"^[*\-•]\s+", "", s)                                   # leading bullet glyph
+        s = re.sub(r"\*\*([^*]+)\*\*", r"\1", s).replace("**", "").replace("`", "")  # bold / code
+        if s:
+            out.append(s)
+    return "\n".join(out).strip()
+
+
 def _chunk_label(c: Any) -> str:
     """'doc_title · section' for the numbered chunk shown to the synthesiser."""
     md = getattr(c, "metadata", None) or (c.get("metadata") if isinstance(c, dict) else {}) or {}
@@ -707,7 +730,7 @@ class VertexGeminiClient(LLMClient):
         if not n:
             return {"sentences": [], "grounded": False}
         try:
-            listing = "\n\n".join(f"[{i}] ({_chunk_label(c)})\n{_chunk_text(c)}"
+            listing = "\n\n".join(f"[{i}] ({_chunk_label(c)})\n{_clean_context(_chunk_text(c))}"
                                   for i, c in enumerate(chunks, start=1))
             filled = render(load_prompt("answer_synthesis"), query=query, chunks=listing,
                             history=self._history_text(history or []))
