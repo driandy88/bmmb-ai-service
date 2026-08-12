@@ -40,6 +40,38 @@ def _citation(n: int, c: Any) -> dict:
     }
 
 
+# Deterministic formatting backstop. The synthesis prompt already says "rephrase, don't transcribe —
+# no markdown tables/headings/bullet glyphs", but gemini-flash still copies source markup through on
+# broad questions (a whole "### SECTION" or a "| a | b |" table lands verbatim in a sentence). Rather
+# than tighten a probabilistic instruction yet again, strip the markup here so the UI — which renders
+# each sentence as plain text — can NEVER show raw `###`, `**`, `|`, or `---`. Wording is left intact;
+# only formatting symbols are removed, so it changes nothing on already-clean sentences.
+_MD_BOLD = re.compile(r"\*\*([^*]+)\*\*")
+_MD_BOLD_ALT = re.compile(r"__([^_]+)__")
+_MD_HEADING = re.compile(r"#{1,6}\s*")
+_MD_RULE = re.compile(r":?-{3,}:?")
+_MD_PIPE = re.compile(r"\s*\|\s*")
+_MD_BULLET = re.compile(r"(^|\s)[•·*]\s+")
+_MULTI_COMMA = re.compile(r"(?:,\s*){2,}")
+_WS = re.compile(r"\s{2,}")
+
+
+def _clean_prose(text: str) -> str:
+    t = text.strip()
+    t = re.sub(r"^['‘’]+\s*", "", t)   # stray leading quote the extractor sometimes leaves
+    t = _MD_BOLD.sub(r"\1", t)
+    t = _MD_BOLD_ALT.sub(r"\1", t)
+    t = t.replace("**", "").replace("`", "")     # drop any unclosed bold / code ticks
+    t = _MD_HEADING.sub("", t)                   # "### PURPOSE" / "#…" -> drop the hashes
+    t = _MD_RULE.sub(" ", t)                     # --- / :--- table rules
+    t = _MD_PIPE.sub(", ", t)                    # flatten a copied table's cells to "a, b, c"
+    t = _MD_BULLET.sub(r"\1", t)                 # inline bullet glyphs
+    t = _MULTI_COMMA.sub(", ", t)                # collapse ", , ," from empty table cells
+    t = re.sub(r"^[\s,;]+", "", t)               # leading punctuation left by a stripped marker
+    t = _WS.sub(" ", t)
+    return t.strip()
+
+
 def _plain_reply(sentences: list) -> str:
     """Flatten the structured sentences into a plain-text reply for history / logging / channels
     without the structured UI. Bullet items render on their own "- " line so a list still reads as
@@ -90,7 +122,7 @@ def grounded_answer(llm, retriever: Retriever, message: str, corpus: CorpusScope
         return None
     sentences = []
     for s in (out.get("sentences") or []):
-        text = (s.get("text") or "").strip()
+        text = _clean_prose(s.get("text") or "")
         if not text:
             continue
         entry = {"text": text, "cites": list(s.get("cites") or [])}
