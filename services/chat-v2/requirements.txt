@@ -1,0 +1,30 @@
+# chat-v2 runtime deps.
+#
+# Mirrors services/chat/requirements.txt so the vendored modules behave
+# identically, PLUS the agent stack. Two deliberate differences from v1:
+#
+#   * langchain-google-vertexai — v1 talks to Gemini through its own thin
+#     VertexGeminiClient (structured JSON calls). v2 needs a LangChain chat
+#     model because that is what create_react_agent binds tools to.
+#   * google-genai is NOT here — v2 does not use v1's LLM client at all.
+#
+# Pinned by major to match the other services in this monorepo.
+fastapi[standard]==0.115.*
+uvicorn[standard]==0.32.*
+pydantic==2.*
+python-dotenv==1.0.*
+PyYAML==6.*
+
+# Agent loop. langgraph is used ONLY for its prebuilt tool-calling agent here —
+# there is no hand-authored state machine in v2. That is the whole experiment.
+langgraph==0.2.*
+langchain-core==0.3.*
+langchain-google-vertexai==2.*
+
+# Cloud SQL — audit durability (AUDIT_BACKEND=cloudsql), same as v1.
+cloud-sql-python-connector[pg8000]==1.*
+SQLAlchemy==2.*
+
+# RAG store (RAG_BACKEND=pgvector) — the vendored vector_search.py queries
+# Cloud SQL pgvector directly.
+psycopg[binary]==3.*

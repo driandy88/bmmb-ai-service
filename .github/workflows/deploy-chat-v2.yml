@@ -1,0 +1,92 @@
+name: Test, Build & Deploy — Chat v2 (agentic)
+
+# chat-v2 is an EXPERIMENT running beside services/chat, not a replacement.
+# It deploys to its own Cloud Run service so v1 traffic is never affected, and
+# so the whole experiment can be removed by deleting services/chat-v2 plus this
+# workflow plus the Cloud Run service.
+on:
+  pull_request:
+    branches: [main]
+    paths: ["services/chat-v2/**", "services/chat/**"]   # v1 too: the drift guard must run when v1 changes
+  push:
+    branches: [main]
+    paths: ["services/chat-v2/**", "services/chat/**"]
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: asia-southeast1
+  SERVICE_NAME: chat-service-v2
+  REPO_NAME: bmmb-ai-service
+  WORKDIR: services/chat-v2
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: ${{ env.WORKDIR }}
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      # Runs from the repo checkout, where services/chat is present — which is
+      # what lets tests/test_no_drift.py byte-compare the vendored modules
+      # against their v1 originals. Inside the image that check skips.
+      - name: Run tests (includes the v1 drift guard)
+        working-directory: ${{ env.WORKDIR }}
+        run: pytest tests/ -v
+
+  deploy:
+    needs: test
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build image
+        run: |
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} ${{ env.WORKDIR }}
+
+      - name: Push image
+        run: |
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+
+      # Reuses chat-service-sa: it already holds roles/aiplatform.user (Gemini +
+      # embeddings) and roles/cloudsql.client (pgvector + audit), which is exactly
+      # what v2 needs. Same DB, same corpus, same embedding pins as v1 — a
+      # mismatch there would make the A/B measure the retriever, not the approach.
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} \
+            --region=${{ env.REGION }} \
+            --platform=managed \
+            --allow-unauthenticated \
+            --memory=1Gi --cpu=1 \
+            --service-account=chat-service-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+            --add-cloudsql-instances=${{ secrets.INSTANCE_CONNECTION_NAME }} \
+            --set-env-vars=GCP_PROJECT_ID=${{ env.PROJECT_ID }},VERTEX_LOCATION=${{ env.REGION }},MODEL_ID=gemini-2.5-flash,RAG_BACKEND=pgvector,AUDIT_BACKEND=memory,ALLOWED_ORIGINS='*',APP_ENV=prod,DB_HOST=/cloudsql/${{ secrets.INSTANCE_CONNECTION_NAME }},DB_PORT=5432,DB_NAME=bmmb_prod,DB_USER=${{ secrets.DB_USER }},EMBEDDING_MODEL_ID=gemini-embedding-001,EMBEDDING_DIMENSIONS=1536,AGENT_MAX_STEPS=8 \
+            --set-secrets=DB_PASS=${{ secrets.DB_PASS_SECRET_NAME }}:latest
+
+      - name: Show deployed URL
+        run: gcloud run services describe ${{ env.SERVICE_NAME }} --region=${{ env.REGION }} --format="value(status.url)"

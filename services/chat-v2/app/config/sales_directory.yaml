@@ -1,0 +1,101 @@
+# Reroute to Sales — Customer Service workbook, Sheet
+# "2. Reroute to Sales". Handoff triggers (2.1), handoff message templates
+# (H1–H4), geo→region lookup, and the Sales directory (2.2 & 2.3).
+#
+# Consumed by agents/sales_handoff. Geo resolution: a customer's state OR city
+# -> region_id -> the region's contact. Unresolvable location -> fallback R1.
+
+# ── 2.1 Handoff trigger criteria ─────────────────────────────────────────────
+triggers:
+  - { id: T1, name: "Complaint / dispute",              condition: "Grievance about service, staff, or a decision.", route_to: "SME Sales Team" }
+  - { id: T2, name: "Explicit request for human",       condition: "Customer asks to talk to a person.",             route_to: "SME Sales Team" }
+  - { id: T3, name: "Repeated bot failure",             condition: "Unresolved after N turns / low-confidence loop.", route_to: "SME Sales Team" }
+  - { id: T4, name: "Sensitive / borderline eligibility", condition: "Manually-reviewable financing case (Sheet 5 Tier-2).", route_to: "SME Sales Team" }
+
+# ── 2.4 Handoff message templates (H1–H4) ────────────────────────────────────
+# {branch_contact} filled from the resolved directory entry; {hours} from
+# HANDOFF_HOURS.
+handoff_messages:
+  H1:
+    scenario: General handoff
+    message: "I'll connect you with our SME financing team who can help further. You can reach them at {branch_contact} during {hours}."
+  H2:
+    scenario: Complaint
+    message: "I'm sorry about this experience. Our team will look into it — please contact {branch_contact} and they'll assist you."
+  H3:
+    scenario: Identity required
+    message: "For your security, this step needs to be done with our team directly. Please reach {branch_contact}."
+  H4:
+    scenario: Repeated failure
+    message: "Let me hand you to someone who can help properly — please contact {branch_contact}."
+
+# Which handoff message each trigger uses.
+trigger_message:
+  T1: H2
+  T2: H1
+  T3: H4
+  T4: H1
+
+# ── Handoff intro (shown BEFORE the location IntakeCard) ──────────────────────
+# Contact-free lead-in per trigger — the actual contact is given after the
+# customer picks their state/city. Keeps the apology (T1) / framing up front.
+handoff_intro:
+  T1: "I'm sorry about this experience — let me connect you with our SME financing team who can help."
+  T2: "Of course — I'll connect you with our SME financing team."
+  T3: "Let me hand you to someone who can help properly."
+  T4: "Eligibility is best confirmed with our SME financing team directly — let me connect you."
+  default: "I'll connect you with our SME financing team."
+
+# ── 2.2 & 2.3 Sales directory & contact details ──────────────────────────────
+# region_id -> region + ordered contacts. The handoff picks contacts[0]
+# deterministically. R4/R6 have a single contact in the sheet.
+fallback_region_id: R1     # used when the location can't be identified
+regions:
+  R1:
+    region: Overall
+    contacts:
+      - { employee: "Commercial Sales Management Team", email: "commercial.sale.management@muamalat.com.my", phone: null }
+  R2:
+    region: Central
+    contacts:
+      - { employee: "Mohammad Elfi", email: "mohammad.elfi@muamalat.com.my", phone: "017-621 5751" }
+      - { employee: "Aqilah Padzil", email: "aqilah@muamalat.com.my",        phone: "017-376 1043" }
+  R3:
+    region: Southern
+    contacts:
+      - { employee: "Kamal Hamidi", email: "m.kamal.hamidi@muamalat.com.my", phone: "019-445 9456" }
+      - { employee: "Adam Ariff",   email: "adam.ariff@muamalat.com.my",     phone: "012-977 0821" }
+  R4:
+    region: Northern
+    contacts:
+      - { employee: "Ivan Teoh", email: "ivan.teoh@muamalat.com.my", phone: "012-524 1984" }
+  R5:
+    region: East Coast
+    contacts:
+      - { employee: "Azam Fakhrullah", email: "azam.fakrullah@muamalat.com.my", phone: "011-2763 2550" }
+      - { employee: "Sofian Kamil",    email: "m.sofian@muamalat.com.my",       phone: "012-394 4182" }
+  R6:
+    region: East Malaysia
+    contacts:
+      - { employee: "Niz Mohd Azaha", email: "nik.azaha@muamalat.com.my", phone: "019-288 8560" }
+
+# ── Geo → region lookup (states L1–L16) ──────────────────────────────────────
+# state -> region_id + cities. The agent matches the customer's text against
+# state names first, then any city.
+geo:
+  "Kuala Lumpur":     { region_id: R2, cities: ["Kuala Lumpur"] }
+  "Selangor":         { region_id: R2, cities: ["Petaling Jaya", "Shah Alam", "Subang Jaya", "Klang", "Kajang", "Ampang", "Cheras", "Puchong", "Rawang", "Kuala Selangor", "Sepang", "Banting", "Sungai Buloh"] }
+  "Putrajaya":        { region_id: R2, cities: ["Putrajaya"] }
+  "Johor":            { region_id: R3, cities: ["Johor Bahru", "Batu Pahat", "Muar", "Kluang", "Segamat", "Kulai", "Pontian", "Kota Tinggi", "Mersing", "Iskandar Puteri"] }
+  "Melaka":           { region_id: R3, cities: ["Melaka City", "Bandar Melaka", "Alor Gajah", "Jasin"] }
+  "Negeri Sembilan":  { region_id: R3, cities: ["Seremban", "Port Dickson", "Nilai", "Bahau", "Kuala Pilah", "Rembau"] }
+  "Penang":           { region_id: R4, cities: ["George Town", "Butterworth", "Bukit Mertajam", "Bayan Lepas", "Nibong Tebal"] }
+  "Kedah":            { region_id: R4, cities: ["Alor Setar", "Sungai Petani", "Kulim", "Langkawi", "Jitra", "Baling"] }
+  "Perak":            { region_id: R4, cities: ["Ipoh", "Taiping", "Teluk Intan", "Sitiawan", "Batu Gajah", "Kampar", "Lumut", "Kuala Kangsar"] }
+  "Perlis":           { region_id: R4, cities: ["Kangar", "Arau"] }
+  "Kelantan":         { region_id: R5, cities: ["Kota Bharu", "Pasir Mas", "Tanah Merah", "Gua Musang"] }
+  "Terengganu":       { region_id: R5, cities: ["Kuala Terengganu", "Kemaman", "Dungun", "Marang"] }
+  "Pahang":           { region_id: R5, cities: ["Kuantan", "Temerloh", "Bentong", "Raub", "Jerantut", "Pekan", "Cameron Highlands", "Genting Highlands"] }
+  "Sabah":            { region_id: R6, cities: ["Kota Kinabalu", "Sandakan", "Tawau", "Lahad Datu", "Keningau", "Semporna", "Kudat"] }
+  "Sarawak":          { region_id: R6, cities: ["Kuching", "Miri", "Sibu", "Bintulu", "Sri Aman", "Limbang"] }
+  "Labuan":           { region_id: R6, cities: ["Labuan Town", "Victoria"] }
