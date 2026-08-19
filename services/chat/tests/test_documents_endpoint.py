@@ -40,9 +40,13 @@ def test_documents_then_typed_staff_reaches_verdict():
                 "audited_financial_statements", "bank_statements"):
         d = _upload(tid, json.dumps(slots)).json()
         slots = d["state"]["collected_slots"]
-    # Docs fill 5 of 6; staff_count is never in a document.
-    assert set(slots) >= {"business_age_years", "working_capital_limit", "revenue",
+    # Docs fill 4 of 5 Tier-1 slots; staff_count is never in a document.
+    # (working_capital_limit is no longer a Tier-1 slot at all -- it's a computed
+    # OUTPUT now, see limit.py -- so it's absent even though document_map.py still
+    # maps it internally; the merge loop only copies rules.SLOT_KEYS.)
+    assert set(slots) >= {"business_age_years", "revenue",
                           "total_equity_or_net_worth", "end_balance"}
+    assert "working_capital_limit" not in slots
     assert "staff_count" not in slots
     # Add staff via the normal typed /chat path → verdict.
     body = {"message": "we have 8 staff",

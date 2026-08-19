@@ -45,7 +45,16 @@ class LLMClient(ABC):
 
     @abstractmethod
     def extract_slots(self, message: str, history: list[dict]) -> dict:
-        """-> {slot_key: number|None} for the six Tier-1 eligibility slots"""
+        """-> {slot_key: number|None} for the five Tier-1 eligibility slots plus
+        the informational operating_profit slot"""
+
+    @abstractmethod
+    def decide_eligibility_intent(self, message: str, history: list[dict]) -> dict:
+        """-> {action: "start_check"|"answer_criterion"|"continue", topics: [str, ...]}
+        Only called on a FRESH eligibility question (no slots collected yet) — decides
+        whether the customer wants the full check started, or is asking about one or
+        more specific criteria without wanting to start the flow. Never decides a
+        verdict or states a number; that stays in rules.py."""
 
     @abstractmethod
     def compose(self, prompt_name: str, *, message: str, history: list[dict],
@@ -262,10 +271,27 @@ _MONEY_RE = re.compile(r"(?:rm\s*)?(\d[\d,]*(?:\.\d+)?)\s*(juta|million|mil|m|k|
 _UNIT_MULT = {"juta": 1e6, "million": 1e6, "mil": 1e6, "m": 1e6, "k": 1e3, "ribu": 1e3, "thousand": 1e3}
 
 
+def _money_in(seg: str) -> Optional[float]:
+    """First money-looking value in `seg` (leftmost match), or None."""
+    for m in _MONEY_RE.finditer(seg):
+        num, unit = m.group(1), m.group(2)
+        looks_money = bool(unit) or "rm" in seg[max(0, m.start() - 3):m.start() + 3] \
+            or "," in num or len(num.replace(",", "").split(".")[0]) >= 4
+        if looks_money:
+            return float(num.replace(",", "")) * _UNIT_MULT.get((unit or "").lower(), 1.0)
+    return None
+
+
 def _amount_near(text: str, keywords: list[str], window: int = 45) -> Optional[float]:
     """Find a money value near any keyword. Requires an RM prefix, a magnitude
     unit, a comma, or >=4 digits to count as money (so '3 years' isn't grabbed).
-    Scans EVERY occurrence of each keyword (a keyword can appear more than once)."""
+    Scans EVERY occurrence of each keyword (a keyword can appear more than once).
+
+    Prefers a match AFTER the keyword ("revenue: RM 1m", "revenue of RM 1m") over
+    one before it: back-to-back "Label: value." sentences — the intake card's
+    combined submission — put each field's own number just after its label, and
+    the PRECEDING field's number just before it; searching forward first stops
+    the preceding field's number from being grabbed instead."""
     low = text.lower()
     for kw in keywords:
         start = 0
@@ -273,14 +299,14 @@ def _amount_near(text: str, keywords: list[str], window: int = 45) -> Optional[f
             i = low.find(kw, start)
             if i < 0:
                 break
-            seg = low[max(0, i - window): i + len(kw) + window]
-            for m in _MONEY_RE.finditer(seg):
-                num, unit = m.group(1), m.group(2)
-                looks_money = bool(unit) or "rm" in seg[max(0, m.start() - 3):m.start() + 3] \
-                    or "," in num or len(num.replace(",", "").split(".")[0]) >= 4
-                if looks_money:
-                    return float(num.replace(",", "")) * _UNIT_MULT.get((unit or "").lower(), 1.0)
-            start = i + len(kw)
+            end = i + len(kw)
+            forward = _money_in(low[end: end + window])
+            if forward is not None:
+                return forward
+            backward = _money_in(low[max(0, i - window): i])
+            if backward is not None:
+                return backward
+            start = end
     return None
 
 
@@ -363,13 +389,35 @@ class StubLLMClient(LLMClient):
         for key, kws in {
             "revenue": ["revenue", "turnover", "sales", "annual revenue"],
             "total_equity_or_net_worth": ["net worth", "networth", "equity"],
-            "working_capital_limit": ["working capital", "wc limit"],
-            "end_balance": ["end balance", "ending balance", "closing balance"],
+            "operating_profit": ["operating profit", "operating income", "ebit"],
+            "end_balance": ["end balance", "ending balance", "closing balance", "average balance"],
         }.items():
             val = _amount_near(low, kws)
             if val is not None:
                 slots[key] = val
         return slots
+
+    # Topic keywords for the narrow-question path — deliberately the same rule
+    # labels a customer would actually say, not the internal slot keys.
+    _ELIGIBILITY_TOPIC_KEYWORDS = {
+        "business_age_years": ["how long", "years operating", "business age", "age of", "how old"],
+        "total_equity_or_net_worth": ["net worth", "equity"],
+        "revenue": ["revenue", "turnover", "sales"],
+        "operating_profit": ["operating profit", "operating income", "ebit"],
+        "end_balance": ["end balance", "bank balance", "ending balance"],
+        "staff_count": ["staff", "employees", "workers"],
+    }
+    _START_CHECK_PHRASES = ["eligible", "eligibility", "qualify", "qualif", "check my"]
+
+    def decide_eligibility_intent(self, message: str, history: list[dict]) -> dict:
+        low = (message or "").lower()
+        topics = [k for k, kws in self._ELIGIBILITY_TOPIC_KEYWORDS.items() if any(kw in low for kw in kws)]
+        is_question = "?" in low or any(w in low for w in ("what", "how much", "how many", "need", "require", "minimum"))
+        if topics and is_question:
+            return {"action": "answer_criterion", "topics": topics}
+        if any(p in low for p in self._START_CHECK_PHRASES) or not topics:
+            return {"action": "start_check", "topics": []}
+        return {"action": "answer_criterion", "topics": topics}
 
     def compose(self, prompt_name: str, *, message: str, history: list[dict],
                 fallback: str, **vars: Any) -> str:
@@ -588,7 +636,7 @@ class VertexGeminiClient(LLMClient):
                     "business_age_years": {"type": "NUMBER", "nullable": True},
                     "total_equity_or_net_worth": {"type": "NUMBER", "nullable": True},
                     "revenue": {"type": "NUMBER", "nullable": True},
-                    "working_capital_limit": {"type": "NUMBER", "nullable": True},
+                    "operating_profit": {"type": "NUMBER", "nullable": True},
                     "end_balance": {"type": "NUMBER", "nullable": True},
                     "staff_count": {"type": "NUMBER", "nullable": True},
                 },
@@ -598,6 +646,31 @@ class VertexGeminiClient(LLMClient):
         except Exception as exc:  # noqa: BLE001
             log.warning("Vertex extract_slots failed (%s); using stub.", exc)
             return self._fallback.extract_slots(message, history)
+
+    def decide_eligibility_intent(self, message: str, history: list[dict]) -> dict:
+        try:
+            filled = render(load_prompt("eligibility_intent"),
+                            history=self._history_text(history), message=message)
+            schema = {
+                "type": "OBJECT",
+                "properties": {
+                    "action": {"type": "STRING", "enum": ["start_check", "answer_criterion", "continue"]},
+                    "topics": {
+                        "type": "ARRAY",
+                        "items": {
+                            "type": "STRING",
+                            "enum": ["business_age_years", "total_equity_or_net_worth", "revenue",
+                                     "operating_profit", "end_balance", "staff_count"],
+                        },
+                    },
+                },
+                "required": ["action"],
+            }
+            out = self._generate_json("eligibility_intent", filled, schema)
+            return {"action": out.get("action") or "start_check", "topics": list(out.get("topics") or [])}
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Vertex decide_eligibility_intent failed (%s); using stub.", exc)
+            return self._fallback.decide_eligibility_intent(message, history)
 
     def compose(self, prompt_name: str, *, message: str, history: list[dict],
                 fallback: str, **vars: Any) -> str:

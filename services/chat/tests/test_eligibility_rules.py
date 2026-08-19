@@ -4,7 +4,7 @@ from app.agents.eligibility import rules
 
 FULL = dict(
     business_age_years=4, total_equity_or_net_worth=100_000, revenue=1_000_000,
-    working_capital_limit=200_000, end_balance=50_000, staff_count=6,
+    end_balance=50_000, staff_count=6,
 )
 
 
@@ -26,11 +26,12 @@ def test_staff_boundaries():
     assert _status(staff_count=6) == rules.INDICATIVE_ELIGIBLE
 
 
-# ── Working capital: max 30% of revenue ──────────────────────────────────────
-def test_working_capital_cap_is_30pct_of_revenue():
-    assert _status(revenue=1_000_000, working_capital_limit=300_000) == rules.INDICATIVE_ELIGIBLE   # exactly 30%
-    assert _status(revenue=1_000_000, working_capital_limit=300_001) == rules.INDICATIVE_NOT_ELIGIBLE
-    assert _status(revenue=1_000_000, working_capital_limit=0) == rules.INDICATIVE_ELIGIBLE
+# ── Operating profit is informational only: never in SLOT_KEYS, never gates ──
+def test_operating_profit_never_gates_the_verdict():
+    # A negative operating profit passed alongside otherwise-passing figures
+    # must not flip the verdict -- rules.evaluate() only ever reads SLOT_KEYS.
+    assert _status(operating_profit=-500_000) == rules.INDICATIVE_ELIGIBLE
+    assert "operating_profit" not in rules.SLOT_KEYS
 
 
 # ── Non-negative floors ──────────────────────────────────────────────────────

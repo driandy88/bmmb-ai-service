@@ -45,7 +45,7 @@ tier1:
     min: 3
     max: null
     prompt: "How many years has your business been operating?"
-    options: ["Less than 1 year", "2 years", "3 years", "5 years", "10+ years"]
+    options: ["<1 year", "1-3 years", "3-5 years", "5+ years"]
 
   - id: "5.1-2"
     key: total_equity_or_net_worth
@@ -65,22 +65,13 @@ tier1:
     prompt: "Roughly what's your annual revenue or turnover, in RM?"
     options: ["RM 100k", "RM 500k", "RM 1m", "RM 5m"]
 
-  - id: "5.1-4"
-    key: working_capital_limit
-    label: Working capital limit
-    unit: RM
-    min: 0
-    max: { pct_of: revenue, pct: 0.30 }   # max 30% of revenue
-    prompt: "How much working capital financing are you looking for, in RM?"
-    options: ["RM 50k", "RM 100k", "RM 250k", "RM 500k"]
-
   - id: "5.1-5"
     key: end_balance
-    label: End balance
+    label: Average 6-month bank end balance
     unit: RM
     min: 0
     max: null
-    prompt: "What's your current bank end balance, in RM?"
+    prompt: "What's your average bank end balance over the last 6 months, in RM?"
     options: ["RM 20k", "RM 100k", "RM 300k", "RM 1m"]
 
   - id: "5.1-6"
@@ -90,13 +81,29 @@ tier1:
     min: 5
     max: null
     prompt: "How many staff does your business currently employ?"
-    options: ["3 staff", "5 staff", "10 staff", "25+ staff"]
+    options: ["1-2", "3-5", "6-10", ">10"]
+
+# ── Informational — collected alongside Tier-1 but NEVER evaluated. Operating
+# profit stays Tier-2 by policy (self-declared figures for it aren't trusted for
+# a verdict), so it never gates PASS/FAIL or the working-capital limit below —
+# it's carried through to the customer/Sales summary, that's all.
+informational:
+  - key: operating_profit
+    label: Operating profit
+    unit: RM
+    prompt: "Roughly what's your operating profit, in RM?"
+
+# The working-capital limit is now a COMPUTED OUTPUT (revenue x this pct), shown
+# after a completed check — not an input the customer is asked to guess within.
+# Mirrors the Node backend's PolicyThresholds.financing.wclRevenuePct default
+# (bmmb-sme-financing-platform/frontend/src/utils/financingRatios.ts); duplicated
+# here since this service has no wiring to that policy endpoint.
+working_capital_limit_pct: 0.30
 
 # ── Tier 2 — NOT attempted by the bot (Sheet 5, lower table) ─────────────────
 # If the customer's message raises any of these, the bot routes to Sales (T4),
 # it does not evaluate them.
 tier2_topics:
-  - Operating profit / EBIT (Audited Financial Statements)
   - Advances to director or related company
   - Dishonour cheque
   - Insolvency
@@ -110,8 +117,6 @@ tier2_topics:
 # Lowercase substrings used by the eligibility agent to detect a Tier-2 signal
 # and hand off instead of attempting the check.
 tier2_keywords:
-  - ebit
-  - operating profit
   - advances to director
   - dishonour
   - dishonoured cheque

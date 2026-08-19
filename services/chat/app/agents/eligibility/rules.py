@@ -22,12 +22,13 @@ from typing import Any, Optional
 
 from app.config.loader import AppConfig, load_config
 
-# The six Tier-1 slots (Sheet 5 upper table), in ask order.
+# The five Tier-1 slots (Sheet 5 upper table), in ask order. working_capital_limit
+# was dropped as an input — it's now a computed OUTPUT (see limit.py), not
+# something the customer is asked to guess a figure within.
 SLOT_KEYS = [
     "business_age_years",
     "total_equity_or_net_worth",
     "revenue",
-    "working_capital_limit",
     "end_balance",
     "staff_count",
 ]

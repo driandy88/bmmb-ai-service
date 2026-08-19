@@ -119,15 +119,58 @@ def test_no_forbidden_terminology_in_replies(client):
         assert "loan" not in low and "interest rate" not in low
 
 
-def test_eligibility_frozen_routes_to_contact_flow(client):
-    # Typed eligibility funnel is FROZEN -> the sales-contact flow (location intake),
-    # and the state round-trips so the location turn resolves to a regional contact.
+def test_eligibility_broad_question_launches_the_card(client):
+    # Un-frozen: a broad "am I eligible" question launches the intake card
+    # instead of an unconditional Sales handoff.
     d1 = _chat(client, "Am I eligible for SME financing?", session_id="s1")
+    assert d1["handoff"]["required"] is False
+    assert d1["ui_action"]["type"] == "render_eligibility_form"
+    assert d1["state"]["stage"] == "eligibility_slotfill"
+
+
+def test_eligibility_narrow_question_answers_without_the_card(client):
+    # A narrow criteria question gets a direct, qualitative answer -- no card,
+    # no handoff, and no exact numeric threshold in the reply.
+    d1 = _chat(client, "What revenue do I need to qualify?", session_id="s2")
+    assert d1["handoff"]["required"] is False
+    assert d1["ui_action"]["type"] == "none"
+    assert "revenue" in d1["reply"].lower()
+    assert not any(ch.isdigit() for ch in d1["reply"])
+
+
+def test_eligibility_card_recalls_a_figure_already_mentioned(client):
+    # A figure mentioned earlier in the SAME conversation is carried into the
+    # card launch as known_slots, so the card doesn't re-ask for it.
+    history = [{"role": "user", "content": "our revenue is RM 2 million"},
+               {"role": "assistant", "content": "Got it."}]
+    d1 = _chat(client, "Am I eligible for SME financing?", session_id="s4", history=history)
+    assert d1["ui_action"]["type"] == "render_eligibility_form"
+    assert d1["ui_action"]["payload"]["known_slots"].get("revenue") == 2_000_000.0
+
+
+def test_eligibility_full_submission_shows_the_working_capital_limit(client):
+    # A completed card submission (one combined message) reaches a verdict and,
+    # on a PASS, includes the computed maximum working-capital limit.
+    msg = ("Business age: 4 years. Total equity or net worth: RM 500,000. "
+           "Annual revenue: RM 1,000,000. Average bank end balance: RM 100,000. "
+           "Staff count: 6 staff.")
+    d = _chat(client, msg, session_id="s5", state={"stage": "eligibility_slotfill", "collected_slots": {}})
+    assert d["ui_action"]["type"] == "show_eligibility_result"
+    assert d["ui_action"]["payload"]["outcome"] == "PASS"
+    assert d["ui_action"]["payload"]["working_capital_limit"] == 300_000.0
+
+
+def test_eligibility_tier2_signal_still_routes_to_contact_flow(client):
+    # A genuine Tier-2 topic (never self-declared) still hands off immediately,
+    # same 2-turn sales-contact flow as any other handoff trigger -- even when
+    # the same message also raises eligibility (INS-04), Tier-2 wins.
+    msg = "Am I eligible? What is my CCRIS score?"
+    d1 = _chat(client, msg, session_id="s3")
     assert d1["handoff"]["required"] is True
     assert d1["ui_action"]["type"] == "render_contact_form"
     assert d1["state"]["stage"] == "await_contact_location"
-    d2 = _chat(client, "Selangor", session_id="s1",
-               history=[{"role": "user", "content": "Am I eligible for SME financing?"},
+    d2 = _chat(client, "Selangor", session_id="s3",
+               history=[{"role": "user", "content": msg},
                         {"role": "assistant", "content": d1["reply"]}],
                state=d1["state"])
     assert d2["ui_action"]["type"] == "show_contact_card"
